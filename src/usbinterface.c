@@ -592,9 +592,11 @@ int usbint_handler_cmd(void) {
             fi.lfname = fbuf;
             fi.lfsize = MAX_STRING_LENGTH;
             server_info.error |= f_stat((TCHAR*)stringParam, &fi);
-            server_info.size = fi.fsize;
-            server_info.total_size = server_info.size;
             server_info.error |= f_open(&fh, (TCHAR*)stringParam, FA_READ);
+            /* a failed f_stat leaves fi (static) with the previous file's size */
+            server_info.size = server_info.error ? 0 : fi.fsize;
+            server_info.total_size = server_info.size;
+            if(!server_info.error && !server_info.size) f_close(&fh);
         }
         else if (server_info.space == USBINT_SERVER_SPACE_CFG) {
             int found = cfg_get_stringvalue((char *)stringParam, fbuf, MAX_STRING_LENGTH);
@@ -778,7 +780,12 @@ int usbint_handler_cmd(void) {
     PRINT_STATE(server_state);
 
     // decide next state
-    if (server_info.opcode == USBINT_SERVER_OPCODE_GET || server_info.opcode == USBINT_SERVER_OPCODE_VGET || server_info.opcode == USBINT_SERVER_OPCODE_LS) {
+    if (server_info.opcode == USBINT_SERVER_OPCODE_GET && !server_info.size) {
+        // nothing to send (missing or empty file): the data phase only ends after a beat
+        // with data, so entering it would hold the lock below forever
+        server_state = USBINT_SERVER_STATE_IDLE;
+    }
+    else if (server_info.opcode == USBINT_SERVER_OPCODE_GET || server_info.opcode == USBINT_SERVER_OPCODE_VGET || server_info.opcode == USBINT_SERVER_OPCODE_LS) {
         // we lock on data transfers so use interrupt for everything
         server_state = USBINT_SERVER_STATE_HANDLE_DAT;
     }
