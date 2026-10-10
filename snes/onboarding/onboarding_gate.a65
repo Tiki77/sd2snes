@@ -3,7 +3,9 @@
 ;
 ; Called with jsl from snes/main.a65's coldboot, right before fileselloop (after the
 ; browser list and the clock prompt are up). If the tour has already been seen
-; (CFG_ONBOARDING_VERSION >= ONB_VERSION) it returns at once. Otherwise it shows a small prompt:
+; (CFG_ONBOARDING_VERSION >= ONB_VERSION) it returns at once. A tour seen before (the version is
+; not 0, a release added cards) starts right away, as the A below, with the language already in
+; the CFG. Never seen (0): it shows a small prompt:
 ;   - a language selector (Left/Right cycle cur_lang live, every string follows);
 ;   - "See a tour of the new features?"  A = Yes, B = No.
 ;
@@ -56,6 +58,8 @@ onboarding_gate:
   lda @CFG_ONBOARDING_VERSION
   cmp #ONB_VERSION
   bcs onbg_out
+  cmp #$00
+  bne onbg_again           ; seen before: no prompt, straight to the new cards
 
   jsr onbg_open
 
@@ -77,9 +81,11 @@ onbg_input:
 onbg_lang_prev:
   .as : .xl
   lda cur_lang
-  bne +
+  bne onbg_lang_dec
   lda #ONBG_NLANG
-+ dec
+onbg_lang_dec:
+  .as : .xl
+  dec
   bra onbg_lang_set
 onbg_lang_next:
   .as : .xl
@@ -117,17 +123,36 @@ onbg_yes:
   lda cur_lang
   sta @CFG_LANGUAGE
   jsr onbg_save_cfg        ; the tour boots in the language picked here
+  rep #$20 : .al
+  lda #$0000               ; the gate's tour: cards by CFG_ONBOARDING_VERSION
+  sep #$20 : .as
   jsr onbg_load_tour       ; returns only when the firmware refused
   ; no onboarding.bin (or a firmware that predates the command and ACKed it as
   ; unknown): treat it as a skip, so the question is not asked on every boot.
   jsr onbg_skip
   bra onbg_close
 
+; --- a tour seen before, and a release added cards: no prompt. A refusal is a skip,
+;     as above, with no window to close. ---------------------------------------------
+onbg_again:
+  .as : .xl
+  rep #$20 : .al
+  lda #$0000
+  sep #$20 : .as
+  jsr onbg_load_tour
+  jsr onbg_skip
+  jmp onbg_out
+
 ; -- onbg_load_tour: fade to black and ask the firmware to boot the tour ROM. On
 ;    success the reload resets the console and this never returns; a return means
-;    the firmware refused, with the screen already back. .as/.xl, DB=$7E, DP=0. --
+;    the firmware refused, with the screen already back. 16-bit A = what the tour
+;    finds in ONB_START (0, or the Settings section + ONB_START_MAGIC in the high
+;    byte); the firmware leaves $FF07xx alone. .as/.xl, DB=$7E, DP=0. --
 onbg_load_tour:
   .as : .xl
+  rep #$20 : .al
+  sta @ONB_START
+  sep #$20 : .as
   jsr mt_fade_out          ; the reload rewrites the image we display and run from
   jsl @ui_call_coversync   ; an in-flight cover $55 would read as our answer
   ; The firmware streams the tour over this image (SD-DMA takes the PSRAM bus from the
@@ -154,21 +179,41 @@ onbg_load_tour:
   plp
   jmp mt_fade_in
 
-; -- onboarding_replay: Settings > "Tour of the new features" (MTYPE_FUNC, reached
-;    through a long pointer, ends in rtl). Same load as the gate's A; a refusal
-;    shows the firmware's popup (it staged "file missing" + the name) and the
-;    menu stays where it was. A menu FUNC runs with DP != 0: force DP=0/DB=$7E. --
-onboarding_replay:
+; -- onboarding_replay_*: Settings > "Tour of the new features" > where to start
+;    (MTYPE_FUNC, reached through a long pointer, ends in rtl): the whole tour, or
+;    from the Nth release section on (the Nth ONB_FF_SECTION card of the tour; the
+;    list in contextdata.a65 gets a line per release). Same load as the gate's A; a
+;    refusal shows the firmware's popup (it staged "file missing" + the name) and
+;    the menu stays where it was. A menu FUNC runs with DP != 0: force DP=0/DB=$7E. --
+onboarding_replay_all:
   php
+  rep #$30 : .al : .xl
+  lda #$b500               ; ONB_START_MAGIC in the high byte, the section in the low one
+  bra onboarding_replay
+onboarding_replay_217:
+  php
+  rep #$30 : .al : .xl
+  lda #$b501
+  bra onboarding_replay
+onboarding_replay_218:
+  php
+  rep #$30 : .al : .xl
+  lda #$b502
+onboarding_replay:
+  .al : .xl
   phb
   phd
-  sep #$20 : .as
-  rep #$10 : .xl
   pea $0000
   pld
+  tax
+  sep #$20 : .as
+  rep #$10 : .xl
   lda #$7e
   pha
   plb
+  rep #$20 : .al
+  txa
+  sep #$20 : .as
   jsr onbg_load_tour
   jsl @ui_call_errmsg
   pld

@@ -308,22 +308,63 @@ onb_next_shown:
   bcs onb_next_shown
   rts
 
-; onb_seen_init: onb_seen = the tour version whose cards this run leaves out. The
-;   gate starts the tour when CFG_ONBOARDING_VERSION < ONB_VERSION: then only the
-;   cards added since the version the user saw are shown (a firmware update does not
-;   repeat what they already know). From Settings the tour is replayed whole (the
-;   stored version is already the current one). .as/.xl in.
+; onb_seen_init: which cards this run shows. onb_seen = the tour version whose cards are
+;   left out, onb_first = the first card shown. The gate starts the tour when
+;   CFG_ONBOARDING_VERSION < ONB_VERSION: then only the cards added since the version the
+;   user saw are shown (a firmware update does not repeat what they already know). From
+;   Settings the menu leaves ONB_START = the release section picked: 0 = the whole tour,
+;   N = from the Nth separator card (ONB_FF_SECTION) on; a section this tour does not
+;   have reads as the whole tour. .as/.xl in.
 onb_seen_init:
   .as : .xl
+  lda #$00
+  sta @onb_first
+  lda @ONB_START+1
+  cmp #ONB_START_MAGIC
+  beq onb_sn_settings
   lda @CFG_ONBOARDING_VERSION
   cmp #ONB_VERSION
   bcc +
   lda #$00
 + sta @onb_seen
   rts
+onb_sn_settings:
+  .as : .xl
+  lda #$00
+  sta @onb_seen
+  sta @onb_sec_n
+  sta @onb_i
+  lda @ONB_START
+  beq onb_sn_out
+onb_sn_loop:
+  .as : .xl
+  lda @onb_i
+  jsr onb_feat_ptr_idx
+  ldy #ONB_FD_FLAGS
+  lda [onb_descptr], y
+  and #ONB_FF_SECTION
+  beq onb_sn_next
+  lda @onb_sec_n
+  inc
+  sta @onb_sec_n
+  cmp @ONB_START
+  bne onb_sn_next
+  lda @onb_i
+  sta @onb_first
+  rts
+onb_sn_next:
+  .as : .xl
+  lda @onb_i
+  inc
+  sta @onb_i
+  cmp #ONB_NUM_CARDS
+  bcc onb_sn_loop
+onb_sn_out:
+  .as : .xl
+  rts
 
-; onb_card_skipped: A = card index. Carry SET when the card is left out: it is older
-;   than the version the user has seen (+ONB_FD_SINCE <= onb_seen), it is for the other
+; onb_card_skipped: A = card index. Carry SET when the card is left out: it comes before
+;   onb_first, it is older than the version the user has seen (+ONB_FD_SINCE <= onb_seen), it is for the other
 ;   board (+ONB_FD_FLAGS: ONB_FF_MK3ONLY on a Mk.II, ONB_FF_MK2ONLY on a Mk.III; the board
 ;   is ST_IS_MK2, which the firmware publishes on every boot of a menu image), or its
 ;   descriptor names a parent CFG byte (+ONB_FD_DEP, and a second one at +ONB_FD_DEP2)
@@ -331,7 +372,11 @@ onb_seen_init:
 ;   covers, no clip music without the clip. Leaves onb_descptr on that card. .as/.xl in.
 onb_card_skipped:
   .as : .xl
+  pha
   jsr onb_feat_ptr_idx
+  pla
+  cmp @onb_first            ; before the release Settings > tour started at
+  bcc onb_cs_old
   ldy #ONB_FD_SINCE
   lda [onb_descptr], y
   cmp @onb_seen

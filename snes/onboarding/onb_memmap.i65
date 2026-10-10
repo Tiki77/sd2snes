@@ -75,6 +75,12 @@
 
 /* The MCU's status block (src/snes.h mcu_status_t, status_load_to_menu): published on every
    menu-image boot, the tour's included, before the firmware enters its command loop. */
+#define ONB_START                   $FF07E8 /* word the menu leaves before loading the tour: low byte = the release
+                                               section to start at (1 = the first ONB_FF_SECTION card...), high byte =
+                                               ONB_START_MAGIC; anything else = the gate (cards by CFG_ONBOARDING_VERSION).
+                                               Read on every boot of the tour, never cleared here. Lockstep with
+                                               snes/memmap.i65. */
+#define ONB_START_MAGIC             $B5
 #define ST_IS_MK2                   $FF1108 /* 1 on the Mk.II (SD2SNES). Lockstep with ST_IS_MK2
                                                (snes/memmap.i65: ST_MCU_ADDR+$0008) and
                                                mcu_status_t.is_mk2. The same board on every boot,
@@ -222,6 +228,8 @@
 #define ONB_FF_BUTTONS    $02  /* ...CFG_ENABLE_INGAME_BUTTONS: it needs the FPGA's fixed gestures too */
 #define ONB_FF_MK3ONLY    $04  /* not a "yes" flag: the card is shown only on the Mk.III (FXPAK PRO) */
 #define ONB_FF_MK2ONLY    $08  /* not a "yes" flag: the card is shown only on the Mk.II (SD2SNES) */
+#define ONB_FF_SECTION    $10  /* not a "yes" flag: a release's separator card ("What's new in X.Y"). Settings >
+                                  tour starts at the Nth one (ONB_START), in the order of the Settings list */
 
 /* option kinds (+13 of the descriptor) */
 #define ONB_OPT_INFO      0    /* no interactive option */

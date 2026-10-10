@@ -182,4 +182,7 @@ onb_font_lo       .byt 0    ;   (its scratch)
 onb_font_mo       .byt 0    ; onb_font_want: the outline mode the screen shows...
 onb_font_ma       .byt 0    ;   ... and the anti-alias one (0 theme / 1 on / 2 off)
 
+onb_first         .byt 0    ; cards before this one are left out (Settings > tour from a release, onb_seen_init)
+onb_sec_n         .byt 0    ;   (onb_seen_init's section counter)
+
 onb_data_end      .byt 0

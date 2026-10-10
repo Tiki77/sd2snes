@@ -391,6 +391,9 @@ mtext_browser_ledbright           .byt "LED brightness", 0
 mtext_browser_showcov             .byt "Show covers", 0
 mtext_browser_covlists            .byt " ",129,"Favorites/Recents", 0
 mtext_cfg_tour                    .byt "Tour of the new features", 0
+mtext_cfg_tour_all                .byt "From the start", 0
+mtext_cfg_tour_217                .byt "From version 2.17 on", 0
+mtext_cfg_tour_218                .byt "From version 2.18 on (current)", 0
 mtext_browser_menumusic           .byt "Menu music", 0
 mtext_browser_menumusic_random    .byt " ", 129, "Random music", 0
 mtext_browser_menusfx             .byt "Menu sounds", 0

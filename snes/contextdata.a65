@@ -672,11 +672,61 @@ menu_enttab_cfg:
  .byt  0,0,0
  .byt  0,0,0
 
- .byt  MTYPE_FUNC
+ .byt  MTYPE_SUBMENU
  .word !mtext_cfg_tour
  .byt  ^mtext_cfg_tour
- .word !onboarding_replay-1
- .byt  ^onboarding_replay-1
+ .word !menu_enttab_tour
+ .byt  ^menu_enttab_tour
+ .byt  0
+ .byt  0,0,0
+ .word !mdesc_cfg_tour
+ .byt  ^mdesc_cfg_tour
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+
+ .byt 0
+
+; Settings > "Tour of the new features": where the tour starts. One line per release
+; section (the Nth line after "from the start" = the tour's Nth ONB_FF_SECTION card,
+; onboarding_gate.a65); a release with tour cards adds its line and moves "(current)".
+menu_enttab_tour:
+; HEADER
+ .byt 1
+ .word !mtext_cfg_tour
+ .byt  ^mtext_cfg_tour
+; ENTRIES
+ .byt  MTYPE_FUNC
+ .word !mtext_cfg_tour_all
+ .byt  ^mtext_cfg_tour_all
+ .word !onboarding_replay_all-1
+ .byt  ^onboarding_replay_all-1
+ .byt  0
+ .byt  0,0,0
+ .word !mdesc_cfg_tour
+ .byt  ^mdesc_cfg_tour
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+
+ .byt  MTYPE_FUNC
+ .word !mtext_cfg_tour_217
+ .byt  ^mtext_cfg_tour_217
+ .word !onboarding_replay_217-1
+ .byt  ^onboarding_replay_217-1
+ .byt  0
+ .byt  0,0,0
+ .word !mdesc_cfg_tour
+ .byt  ^mdesc_cfg_tour
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+
+ .byt  MTYPE_FUNC
+ .word !mtext_cfg_tour_218
+ .byt  ^mtext_cfg_tour_218
+ .word !onboarding_replay_218-1
+ .byt  ^onboarding_replay_218-1
  .byt  0
  .byt  0,0,0
  .word !mdesc_cfg_tour

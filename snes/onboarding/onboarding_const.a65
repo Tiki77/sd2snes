@@ -268,7 +268,7 @@ onb_feat_table:
   .byt ONB_PAL_GREEN, ONB_OPT_INFO : .word 0
   .word 0, 1, onb_f32_name, onb_f32_text, 0, 0   ; 32 and more
   .byt ONB_PAL_CYAN, ONB_OPT_MORE : .word 0
-  .word 0, 1, onb_f33_name, onb_f33_text, 0, 0   ; 33 2.17: what's new
+  .word 0, 1, onb_f33_name, onb_f33_text, 0, ONB_FF_SECTION   ; 33 2.17: what's new (Settings > tour: section 1)
   .byt ONB_PAL_AMBER, ONB_OPT_INFO : .word 0
   .word 0, 1, onb_f34_name, onb_f34_text, 0, ONB_FF_HOOK+ONB_FF_BUTTONS   ; 34 2.17: controller 2 (a yes turns the hook and the in-game buttons on)
   .byt ONB_PAL_CYAN, ONB_OPT_ONOFF : .word !CFG_ENABLE_INGAME_PAD2
@@ -284,7 +284,7 @@ onb_feat_table:
   .byt ONB_PAL_RED, ONB_OPT_INFO : .word 0
   .word 0, 1, onb_f40_name, onb_f40_text, 0, 0   ; 40 2.17: cheats from the game info card
   .byt ONB_PAL_PURPLE, ONB_OPT_INFO : .word 0
-  .word 0, 2, onb_f41_name, onb_f41_text, 0, 0   ; 41 2.18: what's new
+  .word 0, 2, onb_f41_name, onb_f41_text, 0, ONB_FF_SECTION   ; 41 2.18: what's new (Settings > tour: section 2)
   .byt ONB_PAL_AMBER, ONB_OPT_INFO : .word 0
   .word 0, 2, onb_f42_name, onb_f42_text, 0, 0   ; 42 2.18: the RP2040 cartridge
   .byt ONB_PAL_GREEN, ONB_OPT_INFO : .word 0
