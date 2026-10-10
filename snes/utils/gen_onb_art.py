@@ -489,6 +489,19 @@ def shortcut_list():
     return scr.done()
 
 
+def mouse_pointer():
+    """The browser with the SNES Mouse's pointer over the row the bar follows (snes/mouse.a65).
+    The arrow is drawn at twice the menu's 8x8 so it still reads at half size."""
+    scr = Screen(default_look())
+    browser(scr, sel=6)
+    x, y = 150, 57 + 8 * 6 + 2
+    arrow = [(0, 0), (0, 22), (6, 16), (10, 26), (14, 24), (10, 15), (18, 15)]
+    pts = [(x + a, y + b) for a, b in arrow]
+    scr.d.polygon(pts, fill=(255, 255, 255), outline=(16, 16, 24))
+    scr.d.line(pts + [pts[0]], fill=(16, 16, 24), width=2)
+    return scr.done()
+
+
 def section(version):
     """A release section's opening card: the sd2snes+ logo and the version."""
     im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
@@ -1572,7 +1585,7 @@ PICTURES = {
     "folders": card_folders, "sd2snesdir_on": sd2snes_dir, "sd2snesdir_off": dim(sd2snes_dir),
     "led": icon_led2, "clearppu": clear_ppu, "buscompat": bus_compat, "sysinfo": sys_info,
     "clock": clock_prompt, "trainer": trainer,
-    "chips_more": icon_chips_more,
+    "chips_more": icon_chips_more, "mouse": mouse_pointer,
 }
 
 

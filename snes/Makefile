@@ -40,7 +40,7 @@ ONB_O65 = onboarding/onb_header.ips onboarding/onb_reset.o65 onboarding/onboardi
           onboarding/onb_demo_e.o65 onboarding/onb_demo_f.o65 onboarding/onb_demo_g.o65 onboarding/onb_demo_h.o65 \
           onboarding/onb_demo_i.o65 onboarding/onb_demo_j.o65 onboarding/onb_spc.o65 onboarding/onb_welcome.o65 \
           font.o65 palette.o65 spc700.o65 onboarding/onb_const_lang_b.o65 \
-          onboarding/onb_cjk.o65 onboarding/onb_cjk_ja.o65 onboarding/onb_cjk_zh.o65 onboarding/onb_cjk_sheets.o65
+          onboarding/onb_cjk.o65 onboarding/onb_cjk_ja.o65 onboarding/onb_cjk_zh.o65 onboarding/onb_cjk_sheets.o65 onboarding/onb_cjk_sheets_zh.o65
 ONB_OUT = onboarding.bin
 # 12 banks ($C0 code + the menu's palette + half of the string pool, $C1 the string
 # tables and the other half, $C2-$CB the demo pictures -- utils/gen_onb_demo.py). The
@@ -67,8 +67,9 @@ all: $(OUT) $(IGMENU) $(ONB_OUT) $(MAP) lang_ja.fnt lang_zh.fnt
 # (onb_const_lang_b.a65; gen_onb_lang.py POOL_B_LANGS). The
 # answers' value words come from the menu's const.a65 / lang_*.py (menu_text).
 # Japanese and Chinese: their tour words in utils/onb_lang_<code>.json, their strings in a
-# pool of their own (onb_cjk_<code>.a65) and every glyph sheet in onb_cjk_sheets.a65.
-onboarding/onb_const_lang.a65 onboarding/onb_const_lang_b.a65 onboarding/onb_cjk_ja.a65 onboarding/onb_cjk_zh.a65 onboarding/onb_cjk_sheets.a65 &: utils/gen_onb_lang.py utils/build_const.py const.a65 utils/lang_ptbr.py utils/lang_es.py utils/lang_de.py utils/lang_fr.py utils/lang_it.py utils/lang_ru.py utils/lang_nl.py utils/lang_ja.py utils/lang_zh.py utils/onb_lang_ja.json utils/onb_lang_zh.json fonts/misaki_gothic_2nd.hex fonts/fusion8_zh_hans.hex
+# pool of their own (onb_cjk_<code>.a65) and a glyph sheet each (onb_cjk_sheets.a65 = ja + the
+# common glyphs, onb_cjk_sheets_zh.a65).
+onboarding/onb_const_lang.a65 onboarding/onb_const_lang_b.a65 onboarding/onb_cjk_ja.a65 onboarding/onb_cjk_zh.a65 onboarding/onb_cjk_sheets.a65 onboarding/onb_cjk_sheets_zh.a65 &: utils/gen_onb_lang.py utils/build_const.py const.a65 utils/lang_ptbr.py utils/lang_es.py utils/lang_de.py utils/lang_fr.py utils/lang_it.py utils/lang_ru.py utils/lang_nl.py utils/lang_ja.py utils/lang_zh.py utils/onb_lang_ja.json utils/onb_lang_zh.json fonts/misaki_gothic_2nd.hex fonts/fusion8_zh_hans.hex
 	python3 utils/gen_onb_lang.py -o onboarding/onb_const_lang.a65
 
 # Same loud guard as the menu link (the `| tee` masks sneslink's exit code).
@@ -157,7 +158,7 @@ link.log: $(OBJS)
 
 clean:
 	rm -f -- *~ *.ips *.o65 const_lang.a65 const_lang_str.a65 const_lang_tab.a65 const_lang_cjk.a65 lang_*.bin lang_*.fnt igmenu_lang.i65 $(OUT) *.o65.log *.ips.log $(IGMENU) igmenu_raw.smc igmenu.link.log
-	rm -f -- onboarding/*.o65 onboarding/*.ips onboarding/*.o65.log onboarding/*.ips.log onboarding/onb_const_lang.a65 onboarding/onb_const_lang_b.a65 onboarding/onb_cjk_ja.a65 onboarding/onb_cjk_zh.a65 onboarding/onb_cjk_sheets.a65 $(ONB_OUT) onb_link.log
+	rm -f -- onboarding/*.o65 onboarding/*.ips onboarding/*.o65.log onboarding/*.ips.log onboarding/onb_const_lang.a65 onboarding/onb_const_lang_b.a65 onboarding/onb_cjk_ja.a65 onboarding/onb_cjk_zh.a65 onboarding/onb_cjk_sheets.a65 onboarding/onb_cjk_sheets_zh.a65 $(ONB_OUT) onb_link.log
 
 -include $(info $(DEPDIR)) $(shell mkdir $(DEPDIR) 2>/dev/null) $(wildcard $(DEPDIR)/*)
 

@@ -176,6 +176,7 @@ snes/onboarding/onb_const_lang_b.a65
 snes/onboarding/onb_cjk_ja.a65
 snes/onboarding/onb_cjk_zh.a65
 snes/onboarding/onb_cjk_sheets.a65
+snes/onboarding/onb_cjk_sheets_zh.a65
 
 __pycache__
 *.sample
