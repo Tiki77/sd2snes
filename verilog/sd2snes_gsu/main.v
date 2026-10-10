@@ -19,13 +19,22 @@
 //
 //////////////////////////////////////////////////////////////////////////////////
 `include "config.vh"
-// FX3 availability: always present on mk3; on mk2 only in the gsu3 core variant
-// (Verilog macro GSU3, set by that project's .xise).  The classic mk2 gsu core is
-// the master-identical GSU: every FX3 site below keeps the original text under
-// GSU_FX3_OFF, so that netlist cannot differ from the pre-FX3 core.
-`ifdef MK2
- `ifndef GSU3
-  `define GSU_FX3_OFF
+// FX3 lives only in the gsu3 core variant (Verilog macro GSU3, set by that project's
+// .xise and main.qsf), on both boards.  Without GSU3 this is the classic GSU core.
+// GSU3 (the sd2snes_gsu3 variant, both boards; FX3 carts only) swaps gsu.v for the
+// pipelined gsu_fx3.v and gives it the FX3 bus arbitration below.  The in-game hooks
+// are off on FX3 carts (cheat.c), so the hook-side extras of this core (regshadow,
+// the overlay pause) are not built there.  The Mk.II variant also drops the MSU-1
+// audio DAC and register block for room on the Spartan-3 (the firmware never offers
+// MSU-1 for FX3 carts on the Mk.II) and runs gsu_fx3 at half rate behind a clock
+// enable: the XC3S400 cannot close its one-byte-per-clock loop at CLK2.  The 2-cycle
+// paths inside the core are declared in sd2snes_gsu3/ucf.extra.
+`ifdef GSU3
+ `define GSU3_NOSHADOW
+ `ifdef MK2
+  `define GSU3_NODAC
+  `define GSU3_NOMSU
+  `define GSU3_HALF
  `endif
 `endif
 
@@ -159,11 +168,10 @@ wire [2:0] SD_DMA_DBG_clkcnt;
 wire [10:0] SD_DMA_DBG_cyclecnt;
 
 wire [15:0] dsp_feat;
-`ifndef GSU_FX3_OFF
-// FX3 mode select (MCU sets it from the cart type: FX3 spec carttype $17/$18).
-// EVERY FX3 delta in this core is gated on this bit, so with it clear the circuit
-// is the classic GSU by construction.
-wire IS_FX3 = dsp_feat[1];
+`ifdef GSU3
+// FX3 mode.  The gsu3 bitstream is only loaded for FX3 carts (FX3 spec carttype
+// $17/$18), so the mode is a constant here.
+wire IS_FX3 = 1'b1;
 `endif
 
 wire [8:0] snescmd_addr_mcu;
@@ -255,7 +263,7 @@ always @(posedge CLK2) begin
   // synchronize to the SNES cycle to avoid reading partial interrupt vector
   //if (SNES_WR_end | SNES_RD_end) begin
   if (SNES_cycle_end) begin
-`ifdef GSU_FX3_OFF
+`ifndef GSU3
     GSU_RONr    <= GSU_RON & GSU_GO;
     GSU_RANr    <= GSU_RAN & GSU_GO;
 `else
@@ -265,9 +273,43 @@ always @(posedge CLK2) begin
   end
 end
 
+`ifdef GSU3
+// FX3: the 65816 and the FX share PSRAM and FX SRAM at all times (no RON/RAN
+// handover), so the FX can only use a bus in S-CPU cycles that do not.  The classic
+// grants give it ONE slot per such cycle (at SNES_cycle_start), which starves the
+// pipelined core.  The same decision, taken at the same point (SNES_cycle_start,
+// where the decode of the current S-CPU address is trusted), opens a window in which
+// the FX may take back-to-back slots until the cycle ends.  A slot started at the
+// very end of the window runs into the next cycle by at most one access -- the
+// exposure the SNES_cycle_end / SNES_PULSE_end grants already have -- and nothing can
+// chain behind it, because the next window only opens at the next SNES_cycle_start.
+reg fx3_rom_own_r; initial fx3_rom_own_r = 0;
+reg fx3_ram_own_r; initial fx3_ram_own_r = 0;
+always @(posedge CLK2) begin
+  if (SNES_cycle_end) begin
+    fx3_rom_own_r <= 1'b0;
+    fx3_ram_own_r <= 1'b0;
+  end
+  else if (SNES_cycle_start) begin
+    fx3_rom_own_r <= ~ROM_HIT | IS_SAVERAM;
+    fx3_ram_own_r <= ~(ROM_HIT & IS_SAVERAM);
+  end
+end
+wire fx3_rom_own = fx3_rom_own_r & ~SNES_cycle_end;
+wire fx3_ram_own = fx3_ram_own_r & ~SNES_cycle_end;
+// FX3 also trims the FX <-> memory handshake: a read starts on the request pulse
+// itself (the address register is loaded on that same edge; reads drive no strobe,
+// so nothing can glitch), and RDY rises as the access completes rather than one
+// cycle after.  Writes keep the extra address setup cycle.
+wire fx3_fast = 1'b1;
+`endif
+
 // Provide full bandwidth if snes is not accessing the bus.
 always @(posedge CLK2) begin
   if(GSU_RONr & ~gsu_hook_yield) free_strobe <= 1;  // yield to SNES while the hook runs from PSRAM
+`ifdef GSU3
+  else if (fx3_rom_own) free_strobe <= 1;
+`endif
   else if (SNES_cycle_start) free_strobe <= ~ROM_HIT | IS_SAVERAM;
   else free_strobe <= 1'b0;
 end
@@ -349,7 +391,7 @@ sd_dma snes_sd_dma(
 
 assign SD_DMA_TO_ROM = (SD_DMA_STATUS && (SD_DMA_TGT == 2'b00));
 
-`ifndef GSU3
+`ifndef GSU3_NODAC
 dac snes_dac(
   .clkin(CLK2),
   .sysclk(SNES_SYSCLK),
@@ -369,16 +411,23 @@ dac snes_dac(
   .dac_address_ext(dac_ptr_addr)
 );
 `else
-// gsu3 (mk2 FX3 variant): no MSU-1 audio.  Dropping the DAC audio path is what
-// makes room for the FX3 logic on the Spartan-3; the MSU-1 REGISTERS stay
-// (snes_msu below answers as before), so nothing else on the bus changes --
-// MSU-1 titles boot, only the PCM stream stays silent on this variant.
+// gsu3 on the Mk.II: no MSU-1 audio.  Dropping the DAC audio path makes room for
+// the FX3 core on the Spartan-3.
 assign DAC_MCLK  = 1'b0;
 assign DAC_LRCK  = 1'b0;
 assign DAC_SDOUT = 1'b0;
-assign DAC_STATUS = 1'b0;  // implicit net; the msu register block reads it
+assign DAC_STATUS = 1'b0;  // implicit net; the mcu_cmd status word reads it
 `endif
 
+`ifdef GSU3_NOMSU
+// ...nor the MSU-1 register block: FEAT_MSU1 is never set for FX3 carts on the
+// Mk.II, so msu_enable never fires and nothing reachable is lost.
+assign MSU_SNES_DATA_OUT = 8'h00;
+assign msu_status_out    = 8'h00;
+assign msu_volumerq_out  = 8'h00;
+assign msu_addressrq_out = 32'h0;
+assign msu_trackrq_out   = 16'h0;
+`else
 msu snes_msu (
   .clkin(CLK2),
   .enable(msu_enable),
@@ -407,6 +456,7 @@ msu snes_msu (
   .DBG_msu_address(DBG_msu_address),
   .DBG_msu_address_ext_write_rising(DBG_msu_address_ext_write_rising)
 );
+`endif
 
 spi snes_spi(
   .clk(CLK2),
@@ -435,6 +485,57 @@ wire [18:0] GSU_RAM_ADDR;
 wire [7:0]  GSU_RAM_DOUT;
 wire        GSU_RAM_WORD;
 
+`ifdef GSU3
+// GSU (superfx), gsu3 variant: the pipelined FX3 core.
+`ifdef GSU3_HALF
+// half-rate core: CE on every other CLK2 edge; one-cycle strobes are stretched to
+// two cycles so exactly one enabled edge sees each of them
+reg gsu_ce = 1'b0;
+reg gsu_rst_d = 1'b0, gsu_rd_start_d = 1'b0, gsu_wr_end_d = 1'b0;
+always @(posedge CLK2) begin
+  gsu_ce         <= ~gsu_ce;
+  gsu_rst_d      <= SNES_reset_strobe;
+  gsu_rd_start_d <= SNES_RD_start;
+  gsu_wr_end_d   <= SNES_WR_end;
+end
+wire gsu_rst      = SNES_reset_strobe | gsu_rst_d;
+wire gsu_rd_start = SNES_RD_start | gsu_rd_start_d;
+wire gsu_wr_end   = SNES_WR_end   | gsu_wr_end_d;
+// the core's bus requests are registers that stay up for one core cycle (two CLK2
+// cycles); hand the memory FSMs a single-cycle request like full rate
+wire gsu_rom_rrq_w, gsu_ram_rrq_w, gsu_ram_wrq_w;
+wire GSU_ROM_RRQ = gsu_rom_rrq_w & ~gsu_ce;
+wire GSU_RAM_RRQ = gsu_ram_rrq_w & ~gsu_ce;
+wire GSU_RAM_WRQ = gsu_ram_wrq_w & ~gsu_ce;
+`else
+wire gsu_ce       = 1'b1;
+wire gsu_rst      = SNES_reset_strobe;
+wire gsu_rd_start = SNES_RD_start;
+wire gsu_wr_end   = SNES_WR_end;
+wire gsu_rom_rrq_w, gsu_ram_rrq_w, gsu_ram_wrq_w;
+wire GSU_ROM_RRQ = gsu_rom_rrq_w;
+wire GSU_RAM_RRQ = gsu_ram_rrq_w;
+wire GSU_RAM_WRQ = gsu_ram_wrq_w;
+`endif
+gsu_fx3 snes_gsu (
+  .RST(gsu_rst),
+  .CLK(CLK2),
+  .CE(gsu_ce),
+  .pause(1'b0),
+  .SS_EN(1'b0),
+
+  .SAVERAM_MASK(SAVERAM_MASK),
+  .ROM_MASK(ROM_MASK),
+
+  // MMIO interface
+  .ENABLE(gsu_enable),
+  .SNES_RD_start(gsu_rd_start),
+  .SNES_WR_start(1'b0),   // unused by the core
+  .SNES_WR_end(gsu_wr_end),
+  .ROM_BUS_RRQ(gsu_rom_rrq_w),
+  .RAM_BUS_RRQ(gsu_ram_rrq_w),
+  .RAM_BUS_WRQ(gsu_ram_wrq_w),
+`else
 // GSU (superfx)
 gsu snes_gsu (
   .RST(SNES_reset_strobe),
@@ -450,28 +551,29 @@ gsu snes_gsu (
   .SNES_RD_start(SNES_RD_start),
   .SNES_WR_start(SNES_WR_start),
   .SNES_WR_end(SNES_WR_end),
+  .ROM_BUS_RRQ(GSU_ROM_RRQ),
+  .RAM_BUS_RRQ(GSU_RAM_RRQ),
+  .RAM_BUS_WRQ(GSU_RAM_WRQ),
+`endif
   .SNES_ADDR(SNES_ADDR[9:0]),
   .DATA_IN(GSU_SNES_DATA_IN),
   .DATA_ENABLE(gsu_data_enable),
   .DATA_OUT(GSU_SNES_DATA_OUT),
-  
+
   // ROM interface
   .ROM_BUS_RDY(GSU_ROM_RDY),
-  .ROM_BUS_RRQ(GSU_ROM_RRQ),
   .ROM_BUS_WORD(GSU_ROM_WORD),
   .ROM_BUS_ADDR(GSU_ROM_ADDR),
   .ROM_BUS_RDDATA(GSU_ROM_DINr),
 
   // RAM interface
   .RAM_BUS_RDY(GSU_RAM_RDY),
-  .RAM_BUS_RRQ(GSU_RAM_RRQ),
-  .RAM_BUS_WRQ(GSU_RAM_WRQ),
   .RAM_BUS_WORD(GSU_RAM_WORD),
   .RAM_BUS_ADDR(GSU_RAM_ADDR),
   .RAM_BUS_RDDATA(GSU_RAM_DINr),
   .RAM_BUS_WRDATA(GSU_RAM_DOUT),
   
-`ifndef GSU_FX3_OFF
+`ifdef GSU3
   // FX3 mode
   .FX3(IS_FX3),
 
@@ -596,7 +698,7 @@ address snes_addr(
   .IS_PATCH(IS_PATCH),
   .gsu_ss_enable(gsu_ss_enable),
   .snescmd_unlock(snescmd_unlock),
-`ifndef GSU_FX3_OFF
+`ifdef GSU3
   .fx3(IS_FX3),
 `endif
   .SAVERAM_MASK(SAVERAM_MASK),
@@ -671,8 +773,13 @@ wire r2100_enable = r2100_hit & (r2100_patch | ~(&r2100_limit));
 
 wire snoop_4200_enable = {SNES_ADDR[22], SNES_ADDR[15:0]} == 17'h04200;
 // regshadow write-snoop windows (see SNES_DATABUS_OE/DIR)
+`ifdef GSU3_NOSHADOW
+wire snoop_42xx_enable = 1'b0;
+wire rs_snoop_pawr_oe  = 1'b0;
+`else
 wire snoop_42xx_enable = ~SNES_ADDR[22] & (SNES_ADDR[15:5] == 11'b01000010000);
 wire rs_snoop_pawr_oe  = ~SNES_PAWR & (SNES_PA < 8'h40);
+`endif
 
 // In-game cheat overlay coprocessor pause ($202C bit0, same protocol as the SA-1/
 // CX4 cores): freezes the GSU execution clock-enable; memory FSMs drain (gsu.v).
@@ -786,6 +893,12 @@ always @(posedge CLK2) begin
   end
 end
 
+`ifdef GSU3_NOSHADOW
+// no in-game hooks on FX3 carts (cheat.c): nothing ever reads the register shadow
+wire shadow_ppu_hit = 1'b0;
+wire shadow_cpu_hit = 1'b0;
+wire [7:0] regshadow_dout = 8'h00;
+`else
 // PPU-register capture via the base ctx.v counter scheme (fire at count==4 from the
 // write start).  CLK2 here is 85.9 MHz -- the same frequency where the SA-1 regshadow
 // was hardware-validated (REGSHADOW_TEST) -- so the base-calibrated shift patterns
@@ -828,6 +941,7 @@ regshadow snes_regshadow(
   .rd_addr(regshadow_raddr),
   .rd_data(regshadow_dout)
 );
+`endif
 
 assign SNES_DATA = (r213f_enable & ~SNES_PARD & ~r213f_forceread) ? r213fr
                    :(r2100_enable & ~SNES_PAWR & r2100_forcewrite) ? r2100r
@@ -973,7 +1087,11 @@ always @(posedge CLK2) begin
     RQ_GSU_ROM_RDYr <= 1'b0;
     GSU_ROM_ADDRr <= GSU_ROM_ADDR;
     GSU_ROM_WORDr <= GSU_ROM_WORD;
+`ifdef GSU3
+  end else if(fx3_fast ? ((STATE & ST_GSU_ROM_RD_ADDR) && ST_MEM_DELAYr == 0) : (STATE & ST_GSU_ROM_RD_END)) begin
+`else
   end else if(STATE & ST_GSU_ROM_RD_END) begin
+`endif
     GSU_ROM_RD_PENDr <= 1'b0;
     RQ_GSU_ROM_RDYr <= 1'b1;
   end
@@ -1000,7 +1118,11 @@ always @(posedge CLK2) begin
     ST_IDLE: begin
       STATE <= ST_IDLE;
       if(free_slot | SNES_DEADr) begin
+`ifdef GSU3
+        if (GSU_ROM_RD_PENDr | (fx3_fast & GSU_ROM_RRQ)) begin
+`else
         if (GSU_ROM_RD_PENDr) begin
+`endif
           STATE <= ST_GSU_ROM_RD_ADDR;
           ST_MEM_DELAYr <= ROM_CYCLE_LEN;
         end
@@ -1169,6 +1291,9 @@ wire ram_free_slot = SNES_cycle_end | ram_free_strobe;
 // Provide full bandwidth if snes is not accessing the bus.
 always @(posedge CLK2) begin
   if(GSU_RANr) ram_free_strobe <= 1;
+`ifdef GSU3
+  else if (fx3_ram_own) ram_free_strobe <= 1;
+`endif
   else if (SNES_cycle_start) ram_free_strobe <= ~ROM_HIT | ~IS_SAVERAM;
   else ram_free_strobe <= 1'b0;
 end
@@ -1231,7 +1356,12 @@ always @(posedge CLK2) begin
     GSU_RAM_ADDRr <= GSU_RAM_ADDR;
     GSU_RAM_WORDr <= GSU_RAM_WORD;
     GSU_RAM_DATAr <= GSU_RAM_DOUT;
+`ifdef GSU3
+  end else if(fx3_fast ? ((RAM_STATE & (ST_RAM_GSU_RD_ADDR | ST_RAM_GSU_WR_ADDR)) && ST_RAM_DELAYr == 0)
+                       : (RAM_STATE & (ST_RAM_GSU_RD_END | ST_RAM_GSU_WR_END))) begin
+`else
   end else if(RAM_STATE & (ST_RAM_GSU_RD_END | ST_RAM_GSU_WR_END)) begin
+`endif
     GSU_RAM_RD_PENDr <= 1'b0;
     GSU_RAM_WR_PENDr <= 1'b0;
     RQ_GSU_RAM_RDYr <= 1'b1;
@@ -1245,7 +1375,11 @@ always @(posedge CLK2) begin
   case(RAM_STATE)
     ST_RAM_IDLE: begin
       if(ram_free_slot | SNES_DEADr) begin
+`ifdef GSU3
+        if (GSU_RAM_RD_PENDr | (fx3_fast & GSU_RAM_RRQ)) begin
+`else
         if (GSU_RAM_RD_PENDr) begin
+`endif
           RAM_STATE <= ST_RAM_GSU_RD_ADDR;
           ST_RAM_DELAYr <= RAM_CYCLE_LEN;
         end
@@ -1350,7 +1484,7 @@ assign SNES_DATABUS_DIR = ((~SNES_READ & (~rs_snoop_pawr_oe | ROM_HIT | gsu_data
                            : ((~SNES_PAWR & r2100_enable) ? r2100_forcewrite
                            : 1'b0);
 
-`ifdef GSU_FX3_OFF
+`ifndef GSU3
 assign SNES_IRQ = GSU_IRQ;
 `else
 // FX3 spec (hardware vs emulation): there is no FX IRQ -- end of execution is

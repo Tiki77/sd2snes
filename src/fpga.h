@@ -52,8 +52,8 @@ extern uint8_t fpga_boot_led;
 #define FPGA_OBC1 ((const uint8_t*)"/sd2snes/fpga_obc1." FPGA_CONF_EXT)
 #define FPGA_COL20 ((const uint8_t*)"/sd2snes/fpga_col20." FPGA_CONF_EXT)
 #define FPGA_GSU ((const uint8_t*)"/sd2snes/fpga_gsu." FPGA_CONF_EXT)
-/* mk2-only GSU variant: FX3 mode in, MSU-1 audio DAC out (the full core
-   overmaps the Spartan-3).  Selected by smc.c when has_fx3 on CONFIG_MK2. */
+/* FX3-only GSU variant (pipelined FX3 CPU), both boards; on the Mk.II it also
+   drops the MSU-1 audio DAC.  Selected by smc.c for every Super FX 3 cart. */
 #define FPGA_GSU3 ((const uint8_t*)"/sd2snes/fpga_gsu3." FPGA_CONF_EXT)
 #define FPGA_SA1 ((const uint8_t*)"/sd2snes/fpga_sa1." FPGA_CONF_EXT)
 #define FPGA_SDD1 ((const uint8_t*)"/sd2snes/fpga_sdd1." FPGA_CONF_EXT)

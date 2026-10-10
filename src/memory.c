@@ -582,11 +582,9 @@ static uint8_t load_patch_needs_recore(const load_ctx_t *c, uint8_t saved_ips_id
   const uint8_t* core_now = romprops.fpga_conf ? romprops.fpga_conf : FPGA_BASE;
   const uint8_t* core_new = ips_recore_props.fpga_conf ? ips_recore_props.fpga_conf
                                                        : FPGA_BASE;
-  /* The chip mode can change without the core file: on the Mk.III a Super FX 3 cart
-     runs on fpga_gsu like a classic GSU, and only fpga_dspfeat bit 1 (written by
-     load_set_features from the pre-patch header) turns FX3 on.  has_fx3 also keeps
-     the in-game hooks off (cheat.c).  The Mk.II moves FX3 to fpga_gsu3, so there
-     the core comparison already catches it. */
+  /* A Super FX 3 cart runs on fpga_gsu3, so the core comparison already catches a
+     patch that turns a cart into (or out of) an FX3; the has_fx3 term stays because
+     has_fx3 also keeps the in-game hooks off (cheat.c). */
   if(core_new != core_now || ips_recore_props.has_fx3 != romprops.has_fx3) {
     printf("IPS: patch changed cartridge type -> reloading\n");
     ips_recore_active = 1;

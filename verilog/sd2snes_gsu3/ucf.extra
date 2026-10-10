@@ -8,3 +8,12 @@
 # rather than dropping the line (an unreachable constraint makes place-and-route
 # give up early and the physical result gets dramatically worse).
 SYSTEM_JITTER = 0.48 ns;
+
+# Half-rate FX3 core (GSU3_HALF in main.v): gsu_fx3 runs with a clock enable on every
+# other CLK2 edge, so register-to-register paths INSIDE the core get two CLK2 periods
+# (2 x 11.66 ns, rounded down).  Paths into and out of the core (bus handshake, CE,
+# SNES strobes) stay single-cycle under the CLK2 PERIOD.  Valid only while EVERY
+# register and RAM of gsu_fx3 is written under `if (CE)` -- a new always block in
+# there that is not would be signed against a period it does not have.
+INST "snes_gsu/*" TNM = "TNM_gsu";
+TIMESPEC "TS_gsu_half" = FROM "TNM_gsu" TO "TNM_gsu" 23.3 ns;

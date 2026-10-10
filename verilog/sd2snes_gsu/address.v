@@ -1,12 +1,5 @@
-// FX3 availability: always present on mk3; on mk2 only in the gsu3 core variant
-// (Verilog macro GSU3, set by that project's .xise).  The classic mk2 gsu core is
-// the master-identical GSU: every FX3 site below keeps the original text under
-// GSU_FX3_OFF, so that netlist cannot differ from the pre-FX3 core.
-`ifdef MK2
- `ifndef GSU3
-  `define GSU_FX3_OFF
- `endif
-`endif
+// FX3 lives only in the gsu3 core variant (Verilog macro GSU3, set by that project's
+// .xise and main.qsf), on both boards.  Without GSU3 this is the classic GSU core.
 `timescale 1 ns / 1 ns
 //////////////////////////////////////////////////////////////////////////////////
 // Company: Rehkopf
@@ -52,11 +45,11 @@ module address(
   output branch2_enable,
   output branch3_enable,
   output gsu_enable,
-`ifdef GSU_FX3_OFF
+`ifndef GSU3
   input  snescmd_unlock     // snescmd region unlocked (gates the hook window)
 `else
   input  snescmd_unlock,    // snescmd region unlocked (gates the hook window)
-  input  fx3                // FX3 mode (dsp_feat[1]): register window + memory map
+  input  fx3                // FX3 mode (a constant 1 in the gsu3 variant): register window + memory map
 `endif
 );
 
@@ -78,7 +71,7 @@ assign IS_ROM = ~SNES_ROMSEL;
 // FX3 maps $C0-$FF as the upper half of its linear 4MB ROM (game code lives
 // there: e.g. a boot-time jml into bank $CB), so the hook window must not
 // capture those reads in FX3 mode -- in-game hooks are not supported on FX3.
-`ifdef GSU_FX3_OFF
+`ifndef GSU3
 assign IS_PATCH = snescmd_unlock & &SNES_ADDR[23:22];
 `else
 assign IS_PATCH = snescmd_unlock & &SNES_ADDR[23:22] & ~fx3;
@@ -100,18 +93,18 @@ assign gsu_ss_enable = snescmd_unlock & (SNES_ADDR[23:16] == 8'hE8) & ~|SNES_ADD
 // $72-$7D: they serve ROM at $320000+ (mirroring $F2-$FD); the FX3 spec leaves
 // $72-$7D undefined.
 assign IS_SAVERAM = ~IS_PATCH & SAVERAM_MASK[0]
-`ifdef GSU_FX3_OFF
+`ifndef GSU3
                     & ( // 60-7D/E0-FF:0000-FFFF
 `else
                     & ( // 60-7D/E0-FF:0000-FFFF (FX3: only 70-71:0000-FFFF)
 `endif
                         ( &SNES_ADDR[22:21]
                         & ~SNES_ROMSEL
-`ifndef GSU_FX3_OFF
+`ifdef GSU3
                         & (~fx3 | (~SNES_ADDR[23] & (SNES_ADDR[22:17] == 6'b111000)))
 `endif
                         )
-`ifdef GSU_FX3_OFF
+`ifndef GSU3
                         // 00-3F/80-BF:6000-7FFF
 `else
                         // 00-3F/80-BF:6000-7FFF (not present in FX3)
@@ -119,7 +112,7 @@ assign IS_SAVERAM = ~IS_PATCH & SAVERAM_MASK[0]
                       | ( ~SNES_ADDR[22]
                         & ~SNES_ADDR[15]
                         & &SNES_ADDR[14:13]
-`ifndef GSU_FX3_OFF
+`ifdef GSU3
                         & ~fx3
 `endif
                         )
@@ -153,7 +146,7 @@ assign branch1_enable = (SNES_ADDR == 24'h002A1F);
 assign branch2_enable = (SNES_ADDR == 24'h002A59);
 assign branch3_enable = (SNES_ADDR == 24'h002A5E);
 // 00-3F/80-BF:3000-32FF gsu registers.  TODO: some emulators go to $34FF???
-`ifdef GSU_FX3_OFF
+`ifndef GSU3
 assign gsu_enable = (!SNES_ADDR[22] && ({SNES_ADDR[15:10],2'h0} == 8'h30)) && (SNES_ADDR[9:8] != 2'h3);
 `else
 // FX3 (FX3 spec, registers at $007000): the window moves to 00-3F/80-BF:7000-7FFF
