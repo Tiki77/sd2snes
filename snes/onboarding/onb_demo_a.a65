@@ -79,6 +79,8 @@ onb_demo_tbl:
   .word !onb_demo_chips_more : .byt ^onb_demo_chips_more : .word !onb_demo_chips_more_pal : .byt ^onb_demo_chips_more_pal
   .word !onb_demo_lang_ja : .byt ^onb_demo_lang_ja : .word !onb_demo_lang_ja_pal : .byt ^onb_demo_lang_ja_pal
   .word !onb_demo_lang_zh : .byt ^onb_demo_lang_zh : .word !onb_demo_lang_zh_pal : .byt ^onb_demo_lang_zh_pal
+  .word !onb_demo_rp2040_cart : .byt ^onb_demo_rp2040_cart : .word !onb_demo_rp2040_cart_pal : .byt ^onb_demo_rp2040_cart_pal
+  .word !onb_demo_section_218 : .byt ^onb_demo_section_218 : .word !onb_demo_section_218_pal : .byt ^onb_demo_section_218_pal
 
 onb_demo_lang_en_pal:
   .byt $00, $00, $ff, $7f, $ef, $45, $ee, $25, $cf, $21, $8e, $0d, $42, $19, $ad, $14

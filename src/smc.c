@@ -143,6 +143,7 @@ void smc_id(snes_romprops_t* props, uint32_t file_offset) {
   props->has_sdd1 = 0;
   props->has_combo = 0;
   props->has_sufami = 0;
+  props->has_xc = 0;
   props->srambase = 0;
   props->sramsize_bytes = 0;
   props->fpga_features = 0;
@@ -414,6 +415,18 @@ void smc_id(snes_romprops_t* props, uint32_t file_offset) {
         props->has_st0018 = 1;
         props->dsp_fw = DSPFW_ST0018;
         props->fpga_conf = FPGA_ST0018;
+      }
+      /* Xeno Crisis (Bitmap Bureau, 2019): the 128 KB SNES ROM is only a kernel; the game
+         itself runs on the cartridge's RP2040 and streams 65816 code through a window at
+         $3000.  The xc cores run the RP2040 firmware on a soft Cortex-M0 out of the PSRAM;
+         load_stage_bios builds that image from the user's flash dump (src/xc.c).  The save
+         is the RP2040's flash save area, 32 KB at the start of the SRAM chip. */
+      else if (header->map == 0x30 && header->carttype == 0x63
+               && header->maker[0] == 'B' && header->maker[1] == 'M'
+               && !memcmp(header->gamecode, "XCRI", 4)) {
+        props->has_xc = 1;
+        props->fpga_conf = FPGA_XC;
+        header->ramsize = 5;
       }
       /* OBC1 LoROM */
       else if (header->map == 0x30 && header->carttype == 0x25) {

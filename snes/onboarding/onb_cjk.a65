@@ -22,7 +22,7 @@
 
 #include "onboarding/onb_memmap.i65"
 #include "onboarding/onb_dma.i65"
-.link page $cb
+.link page $c9
 
 #define OCJ_TOFU_TILE   $007e   /* '?' (char 63 = tile 126) */
 #define OCJ_TILE_A      640     /* slots 0..63: tiles 640+2s, VRAM $5400 + 16s */

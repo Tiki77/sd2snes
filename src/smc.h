@@ -101,6 +101,8 @@ typedef struct __attribute__ ((__packed__)) {
   uint8_t has_sufami;         /* Sufami Turbo minicart (.st).  A flag and NOT mapper_id:
                                  FPGA mapper 5 is shared with the SPC7110, which has its
                                  own core, so mapper_id cannot tell them apart here. */
+  uint8_t has_xc;             /* Xeno Crisis: the cartridge's RP2040 runs on a soft CPU in the
+                                 FPGA (fpga_xc, src/xc.c) */
   uint32_t srambase;          /* saveram base address */
   uint32_t sramsize_bytes;    /* saveram size in bytes */
   uint16_t fpga_features;     /* feature/peripheral enable bits */

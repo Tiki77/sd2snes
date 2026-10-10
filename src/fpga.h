@@ -84,6 +84,8 @@ extern uint8_t fpga_boot_led;
    fpga_dsp. Exists for both mk2 (.bit) and mk3 (.bi3). */
 #define FPGA_ST0011 ((const uint8_t*)"/sd2snes/fpga_st0011." FPGA_CONF_EXT)
 #define FPGA_ST0018 ((const uint8_t*)"/sd2snes/fpga_st0018." FPGA_CONF_EXT)
+/* Xeno Crisis: a soft Cortex-M0 runs the cartridge's RP2040 firmware (src/xc.c) */
+#define FPGA_XC ((const uint8_t*)"/sd2snes/fpga_xc." FPGA_CONF_EXT)
 /* Copy-protected unlicensed LoROM bootlegs (verilog/sd2snes_bootleg): fpga_base
    plus the protection latch/ALU of the Pokemon/KOF2000/Soul Blade/Tekken 2 carts.
    Picked by ROM CRC32 in bootleg.c; the variant travels in chipfeat[2:0]. */

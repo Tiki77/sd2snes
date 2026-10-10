@@ -489,13 +489,13 @@ def shortcut_list():
     return scr.done()
 
 
-def section_217():
-    """The 2.17 section's opening card: the sd2snes+ logo and the version."""
+def section(version):
+    """A release section's opening card: the sd2snes+ logo and the version."""
     im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     grad, logo = default_look()
     lg = logo.resize((128, 28), Image.LANCZOS)
     im.paste(lg, (0, 14), lg)
-    draw_menu_text(im, 64, 56, "2.17", 3, 5, (248, 208, 56))
+    draw_menu_text(im, 64, 56, version, 3, 5, (248, 208, 56))
     return im
 
 
@@ -1448,6 +1448,27 @@ def icon_chips_more():
     return im
 
 
+# ---- the cartridge with its own microcontroller (2.18): a cart whose label window shows the chip,
+#      a music note beside it for the soundtrack pack
+
+def icon_rp2040_cart():
+    ic = Icon()
+    grey, dgrey = (190, 190, 200), (120, 120, 134)
+    ic.rrect((14, 16, 90, 100), 4, grey, w=2.5)
+    for k in range(5):
+        ic.line([(24, 22 + k * 3), (80, 22 + k * 3)], dgrey, 1)
+    # the window onto the board: a green PCB with the chip and its pin pads
+    ic.rrect((22, 42, 82, 90), 2, (30, 120, 70), out=(20, 70, 44), w=1.5)
+    chip_ic(ic, 36, 52, 68, 80)
+    ic.ellipse((40, 56, 44, 60), (200, 200, 210), out=None)
+    for x in (27, 77):
+        ic.ellipse((x - 2, 62, x + 2, 66), (220, 200, 120), out=None)
+    ic.rrect((30, 96, 74, 104), 1, (220, 200, 120), w=1.2)
+    # the soundtrack pack
+    ic.note(108, 70, YELLOW, 1.1)
+    return ic.done()
+
+
 # ---- the Mk.II LED codes: the cart's three LEDs (green ready, yellow read, red write) in the two
 #      states the siren swaps between, and what is missing; no words (the same in every language)
 
@@ -1536,7 +1557,8 @@ PICTURES = {
     "consoles": consoles_icons, "memtest": more("memtest"),
     "saves": saves_tab, "pcm": pcm_player, "bsx": icon_bsx, "delete": delete_ctx,
     "bios": bios_popup, "desc": option_desc,
-    "section_217": section_217, "gbc": icon_gbc, "shortcuts": shortcut_list,
+    "section_217": lambda: section("2.17"), "section_218": lambda: section("2.18"),
+    "rp2040_cart": icon_rp2040_cart, "gbc": icon_gbc, "shortcuts": shortcut_list,
     "carts_seta": icon_carts_seta, "carts_more": carts_more, "icons": browser_icons,
     "gameinfo_cheats": gameinfo_cheats,
     "theme_restore": theme_restore,

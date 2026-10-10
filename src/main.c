@@ -24,6 +24,7 @@
 #include "crc.h"
 #include "smc.h"
 #include "msu1.h"
+#include "xc.h"
 #include "rtc.h"
 #include "sysinfo.h"
 #include "cfg.h"
@@ -499,6 +500,7 @@ int main(void) {
 
     if(romprops.has_msu1) {
       while(!msu1_loop());
+      if(romprops.has_xc) xc_report();
       /* An MSU-1 game runs its own loop instead of the one below, so the
          reset-to-menu flag has to be raised HERE too: msu1_loop only ever
          returns 1 for a long reset or the $81 combo, i.e. exactly the two
@@ -524,6 +526,8 @@ int main(void) {
       WD_SITE(WD_SITE_USBINT);
       usb_cmd |= usbint_handler();
       if (usb_cmd == SNES_CMD_GAMELOOP) usb_cmd = 0;
+      /* Xeno Crisis on the Mk.III without an MSU-1 pack: answer the mixer's music packets */
+      if(romprops.has_xc) xc_poll();
 
 //        sleep_ms(250);
       WD_SITE(WD_SITE_SRAM_REL);
@@ -547,6 +551,7 @@ int main(void) {
       uint8_t resetState = get_snes_reset_state();
       if(resetState == SNES_RESET_LONG) {
         STM.reset_to_menu_active = (CFG.reset_to_menu >= 2) ? 1 : 0;
+        if(romprops.has_xc) xc_report();
         prepare_reset();
         break;
       } else {
@@ -556,7 +561,9 @@ int main(void) {
           loop_ticks = getticks();
  //         sram_reliable();
           WD_SITE(WD_SITE_CIC_PRINT);
-          printf("%s ", get_cic_statename(get_cic_state()));
+          /* debug print only, but get_cic_state() samples the CIC pin 100,000 times
+             (~12 ms on the Mk.III): too long a gap for the Xeno Crisis soft CPU */
+          if(!romprops.has_xc) printf("%s ", get_cic_statename(get_cic_state()));
           WD_SITE(WD_SITE_SNES_LOOP);
           cmd=snes_main_loop();
           if (usb_cmd && !cmd) cmd = usb_cmd;
@@ -585,6 +592,7 @@ int main(void) {
               case SNES_CMD_RESET_TO_MENU:
                 usb_cmd = 0;
                 STM.reset_to_menu_active = (CFG.reset_to_menu >= 2) ? 1 : 0;
+                if(romprops.has_xc) xc_report();
                 prepare_reset();
                 goto snes_loop_out;
               case SNES_CMD_COMBO_TRANSITION:

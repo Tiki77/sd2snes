@@ -98,6 +98,9 @@ SRC += spc7110rtc.c
 # Sufami Turbo Slot B autosave.  Linked into every config.
 SRC += sufami.c
 
+# Xeno Crisis: the soft CPU image loader and the service of the xc cores.  Every config.
+SRC += xc.c
+
 SRC += usbdesc.c usbcore.c usbuser.c cdcuser.c usbinterface.c
 
 # Wedge diagnostic instrument (wdiag.h): only a private diagnostic config sets
@@ -144,6 +147,8 @@ CSTANDARD = -std=gnu99
 
 # Place -D or -U options here
 CDEFS = -DF_OSC=$(CONFIG_MCU_FOSC)UL
+# XC_DEBUG=1: Xeno Crisis soft CPU halt report in /sd2snes/xc_debug.txt (xc.c); off by default
+CDEFS += $(if $(filter 1,$(XC_DEBUG)),-DXC_DEBUG)
 
 # Place -I options here
 CINCS = -Iinclude -Iinclude/arm
@@ -256,10 +261,17 @@ ALL_ASFLAGS = -I. -x assembler-with-cpp $(ASFLAGS) $(CDEFS)
 # Default target.
 all: build
 
-build: elf bin hex
+build: elf bin hex xc_soc
 	$(E) "  SIZE   $(TARGET).elf"
 	$(Q)$(ELFSIZE)|grep -v debug
 	cp $(TARGET).bin $(OBJDIR)/$(CONFIG_FW_FILE)
+
+# Xeno Crisis: xc_soc.bin, the soft CPU's replacement bootrom and firmware additions (Cortex-M0+
+# code, see xc_soc/README.md).  Built with every firmware so the pair on the card always match;
+# the same file serves all three boards.
+xc_soc:
+	$(Q)$(MAKE) -s -C xc_soc OUT=../$(OBJDIR)
+.PHONY: xc_soc
 
 elf: $(TARGET).elf
 bin: $(TARGET).bin
@@ -391,6 +403,7 @@ clean_list :
 	$(Q)$(REMOVE) $(OBJDIR)/version.h
 	$(Q)$(REMOVE) $(OBJDIR)/${CONFIG_FW_FILE}
 	$(Q)$(REMOVE) $(OBJDIR)/fw.hdr
+	$(Q)$(REMOVE) -r $(OBJDIR)/xc_soc_build $(OBJDIR)/xc_soc.bin $(OBJDIR)/xc_fw.bin $(OBJDIR)/xc_bootrom.bin
 	$(Q)$(REMOVE) $(OBJDIR)/.DS_Store
 	$(Q)$(REMOVE) $(LST)
 	$(Q)$(REMOVE) $(CSRC:.c=.s)

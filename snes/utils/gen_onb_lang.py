@@ -130,8 +130,8 @@ for _m in range(3, 19):
                                            for l in LANGS)
 
 # The descriptors in tour order, by name: the base tour's cards (1-32, "and more" last),
-# the 2.17 section (33-40: its separator card, then the release's cards), then the
-# "and more" items (41-48, ONB_MORE_FIRST in onboarding_main.a65). Per language.
+# the 2.17 and 2.18 sections (33-40 and 41-42: each its separator card, then the release's cards), then the
+# "and more" items (43-50, ONB_MORE_FIRST in onboarding_main.a65). Per language.
 NAMES = [
   # 1 language
   ('Language', 'Idioma', 'Idioma', 'Sprache', 'Langue', 'Lingua', 'Язык', 'Taal'),
@@ -227,21 +227,25 @@ NAMES = [
   ('Icons in the list', 'Ícones na lista', 'Iconos en la lista', 'Symbole in der Liste', 'Icônes dans la liste', 'Icone nella lista', 'Значки в списке', 'Pictogrammen in de lijst'),
   # 40 the cheat list from the game info card (2.17)
   ('Cheats from the game info', 'Cheats pela ficha do jogo', 'Cheats desde la ficha', 'Cheats aus der Infokarte', 'Cheats depuis la fiche', 'Cheat dalla scheda', 'Читы в окне Информация об игре', 'Cheats vanuit spelinfo'),
-  # 41 the PPU is cleared before every game boots
+  # 41 the 2.18 section: what is new in this release
+  ("What's new in 2.18", 'Novidades da 2.18', 'Novedades de la 2.18', 'Neu in 2.18', 'Nouveautés de la 2.18', 'Novità della 2.18', 'Новое в 2.18', 'Nieuw in 2.18'),
+  # 42 the cartridge with an RP2040 chip (2.18)
+  ('Xeno Crisis',)*8,
+  # 43 the PPU is cleared before every game boots
   ('Clear PPU on boot', 'Limpar PPU no boot', 'Limpiar PPU al arrancar', 'PPU beim Start löschen', 'Effacer le PPU au boot', "Pulisci PPU all'avvio", 'Очистка PPU при старте', 'Leeg PPU bij starten'),
-  # 42 bus timing compat
+  # 44 bus timing compat
   ('Bus timing compat', 'Compat. de barramento', 'Compat. de bus', 'Bus-Timing-Kompat.', 'Compat. timing bus', 'Compat. timing bus', 'Совместимость шины', 'Compat. bustiming'),
-  # 43 the hardware model in System Information
+  # 45 the hardware model in System Information
   ('Hardware model', 'Modelo do hardware', 'Modelo de hardware', 'Hardware-Modell', 'Modèle du matériel', "Modello dell'hardware", 'Модель устройства', 'Hardwaremodel'),
-  # 44 BS-X and the Memory Pack
+  # 46 BS-X and the Memory Pack
   ('BS-X and Memory Pack', 'BS-X e Memory Pack', 'BS-X y Memory Pack', 'BS-X und Memory Pack', 'BS-X et Memory Pack', 'BS-X e Memory Pack', 'BS-X и Memory Pack', 'BS-X en Memory Pack'),
-  # 45 delete files and saves
+  # 47 delete files and saves
   ('Delete files and saves', 'Apagar arquivos e saves', 'Borrar archivos y saves', 'Dateien/Saves löschen', 'Effacer fichiers/saves', 'Eliminare file e save', 'Удаление файлов', 'Bestanden/saves wissen'),
-  # 46 missing BIOS warning
+  # 48 missing BIOS warning
   ('Missing BIOS warning', 'Aviso de BIOS faltando', 'Aviso de BIOS que falta', 'Fehlendes BIOS melden', 'Alerte de BIOS manquant', 'Avviso di BIOS mancante', 'Нет файла BIOS', 'Melding: BIOS ontbreekt'),
-  # 47 the clock question on boot and the date format
+  # 49 the clock question on boot and the date format
   ('Clock and date', 'Relógio e data', 'Reloj y fecha', 'Uhr und Datum', 'Horloge et date', 'Orologio e data', 'Часы и дата', 'Klok en datum'),
-  # 48 a description for each option
+  # 50 a description for each option
   ('Option descriptions', 'Descrição das opções', 'Descripción de opciones', 'Optionsbeschreibungen', 'Description des options', 'Descrizione opzioni', 'Описание опций', 'Uitleg bij opties'),
 ]
 
@@ -607,7 +611,25 @@ TEXTS = [
    '[SELECT] sulla scheda del gioco apre la sua lista di cheat: attiva e disattiva i codici, aggiungi o modifica, poi avvia il gioco con quelli pronti.',
    '[SELECT] в окне Информация об игре открывает список читов этой игры: включай и выключай коды, добавляй или меняй их и запускай игру уже с ними.',
    '[SELECT] op de spelinfo opent de cheatlijst van het spel: zet codes aan en uit, voeg toe of wijzig, en start het spel er direct mee.'),
-  # 41 the PPU is cleared before every game boots
+  # 41 the 2.18 section: what is new in this release
+  ('Version 2.18 is out. The next card shows what is new.',
+   'A versão 2.18 chegou. O próximo card mostra o que há de novo.',
+   'Ya está aquí la versión 2.18. La siguiente pantalla muestra las novedades.',
+   'Version 2.18 ist da. Die nächste Karte zeigt, was neu ist.',
+   'La version 2.18 est là. Le prochain écran montre les nouveautés.',
+   'La versione 2.18 è arrivata. La prossima scheda mostra le novità.',
+   'Вышла версия 2.18. Что в ней нового, смотри на следующей карточке.',
+   'Versie 2.18 is er. De volgende kaart toont wat er nieuw is.'),
+  # 42 the cartridge with an RP2040 chip (2.18)
+  ("Xeno Crisis, the 2019 cartridge with an RP2040 chip, now runs. It needs the dump of your cartridge's RP2040 flash, saved as /sd2snes/xenocrisis_rp2040.bin on the card. Music comes from an MSU-1 pack next to the ROM. Without one, the game plays with sound effects only.",
+   'Xeno Crisis, o cartucho de 2019 com um chip RP2040, agora roda. Ele precisa do dump da flash RP2040 do seu cartucho, gravado como /sd2snes/xenocrisis_rp2040.bin no cartão. A música vem de um pack MSU-1 ao lado da ROM. Sem ele, o jogo toca só com efeitos sonoros.',
+   'Xeno Crisis, el cartucho de 2019 con un chip RP2040, ya funciona. Necesita el volcado de la flash RP2040 de tu cartucho, guardado como /sd2snes/xenocrisis_rp2040.bin en la tarjeta. La música viene de un pack MSU-1 junto a la ROM. Sin él, el juego suena solo con efectos de sonido.',
+   'Xeno Crisis, das Modul von 2019 mit RP2040-Chip, läuft jetzt. Es braucht den Dump des RP2040-Flashs deines Moduls, gespeichert als /sd2snes/xenocrisis_rp2040.bin auf der Karte. Die Musik kommt aus einem MSU-1-Pack neben der ROM. Ohne Pack hat das Spiel nur Soundeffekte.',
+   "Xeno Crisis, la cartouche de 2019 avec une puce RP2040, tourne désormais. Elle demande le dump de la flash RP2040 de ta cartouche, enregistré sous /sd2snes/xenocrisis_rp2040.bin sur la carte. La musique vient d'un pack MSU-1 à côté de la ROM. Sans pack, le jeu n'a que les effets sonores.",
+   'Xeno Crisis, la cartuccia del 2019 con un chip RP2040, ora funziona. Serve il dump della flash RP2040 della tua cartuccia, salvato come /sd2snes/xenocrisis_rp2040.bin sulla scheda. La musica arriva da un pack MSU-1 accanto alla ROM. Senza pack, il gioco ha solo gli effetti sonori.',
+   'Xeno Crisis, картридж 2019 года с чипом RP2040, теперь запускается. Нужен дамп флеш-памяти RP2040 твоего картриджа, сохранённый как /sd2snes/xenocrisis_rp2040.bin на карте. Музыка берётся из MSU-1 пака рядом с ROM. Без него в игре только звуковые эффекты.',
+   'Xeno Crisis, de cartridge uit 2019 met een RP2040-chip, draait nu. Hij heeft de RP2040-flashdump van je cartridge nodig, bewaard als /sd2snes/xenocrisis_rp2040.bin op de kaart. De muziek komt uit een MSU-1-pack naast de ROM. Zonder pack heeft het spel alleen geluidseffecten.'),
+  # 43 the PPU is cleared before every game boots
   ("Some romhacks draw their intro without clearing the video memory, and on a real console the menu's leftovers show as garbage. The sd2snes+ wipes it before every game starts.",
    'Alguns romhacks desenham a abertura sem limpar a memória de vídeo, e num console de verdade as sobras do menu aparecem como lixo. O sd2snes+ limpa tudo antes de qualquer jogo começar.',
    'Algunos romhacks dibujan su intro sin limpiar la memoria de vídeo, y en una consola real los restos del menú salen como basura. El sd2snes+ la borra antes de que empiece cualquier juego.',
@@ -616,7 +638,7 @@ TEXTS = [
    "Alcune romhack disegnano l'intro senza pulire la memoria video, e su una console vera gli avanzi del menu appaiono come spazzatura. L'sd2snes+ la pulisce prima che parta qualsiasi gioco.",
    'Некоторые ромхаки рисуют заставку, не очищая видеопамять, и на настоящей консоли остатки меню видны как мусор. sd2snes+ очищает её перед запуском любой игры.',
    'Sommige romhacks tekenen hun intro zonder het videogeheugen te wissen, en op een echte console verschijnen restjes van het menu als rommel. De sd2snes+ wist het voordat elk spel start.'),
-  # 42 bus timing compat
+  # 44 bus timing compat
   ('A game that freezes or glitches right after the logo on some consoles, mostly 1-CHIP ones? Try {cfg} > {ingame} > {buscompat}: it frees the cartridge bus a little earlier, like firmware 1.11.0 did.',
    'Um jogo trava ou dá glitch logo depois do logo em alguns consoles, quase sempre 1-CHIP? Tente {cfg} > {ingame} > {buscompat}: ela libera o barramento do cartucho um pouco antes, como a firmware 1.11.0 fazia.',
    '¿Un juego se cuelga o falla justo tras el logo en algunas consolas, casi siempre 1-CHIP? Prueba {cfg} > {ingame} > {buscompat}: libera el bus del cartucho un poco antes, como hacía el firmware 1.11.0.',
@@ -625,7 +647,7 @@ TEXTS = [
    "Un gioco si blocca o dà glitch subito dopo il logo su alcune console, quasi sempre 1-CHIP? Prova {cfg} > {ingame} > {buscompat}: libera il bus della cartuccia un po' prima, come il firmware 1.11.0.",
    'Игра зависает или сбоит сразу после логотипа на некоторых консолях, чаще 1-CHIP? Попробуй {cfg} > {ingame} > {buscompat}: шина картриджа освобождается чуть раньше, как в прошивке 1.11.0.',
    'Loopt een spel vast of hapert het net na het logo op sommige consoles, meestal 1-CHIP? Probeer {cfg} > {ingame} > {buscompat}: de cartridgebus wordt iets eerder vrijgegeven, zoals firmware 1.11.0 deed.'),
-  # 43 the hardware model in System Information
+  # 45 the hardware model in System Information
   ('{sysinfo} in the main menu ([X]) now also shows which hardware it runs on: sd2snes Mk.II, sd2snes Mk.III or FXPAK PRO STM32.',
    '{sysinfo} no menu principal ([X]) agora mostra também em que hardware ele roda: sd2snes Mk.II, sd2snes Mk.III ou FXPAK PRO STM32.',
    '{sysinfo} en el menú principal ([X]) ahora también muestra en qué hardware corre: sd2snes Mk.II, sd2snes Mk.III o FXPAK PRO STM32.',
@@ -634,7 +656,7 @@ TEXTS = [
    '{sysinfo} nel menu principale ([X]) ora mostra anche su quale hardware gira: sd2snes Mk.II, sd2snes Mk.III o FXPAK PRO STM32.',
    '{sysinfo} в главном меню ([X]) теперь показывает и модель устройства: sd2snes Mk.II, sd2snes Mk.III или FXPAK PRO STM32.',
    '{sysinfo} in het hoofdmenu ([X]) toont nu ook op welke hardware het draait: sd2snes Mk.II, sd2snes Mk.III of FXPAK PRO STM32.'),
-  # 44 BS-X and the Memory Pack
+  # 46 BS-X and the Memory Pack
   ('Satellaview games that use the 8M Memory Pack slot read it from /sd2snes/saves as <rom>.mpk: saved sound novels, downloaded races and the like. The game still boots without a pack.',
    'Jogos do Satellaview que usam o slot de Memory Pack de 8M leem o pack de /sd2snes/saves como <rom>.mpk: sound novels salvas, corridas baixadas e afins. O jogo boota mesmo sem o pack.',
    'Los juegos de Satellaview que usan el slot de Memory Pack de 8M lo leen de /sd2snes/saves como <rom>.mpk: sound novels guardadas, carreras descargadas y más. El juego arranca incluso sin pack.',
@@ -643,7 +665,7 @@ TEXTS = [
    'I giochi Satellaview che usano lo slot Memory Pack da 8M lo leggono da /sd2snes/saves come <rom>.mpk: sound novel salvate, corse scaricate e simili. Il gioco parte anche senza pack.',
    'Игры Satellaview со слотом Memory Pack 8M читают его из /sd2snes/saves как <rom>.mpk: сохранённые звуковые новеллы, скачанные гонки и прочее. Игра запускается и без Memory Pack.',
    'Satellaview-spellen met een 8M Memory Pack-slot lezen het pack uit /sd2snes/saves als <rom>.mpk: opgeslagen sound novels, gedownloade races en meer. Het spel start ook zonder pack.'),
-  # 45 delete files and saves
+  # 47 delete files and saves
   ("From the [Y] menu of the file list, {del} erases the selected file and {delsrm} only the game's saves, all 4 slots. Deleting a ROM also takes its cover, info card, guides and cheats along.",
    'No menu do [Y] da lista de arquivos, {del} apaga o arquivo selecionado e {delsrm} só os saves do jogo, nos 4 slots. Apagar uma ROM leva junto a capa, a ficha, as guias e os cheats dela.',
    'Desde el menú [Y] de la lista, {del} borra el archivo elegido y {delsrm} solo los saves del juego, las 4 ranuras. Borrar una ROM también se lleva su carátula, ficha, guías y cheats.',
@@ -652,7 +674,7 @@ TEXTS = [
    'Dal menu [Y] della lista, {del} cancella il file scelto e {delsrm} solo i salvataggi del gioco, tutti e 4 gli slot. Eliminare una ROM porta via anche copertina, scheda, guide e cheat.',
    'В списке файлов по кнопке [Y] пункт {del} удаляет выбранный файл, а {delsrm} только сохранения игры, все 4 слота. Вместе с игрой удаляются её обложка, карточка, руководства и читы.',
    'Vanuit het [Y]-menu van de lijst wist {del} het gekozen bestand en {delsrm} alleen de saves van het spel, alle 4 plekken. Een gewiste ROM neemt ook hoes, spelinfo, gidsen en cheats mee.'),
-  # 46 missing BIOS warning
+  # 48 missing BIOS warning
   ('Games with special chips (DSP, Super FX, SA-1, S-DD1, CX4, Super Game Boy, BS-X...) need support files on the card. If one is missing, the menu names the file and stays up, instead of freezing or starting a broken game.',
    'Jogos com chips especiais (DSP, Super FX, SA-1, S-DD1, CX4, Super Game Boy, BS-X...) precisam de arquivos de apoio no cartão. Se faltar algum, o menu diz qual é e continua de pé, em vez de travar ou abrir um jogo quebrado.',
    'Los juegos con chips especiales (DSP, Super FX, SA-1, S-DD1, CX4, Super Game Boy, BS-X...) necesitan archivos de apoyo en la tarjeta. Si falta uno, el menú dice cuál y sigue en pie, en vez de colgarse o abrir un juego roto.',
@@ -661,7 +683,7 @@ TEXTS = [
    'I giochi con chip speciali (DSP, Super FX, SA-1, S-DD1, CX4, Super Game Boy, BS-X...) vogliono file di supporto sulla scheda. Se ne manca uno, il menu dice quale e resta attivo, invece di bloccarsi o avviare un gioco rotto.',
    'Играм со специальными чипами (DSP, Super FX, SA-1, S-DD1, CX4, Super Game Boy, BS-X...) нужны файлы BIOS на карте. Если какого-то нет, меню показывает его название и остаётся открытым, а не зависает и не запускает сломанную игру.',
    'Spellen met speciale chips (DSP, Super FX, SA-1, S-DD1, CX4, Super Game Boy, BS-X...) hebben hulpbestanden op de kaart nodig. Ontbreekt er een, dan noemt het menu het bestand en blijft het open, in plaats van te hangen.'),
-  # 47 the clock question on boot and the date format
+  # 49 the clock question on boot and the date format
   ("When the cartridge's clock is not set, the menu asks for the time on start. {askclock} in {browser} turns the question off. The date at the bottom of the list follows the language: month first in English, day first in the others.",
    'Quando o relógio do cartucho não está acertado, o menu pede a hora ao iniciar. {askclock} em {browser} desliga a pergunta. A data no rodapé da lista segue o idioma: mês primeiro em inglês, dia primeiro nos outros.',
    'Si el reloj del cartucho no está en hora, el menú la pide al iniciar. {askclock} en {browser} quita la pregunta. La fecha al pie de la lista sigue el idioma: primero el mes en inglés, el día en los demás.',
@@ -670,7 +692,7 @@ TEXTS = [
    "Se l'orologio della cartuccia non è impostato, il menu chiede l'ora all'avvio. {askclock} in {browser} toglie la domanda. La data in fondo alla lista segue la lingua: prima il mese in inglese, il giorno nelle altre.",
    'Если часы картриджа не выставлены, меню спрашивает время при старте. {askclock} в {browser} отключает вопрос. Дата внизу списка следует языку: в английском сначала месяц, в остальных день.',
    'Is de klok van de cartridge niet ingesteld, dan vraagt het menu bij de start om de tijd. {askclock} in {browser} zet dat uit. De datum onder de lijst volgt de taal: in het Engels eerst de maand, anders de dag.'),
-  # 48 a description for each option
+  # 50 a description for each option
   ("Every option in {cfg} shows a sentence in a box on screen explaining what it does, in the menu's language, so each setting makes sense without a manual.",
    'Cada opção em {cfg} mostra uma frase numa caixa na tela explicando o que ela faz, no idioma do menu, para cada ajuste fazer sentido sem manual.',
    'Cada opción de {cfg} muestra una frase en un recuadro explicando lo que hace, en el idioma del menú, para entender cada ajuste sin manual.',
@@ -732,7 +754,7 @@ def _cells(text):
 
 
 TEXT_W = 30          # == ONB_TEXT_W: cols 1..30
-MORE_FIRST = 40      # == ONB_MORE_FIRST: the "and more" items are the descriptors from here
+MORE_FIRST = 42      # == ONB_MORE_FIRST: the "and more" items are the descriptors from here
 MORE_NAME_W = 24     # an answer row's width (onb_draw_option_value prints labels with 24)
 TEXT_MAX_LINES = 11  # the answer list starts 2 rows below the text and the longest
                      # list (8 languages) has to fit above the progress bar

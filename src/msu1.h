@@ -41,6 +41,7 @@
 
 int msu1_check(uint8_t*);
 int msu1_loop(void);
+void msu1_audio_service(void);
 void msu_dac_hold(void);      /* pause the DAC around a blocking op (no-op if idle) */
 void msu_dac_release(void);   /* resume it (no-op if idle) */
 

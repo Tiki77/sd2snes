@@ -63,6 +63,7 @@ memory.c: RAM operations
 #include "atari.h"
 #include "patch.h"
 #include "patch_copier.h"
+#include "xc.h"
 
 #include <string.h>
 #include "util.h"
@@ -659,7 +660,10 @@ static void load_saveram(const load_ctx_t *c) {
   } else if(romprops.ramsize_bytes) {
     // powerslide relies on the init value to be 00.
     sram_memset(SRAM_SAVE_ADDR, romprops.ramsize_bytes, romprops.has_gsu ? 0x00 : 0xFF);
-    if (romprops.sramsize_bytes) migrate_and_load_srm(filename, SRAM_SAVE_ADDR);
+    if (romprops.sramsize_bytes && !migrate_and_load_srm(filename, SRAM_SAVE_ADDR)
+        && romprops.has_xc) {
+      xc_load_dump_save();   /* no .srm yet: the saves made on the cartridge */
+    }
     /* file not found error is ok (SRM file might not exist yet) */
     if(file_res == FR_NO_FILE) file_res = 0;
     /* A core without the virtual battery cannot pass the factory check program's
@@ -864,6 +868,10 @@ static void load_stage_bios(tick_t ticksstart) {
     if(!load_st018(romprops.dsp_fw)) {
       snes_menu_errmsg(MENU_ERR_SUPPLFILE, (void*)romprops.dsp_fw);
     }
+  }
+  /* Xeno Crisis: the soft CPU's image around the kernel ROM (xc.c) */
+  if(romprops.has_xc && !xc_load_image()) {
+    snes_menu_errmsg(MENU_ERR_SUPPLFILE, (void*)"xenocrisis_rp2040.bin");
   }
 }
 
@@ -1447,6 +1455,12 @@ static uint32_t load_check_prereqs(load_ctx_t *c) {
     return load_abort_missing(flags, MENU_ERR_SUPPLFILE,
                               path_leaf((const char*)romprops.fpga_conf));
   }
+  /* Xeno Crisis: the RP2040 flash dump (the user's) and xc_soc.bin (ours), checked for
+     size/build too -- a wrong file found after the ACK could only boot a dead game. */
+  if(romprops.has_xc) {
+    const char *bad = xc_check_files();
+    if(bad) return load_abort_missing(flags, MENU_ERR_SUPPLFILE, bad);
+  }
 #ifdef CONFIG_MK2
   /* the base-core variant with the decoder extensions (see load_base_core) */
   {
@@ -1663,6 +1677,9 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
     romprops.fpga_features |= FEAT_MSU1;
     romprops.has_msu1 = 1;
   }
+  /* Xeno Crisis: the soft CPU drives the MSU-1 (the SNES never sees it), so only the
+     MCU's side of it is kept -- has_msu1 still sends the game to msu1_loop */
+  if(romprops.has_xc) romprops.fpga_features &= ~FEAT_MSU1;
   printf("done\n");
 
   load_set_features(&c);
@@ -1770,7 +1787,11 @@ void init(uint8_t *filename) {
      savestate_program().  Probed on hardware: with the body live, 5/5 clean
      resumes and the reset-loop path never fires during a resume. */
   if (CFG.reset_patch) snescmd_writebyte(0, SNESCMD_RESET_HOOK+1);
-  cheat_yaml_load(filename);
+  /* Xeno Crisis: the soft CPU's image covers the PSRAM where the cheat records, the in-game
+     menu and its staging live (xc.c), and the xc cores have no hooks, cheat engine or
+     savestates.  Staging any of them would overwrite the game. */
+  uint8_t staged = !romprops.has_xc;
+  if(staged) cheat_yaml_load(filename);
 // XXX    cheat_yaml_save(filename);
   /* Stage the in-game TAB menu bin (igmenu.bin) into PSRAM $C2 for real game loads
      only (not a menu reload -- the $C2 dir buffer is the menu's own scratch there).
@@ -1779,7 +1800,7 @@ void init(uint8_t *filename) {
      cheat_program() below emits frozen pins into the NMI hook, and a stale one from the
      previous game must never reach the menu or the next ROM. */
   trainer_stage();
-  if (filename != (uint8_t *)MENU_FILENAME) {
+  if (staged && filename != (uint8_t *)MENU_FILENAME) {
     igmenu_stage();
     /* Stage the SAVES-tab status block for the in-game menu (game load only). */
     saveinfo_stage(filename);
@@ -1792,13 +1813,17 @@ void init(uint8_t *filename) {
        in the MENU leak into the in-game GUIDES tab of whatever game boots next. */
     manual_stage_meta(filename);
   }
-  cheat_program();
-  savestate_program();
+  if(staged) {
+    cheat_program();
+    savestate_program();
+  }
   fpga_set_features(romprops.fpga_features);
   fpga_reset_srtc_state();
   snes_set_mcu_cmd(0);
   // init save state region - VRAM, APURAM, CGRAM, OAM only
   sram_memset(0xF70000, 0x30000, 0);
+  /* image and save are in place: the soft CPU starts with the SNES */
+  if(romprops.has_xc) xc_run(romprops.has_msu1);
 }
 
 void deassert_reset() {
@@ -2273,6 +2298,14 @@ int save_sram(uint8_t* filename, uint32_t sram_size, uint32_t base_addr) {
       return 0;
     }
     remain -= copy;
+    /* Xeno Crisis: a 32 KB save outlasts the MSU-1 DAC buffer; serve it every sector */
+    if(romprops.has_xc && remain) {
+      FPGA_DESELECT();
+      xc_service();
+      set_mcu_addr(base_addr + sram_size - remain);
+      FPGA_SELECT();
+      FPGA_TX_BYTE(0x88); /* read */
+    }
   }
   FPGA_DESELECT();
   file_close();
@@ -2287,6 +2320,14 @@ uint32_t calc_sram_crc(uint32_t base_addr, uint32_t size, uint32_t crc) {
   FPGA_SELECT();
   FPGA_TX_BYTE(FPGA_CMD_READMEM | FPGA_MEM_AUTOINC);
   for(count=0; count<size; count++) {
+    /* Xeno Crisis: the 32 KB CRC takes ~20 ms, longer than the MSU-1 DAC buffer */
+    if(romprops.has_xc && count && !(count & 511)) {
+      FPGA_DESELECT();
+      xc_service();
+      set_mcu_addr(base_addr + count);
+      FPGA_SELECT();
+      FPGA_TX_BYTE(FPGA_CMD_READMEM | FPGA_MEM_AUTOINC);
+    }
     FPGA_WAIT_RDY_INLINE();
     data = FPGA_RX_BYTE();
     if(get_snes_reset()) {
@@ -2326,7 +2367,10 @@ uint8_t sram_reliable() {
   uint16_t score=0;
   uint32_t val;
   uint8_t result = 0;
-  for(uint16_t i = 0; i < SRAM_RELIABILITY_SCORE; i++) {
+  /* Xeno Crisis: the soft CPU has priority on the PSRAM, so 256 reads take ~12 ms here and
+     steal slots from its code fetches every main-loop pass.  A few still catch a dead PSRAM. */
+  uint16_t n = romprops.has_xc ? 4 : SRAM_RELIABILITY_SCORE;
+  for(uint16_t i = 0; i < n; i++) {
     val=sram_readlong(SRAM_SCRATCHPAD);
     if(val==0x12345678) {
       score++;
@@ -2337,7 +2381,7 @@ uint8_t sram_reliable() {
       printf("i=%d val=%08lX\n", i, val);
     }
   }
-  if(score<SRAM_RELIABILITY_SCORE) {
+  if(score<n) {
     result = 0;
 /* dprintf("score=%d\n", score); */
   } else {

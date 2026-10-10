@@ -43,9 +43,9 @@
 ;                        the focused one's paragraph under them (onb_more_body)
 ;   right  (OBJ)     : the demo picture of the focused answer (onb_build_oam)
 ;   footer rows 25/27: progress bar + the input hints of the view
-#define ONB_NUM_CARDS      40      ; cards walked: the base tour ("and more" last), then the
-                                   ; 2.17 section (its separator card and the release's cards)
-#define ONB_MORE_FIRST     40      ; the "and more" items: descriptors 40..47 of onb_feat_table
+#define ONB_NUM_CARDS      42      ; cards walked: the base tour ("and more" last), then the
+                                   ; 2.17 and 2.18 sections (each its separator card and the release's cards)
+#define ONB_MORE_FIRST     42      ; the "and more" items: descriptors 42..49 of onb_feat_table
 ; header
 #define ONB_HDR_ROW        1       ; feature name (primary language)
 
