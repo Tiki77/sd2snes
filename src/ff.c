@@ -2543,7 +2543,28 @@ FRESULT f_open (
 /* Read File                                                             */
 /*-----------------------------------------------------------------------*/
 
+static FRESULT f_read_body (FIL* fp, void* buff, UINT btr, UINT* br);
+
+/* ff_sd_offload sends the NEXT read to the FPGA's SD DMA instead of the buffer, and is meant
+   for that one call.  f_read_body clears it only on its normal exit: an invalid or failed
+   file object and a disk error returned early and left it (and sd_offload) set, so the
+   following plain read of any file went to the FPGA.  That happens whenever an MSU-1 track
+   refill hits a missing track, and the first read after it then hangs if the core's DMA
+   cannot complete (fpga_pgm reading the menu's core after Xeno Crisis on the Mk.II). */
 FRESULT f_read (
+	FIL* fp, 		/* Pointer to the file object */
+	void* buff,		/* Pointer to data buffer */
+	UINT btr,		/* Number of bytes to read */
+	UINT* br		/* Pointer to number of bytes read */
+)
+{
+	FRESULT res = f_read_body(fp, buff, btr, br);
+	ff_sd_offload = 0;
+	sd_offload = 0;
+	return res;
+}
+
+static FRESULT f_read_body (
 	FIL* fp, 		/* Pointer to the file object */
 	void* buff,		/* Pointer to data buffer */
 	UINT btr,		/* Number of bytes to read */
@@ -3009,7 +3030,20 @@ FRESULT f_getcwd (
 /* Seek File R/W Pointer                                                 */
 /*-----------------------------------------------------------------------*/
 
+static FRESULT f_lseek_body (FIL* fp, DWORD ofs);
+
+/* same as f_read: the early exits of the seek left ff_sd_offload set */
 FRESULT f_lseek (
+	FIL* fp,		/* Pointer to the file object */
+	DWORD ofs		/* File pointer from top of file */
+)
+{
+	FRESULT res = f_lseek_body(fp, ofs);
+	ff_sd_offload = 0;
+	return res;
+}
+
+static FRESULT f_lseek_body (
 	FIL* fp,		/* Pointer to the file object */
 	DWORD ofs		/* File pointer from top of file */
 )
