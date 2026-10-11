@@ -665,6 +665,7 @@ uint8_t menu_main_loop() {
          frame interval and drifting the video ~25% behind the audio. */
       do {
         menu_sfx_pump();
+        menu_music_work();   /* a QOA clip: decode the next step ahead of the FPGA fetcher */
         if(!cmd && !get_snes_reset()) cmd = snes_get_mcu_cmd();
       } while(!cmd && getticks() < until);
     } else {

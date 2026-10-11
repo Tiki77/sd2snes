@@ -58,8 +58,9 @@ void menu_sfx_forget(void);               /* drop the PSRAM preload cache + rewi
    no one-shot deadline -- loops the whole clip from sample 0 until menu_music_stop. Shares
    the DAC, so the caller suppresses nav SFX while it plays (snes.c). Pumped by the same
    menu_sfx_pump(). */
-int  menu_music_play(const char *filename); /* 0xA0 playing / 0x01 open-fail / 0x02 bad-magic */
+int  menu_music_play(const char *filename); /* .pcm or .qoa: 0xA0 playing / 0x01 open-fail / 0x02 bad */
 void menu_music_stop(void);
+void menu_music_work(void);               /* decode a QOA clip ahead; idle menu loop only */
 int  menu_music_active(void);             /* nonzero while a looping clip is playing */
 void menu_music_lock(int locked);         /* claim the DAC: the FMV stop paths leave it alone */
 int  menu_music_locked(void);             /* nonzero while somebody holds that claim */

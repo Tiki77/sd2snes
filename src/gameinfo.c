@@ -523,7 +523,7 @@ static int gi_fmv_reopen(void) {
   /* The idle watchdog's stop kills the clip AUDIO too, and this reopen used to bring back only
    * the VIDEO -- any screen that holds the pump >300ms (e.g. the guide picker) resumed a silent
    * clip. Restart the soundtrack under the same gate gameinfo_load uses; the pump then re-locks
-   * the video to the fresh audio position. Only the .fmv clip ever ships a .pcm, so the .gss
+   * the video to the fresh audio position. Only the .fmv clip ever ships a .qoa/.pcm, so the .gss
    * snapshot path (no pump, no audio) never gets here with a non-.fmv suffix anyway. The
    * extension is swapped IN PLACE in gi_fmv_path and restored right after: menu_music_play
    * opens the file synchronously and keeps no pointer/name cache (menusfx_open_name = 0), and
@@ -533,8 +533,12 @@ static int gi_fmv_reopen(void) {
     size_t n = strlen(gi_fmv_path);
     if(n > 4 && !strcmp(gi_fmv_path + n - 4, ".fmv")) {
       int st;
-      memcpy(gi_fmv_path + n - 4, ".pcm", 4);
-      st = menu_music_play(gi_fmv_path);       /* silent + harmless if the .pcm is absent */
+      memcpy(gi_fmv_path + n - 4, ".qoa", 4);  /* the compressed soundtrack wins over a .pcm */
+      st = menu_music_play(gi_fmv_path);
+      if(st != 0xA0) {
+        memcpy(gi_fmv_path + n - 4, ".pcm", 4);
+        st = menu_music_play(gi_fmv_path);     /* silent + harmless if the .pcm is absent */
+      }
       memcpy(gi_fmv_path + n - 4, ".fmv", 4);
       /* The pump LOCKS video to audio: fresh audio starts at sample 0 while gi_fmv_cur still
        * points at the frame where the watchdog struck, so the "video slightly ahead -> hold"
@@ -729,8 +733,11 @@ void gameinfo_load(uint8_t *rom_path) {
         if(gi_fmv_begin(f->path, &f->meta)) {  /* sets GAMEINFO_FLAG_FMV; N frames -> animated */
           shown = 1;
           if(CFG.game_info_music) {          /* clip soundtrack gated by the "Play video music" toggle */
-            gi_join(f->path, sizeof(f->path), f->base, ".pcm");
-            menu_music_play(f->path);        /* clip audio; silent if absent */
+            gi_join(f->path, sizeof(f->path), f->base, ".qoa");   /* compressed soundtrack first */
+            if(menu_music_play(f->path) != 0xA0) {
+              gi_join(f->path, sizeof(f->path), f->base, ".pcm");
+              menu_music_play(f->path);      /* clip audio; silent if absent */
+            }
           }
         }
       }

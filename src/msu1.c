@@ -20,6 +20,7 @@
 #include "spc7110rtc.h"
 #include "psram_io.h"
 #include "sufami.h"
+#include "qoa.h"
 
 FIL msudata;
 FIL msuaudio;
@@ -576,6 +577,40 @@ static int menusfx_locked = 0;             /* 1 = a caller claimed the DAC exclu
 static uint32_t menusfx_samples = 0;       /* FMV music: stereo samples fed to the DAC since the
                                               loop start -> the FMV video frame clock (sync) */
 
+/* A QOA clip soundtrack (<rom>.qoa) is not streamed through the 2 KB dac_buf like a .pcm.
+   The MCU decodes it into the PSRAM ROM area, idle while the menu runs, and the FPGA SFX
+   fetcher (sfxdma.v) plays it from there exactly like a nav blip -- the MCU cannot write
+   dac_buf itself (the SPI write opcode only reaches PSRAM).  Decoding runs ahead of the
+   fetcher from the menu loop (menu_music_work).
+   The clip is laid out back to back as many times as the area holds (a 30 s clip twice, a
+   6 s one eleven times) and then its first 2 KB once more, so the fetcher runs through the
+   whole run on its own; only the end of the run costs a re-kick, whose prime holds the DAC
+   ~4 ms (measured on a Mk.III).  Re-kicking at every loop made that a click per loop. */
+#define MENUQOA_ADDR     SRAM_ROM_ADDR
+#define MENUQOA_PAD      MSU_DAC_BUFSIZE   /* the clip's first 2 KB again after the run */
+#define MENUQOA_MAX      (SRAM_MENU_ADDR - SRAM_ROM_ADDR - MENUQOA_PAD) /* ~71 s; a longer clip is cut */
+#define MENUQOA_LEAD     0x8000UL   /* decoded before the fetcher starts (~186 ms) */
+#define MENUQOA_GUARD    0x1000UL   /* the fetcher this close to the decoder -> hold the DAC */
+#define MENUQOA_RESUME   0x8000UL   /* ... until the decoder is this far ahead again */
+#define MENUQOA_STEP     80         /* sample frames per decode step: 320 B of stack */
+#define MENUQOA_TICK_B   (176400UL / MS_TO_TICKS(1000))    /* DAC bytes per timer tick */
+#define MENUQOA_TICK_LO  (MENUQOA_TICK_B * 63 / 64)         /* ... give or take 1.6 %, in case */
+#define MENUQOA_TICK_HI  (MENUQOA_TICK_B * 65 / 64)         /*     the DAC clock is not exact */
+#define MENUQOA_STALL    1          /* menuqoa_hold: the decoder fell behind the fetcher */
+#define MENUQOA_PAUSED   2          /* menuqoa_hold: menu_music_pause */
+static qoa_dec_t menuqoa_dec;
+static uint8_t   menuqoa = 0;       /* the playing music clip is a QOA decoded into PSRAM */
+static uint8_t   menuqoa_hold = 0;  /* MENUQOA_STALL | MENUQOA_PAUSED: DAC held, clock frozen */
+static uint8_t   menuqoa_sealed;    /* the run is complete and the pad after it written */
+static uint32_t  menuqoa_wr;        /* bytes of the run decoded so far */
+static uint32_t  menuqoa_copy;      /* where the copy being decoded starts */
+static uint32_t  menuqoa_len;       /* one clip, in bytes; 0 until the first copy is complete */
+static uint32_t  menuqoa_end;       /* the run: whole copies (once sealed) */
+static uint32_t  menuqoa_pos;       /* run byte the last kick started the fetcher at */
+static uint32_t  menuqoa_halves;    /* DAC half-buffers (1 KB) played since the last kick */
+static tick_t    menuqoa_t0;        /* tick of the last kick, pushed forward by every hold */
+static tick_t    menuqoa_held_at;   /* tick the current hold began */
+
 /* Cap on how long one effect may stay "active". Real blips are well under a
    second; this only matters if the DAC never toggles (e.g. an abnormal FPGA
    state) - it stops the effect so the menu loop can't busy-spin on it forever. */
@@ -594,7 +629,8 @@ static void menusfx_close(void) {
    used to leave the DAC re-wrapping the last 2 KB -- the audible "frozen loop".
    Nav blips now play from the FPGA sfxdma engine: each effect's PCM body is
    preloaded into PSRAM once, and the FPGA streams it into dac_buf on its own,
-   immune to any MCU stall.  (FMV info-screen MUSIC still uses the MCU-fed path.)
+   immune to any MCU stall.  (FMV info-screen MUSIC from a .pcm still uses the MCU-fed
+   path; a .qoa one is decoded into PSRAM and played by this same fetcher, see menuqoa.)
 
    The four effects SHARE the 256 KB window as one budget, handed out by a bump
    allocator in first-use order, instead of owning a fixed 64 KB slot each.  At
@@ -709,6 +745,8 @@ void menu_sfx_stop(void) {
   fpga_sfx_disable();   /* abort the FPGA nav-SFX fetcher if one is running */
   dac_pause();          /* freeze the DAC read pointer -> silence (no residual loop; stops music too) */
   menusfx_active = 0;   /* clear the MCU-fed (FMV music) flag */
+  menuqoa = 0;          /* and a QOA clip played by the fetcher */
+  menuqoa_hold = 0;
 }
 
 void menu_sfx_shutdown(void) {
@@ -743,6 +781,155 @@ void menu_sfx_play(const char *filename) {
                   (unsigned long)s->base, (unsigned long)s->bytelen);
 }
 
+/* ---- QOA clip soundtrack (see MENUQOA_ADDR) ---- */
+
+static unsigned menuqoa_read(void *ctx, uint8_t *buf, unsigned len) {
+  UINT br = 0;
+  (void)ctx;
+  ff_sd_offload = 0; sd_offload = 0;   /* a plain RAM read, never the FPGA SD DMA */
+  if(f_read(&menusfx_fil, buf, len, &br) != FR_OK) return 0;
+  return br;
+}
+
+/* Back to the top of the file for the next copy (also the first one); 0 = unusable. */
+static uint32_t menuqoa_rewind(void) {
+  uint8_t hdr[QOA_HEADER_SIZE];
+  f_lseek(&menusfx_fil, 0);
+  if(menuqoa_read(0, hdr, sizeof(hdr)) != sizeof(hdr)) return 0;
+  return qoa_dec_open(&menuqoa_dec, hdr, 44100);
+}
+
+/* Upper bound of where the fetcher reads: the 2 KB prime plus every byte the DAC could
+   have played since the kick (two ticks of slack), frozen while the DAC is held. */
+static uint32_t menuqoa_fetch_max(void) {
+  tick_t now = menuqoa_hold ? menuqoa_held_at : getticks();
+  uint32_t played = (uint32_t)(now - menuqoa_t0 + 2) * MENUQOA_TICK_HI;
+  uint32_t counted = menuqoa_halves * (MSU_DAC_BUFSIZE / 2);
+  return menuqoa_pos + MSU_DAC_BUFSIZE + (played > counted ? played : counted);
+}
+
+static void menuqoa_hold_set(uint8_t bit, int on) {
+  uint8_t was = menuqoa_hold;
+  if(on) menuqoa_hold |= bit; else menuqoa_hold &= ~bit;
+  if(!was && menuqoa_hold) { dac_pause(); menuqoa_held_at = getticks(); }
+  else if(was && !menuqoa_hold) { menuqoa_t0 += getticks() - menuqoa_held_at; dac_play(); }
+}
+
+/* (Re)start the fetcher at run byte `pos`, with the pad after the run in its range.  At the
+   end of the run the fetcher reads the pad (the start of the clip), and the first
+   half-buffer flip after the DAC crosses the end re-kicks it at the clip byte the DAC has
+   reached: the seam is the prime, plus the few samples the pump took to see the flip heard
+   twice, never a silence of the leftover half-buffer. */
+static void menuqoa_kick(uint32_t pos) {
+  dac_pause();
+  dac_reset(0);
+  fpga_sfx_play(MENUQOA_ADDR + pos, (menuqoa_sealed ? menuqoa_end : MENUQOA_MAX) + MENUQOA_PAD - pos);
+  menuqoa_pos = pos;
+  menuqoa_halves = 0;
+  menusfx_fpga_prev = fpga_status();
+  menuqoa_t0 = getticks();
+  if(!menuqoa_hold) dac_play();
+  printf("qoa: kick @%lu %lu/%lu\n", (unsigned long)pos, (unsigned long)menuqoa_wr,
+         (unsigned long)menuqoa_len);
+}
+
+/* The run is complete: its end is `menuqoa_wr`, cut back to whole copies, and the 2 KB
+   after it get the start of the clip. */
+static void menuqoa_seal(uint8_t *buf, uint16_t bufsize) {
+  uint32_t at = 0;
+  if(!menuqoa_len) menuqoa_len = menuqoa_wr;          /* the clip did not fit the area */
+  menuqoa_end = menuqoa_len ? menuqoa_wr / menuqoa_len * menuqoa_len : 0;
+  menuqoa_wr = menuqoa_end;
+  menuqoa_sealed = 1;
+  while(menuqoa_len && at < MENUQOA_PAD) {
+    uint32_t src = at % menuqoa_len;
+    uint32_t n = MENUQOA_PAD - at;
+    if(n > bufsize) n = bufsize;
+    if(n > menuqoa_len - src) n = menuqoa_len - src;
+    sram_readblock(buf, MENUQOA_ADDR + src, (uint16_t)n);
+    sram_writeblock(buf, MENUQOA_ADDR + menuqoa_end + at, (uint16_t)n);
+    at += n;
+  }
+}
+
+/* Decode up to `bytes` more of the run into PSRAM.  A copy ends where the decoder stops:
+   the end of the file, or a broken spot (the first copy then defines the clip, and every
+   copy stops at the same place).  The next copy starts only if it fits whole. */
+static __attribute__((noinline)) void menuqoa_decode(uint32_t bytes) {
+  int16_t pcm[MENUQOA_STEP * 2];
+  while(bytes && !menuqoa_sealed) {
+    uint32_t room = (MENUQOA_MAX - menuqoa_wr) / 4;
+    unsigned want = room < MENUQOA_STEP ? (unsigned)room : MENUQOA_STEP;
+    unsigned got = want ? qoa_dec_run(&menuqoa_dec, pcm, want, menuqoa_read, 0) : 0;
+    if(got) {
+      sram_writeblock(pcm, MENUQOA_ADDR + menuqoa_wr, got * 4);
+      menuqoa_wr += got * 4;
+    }
+    if(!want || got < want) {
+      if(!menuqoa_len && want) menuqoa_len = menuqoa_wr;   /* the first copy is the clip */
+      if(!menuqoa_len || menuqoa_wr - menuqoa_copy != menuqoa_len
+         || menuqoa_wr + menuqoa_len > MENUQOA_MAX || !menuqoa_rewind()) {
+        menuqoa_seal((uint8_t *)pcm, sizeof(pcm));
+        break;
+      }
+      menuqoa_copy = menuqoa_wr;
+    }
+    bytes = bytes > got * 4 ? bytes - got * 4 : 0;
+  }
+}
+
+/* Open a .qoa clip: decode the lead-in, then hand it to the fetcher.  The clip must be
+   44.1 kHz mono/stereo (what the DAC plays); anything else fails like a bad .pcm. */
+static int menuqoa_play(void) {
+  if(!menuqoa_rewind()) return 0x02;
+  menuqoa_wr = menuqoa_copy = menuqoa_len = menuqoa_end = 0;
+  menuqoa_hold = 0;
+  menuqoa_sealed = 0;
+  menuqoa_decode(MENUQOA_LEAD);
+  if(!menuqoa_wr) return 0x02;           /* not even the first slice decoded */
+  if(!(current_features & FEAT_MSU1))
+    fpga_set_features(current_features | FEAT_MSU1);
+  menuqoa = 1;
+  menuqoa_kick(0);
+  return 0xA0;
+}
+
+/* Cheap enough for every pump site (no SD access): follow the DAC, hold it if the decoder
+   fell behind, and re-kick at the end of the run. */
+static void menuqoa_pump(void) {
+  uint16_t now = fpga_status();
+  uint32_t at;
+  if((now ^ menusfx_fpga_prev) & MSU_FPGA_STATUS_DAC_READ_MSB) menuqoa_halves++;
+  menusfx_fpga_prev = now;
+  if(menuqoa_hold) return;
+  {
+    /* a pump that came too late to see every flip: the timer says at least this many */
+    tick_t el = getticks() - menuqoa_t0;
+    uint32_t lb = el > 2 ? (uint32_t)(el - 2) * MENUQOA_TICK_LO / (MSU_DAC_BUFSIZE / 2) : 0;
+    if(lb > menuqoa_halves) menuqoa_halves = lb;
+  }
+  at = menuqoa_pos + menuqoa_halves * (MSU_DAC_BUFSIZE / 2);     /* the DAC's run byte */
+  /* the FMV frame clock: samples fed (2 KB ahead of the DAC, like the .pcm path) into
+     the current copy of the clip */
+  menusfx_samples = (menuqoa_len ? (at + MSU_DAC_BUFSIZE) % menuqoa_len
+                                 : at + MSU_DAC_BUFSIZE) / 4;
+  if(menuqoa_sealed) {
+    if(menuqoa_end && at >= menuqoa_end) menuqoa_kick((at - menuqoa_end) % menuqoa_len);
+  } else if(menuqoa_wr < menuqoa_fetch_max() + MENUQOA_GUARD) {
+    menuqoa_hold_set(MENUQOA_STALL, 1);
+  }
+}
+
+/* The decoding half of the QOA clip, from the idle menu loop only (it reads the card):
+   one short step per call, so a pending command waits at most one step. */
+void menu_music_work(void) {
+  if(!menuqoa || !menusfx_active) return;
+  if(!menuqoa_sealed) menuqoa_decode(MENUQOA_STEP * 4);
+  if((menuqoa_hold & MENUQOA_STALL)
+     && (menuqoa_sealed || menuqoa_wr >= menuqoa_fetch_max() + MENUQOA_RESUME))
+    menuqoa_hold_set(MENUQOA_STALL, 0);
+}
+
 void menu_sfx_silence(void) {
   fpga_sfx_play(SRAM_MENU_SFX_ADDR, 0);
 }
@@ -755,6 +942,7 @@ void menu_sfx_pump(void) {
      where the DAC never toggles, so menusfx_active can't latch forever and
      the menu loop can't busy-spin on a stuck effect. */
   if(!menusfx_loop_forever && time_after(getticks(), menusfx_deadline)) { menu_sfx_stop(); return; }
+  if(menuqoa) { menuqoa_pump(); return; }
   now = fpga_status();
   /* refill the half the FPGA just finished reading (DAC_READ_MSB toggles) */
   if((now & MSU_FPGA_STATUS_DAC_READ_MSB) != (menusfx_fpga_prev & MSU_FPGA_STATUS_DAC_READ_MSB)) {
@@ -795,13 +983,24 @@ int menu_music_play(const char *filename) {
   menu_sfx_stop();                     /* free the DAC from any blip */
   menusfx_close();                     /* always reopen fresh (music isn't retriggered per blip) */
   if(f_open(&menusfx_fil, (const TCHAR*)filename, FA_READ) != FR_OK) return 0x01;
-  if(f_read(&menusfx_fil, magic, 4, &br) != FR_OK || br != 4 || memcmp(magic, "MSU1", 4)) {
-    f_close(&menusfx_fil); return 0x02;   /* not a valid MSU-1 PCM -> silent */
-  }
   /* No fast-seek linkmap: a multi-MB clip overflows CLTBL_SIZE anyway, and BUILDING it scans
      the whole cluster chain -- a slow open. Stream sequentially without it; the only seek is
      the cheap once-per-loop rewind to the loop point (near the file start). */
   menusfx_fil.cltbl = 0;
+  if(f_read(&menusfx_fil, magic, 4, &br) == FR_OK && br == 4 && !memcmp(magic, "qoaf", 4)) {
+    int st;
+    menusfx_open = 1;
+    menusfx_open_name = 0;
+    menusfx_loop_forever = 1;
+    st = menuqoa_play();
+    if(st != 0xA0) { menusfx_close(); menusfx_loop_forever = 0; return st; }
+    menusfx_active = 1;
+    DBG_MSU1 printf("music (qoa): %s\n", filename);
+    return st;
+  }
+  if(br != 4 || memcmp(magic, "MSU1", 4)) {
+    f_close(&menusfx_fil); return 0x02;   /* not a valid MSU-1 PCM -> silent */
+  }
   /* loop point (samples) from the header, clamped; default = loop the whole clip */
   f_lseek(&menusfx_fil, MSU_PCM_OFFSET_LOOPPOINT);
   f_read(&menusfx_fil, &menusfx_loop_point, sizeof(menusfx_loop_point), &br);
@@ -872,10 +1071,18 @@ void menu_music_stop(void) {
    clock, not a file position).  f_tell runs up to one DAC buffer (2 KB = ~11 ms) ahead of
    what is actually audible, which is invisible on a progress bar. */
 uint32_t menu_music_tell(void) {
+  /* a QOA clip answers in decoded bytes, behind a pretend .pcm header, so the caller's
+     arithmetic does not care which kind is playing */
+  if(menuqoa) {
+    uint32_t played = menuqoa_pos + menuqoa_halves * (MSU_DAC_BUFSIZE / 2);
+    return MSU_PCM_OFFSET_WAVEDATA + (menuqoa_len ? played % menuqoa_len : played);
+  }
   return menusfx_open ? (uint32_t)f_tell(&menusfx_fil) : 0;
 }
 
 uint32_t menu_music_size(void) {
+  if(menuqoa) return MSU_PCM_OFFSET_WAVEDATA
+                     + (menuqoa_len ? menuqoa_len : menuqoa_wr + menuqoa_dec.left * 4);
   return menusfx_open ? (uint32_t)f_size(&menusfx_fil) : 0;
 }
 
@@ -887,6 +1094,7 @@ uint32_t menu_music_size(void) {
    DAC_READ_MSB bit stops toggling, so menu_sfx_pump() turns into a no-op on its own. */
 void menu_music_pause(int paused) {
   if(!menusfx_active || !menusfx_loop_forever) return;
+  if(menuqoa) { menuqoa_hold_set(MENUQOA_PAUSED, paused); return; }
   if(paused) dac_pause(); else dac_play();
 }
 

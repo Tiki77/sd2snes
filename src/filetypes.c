@@ -96,6 +96,7 @@ static uint8_t is_card_data_ext(const char *name) {
     "yml",                              /* cheats / game info / patch meta / config */
     "cfg",                              /* lastgame.cfg, favorites.cfg */
     "cov", "gcv", "gss", "fmv", "man",  /* box art, info screen, clip, manual */
+    "qoa",                              /* clip soundtrack (a .pcm one is TYPE_PCM) */
     "msu",                              /* MSU-1 marker (its tracks are TYPE_PCM) */
   };
   const char *ext = strrchr(name, '.');

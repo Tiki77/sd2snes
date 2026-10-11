@@ -1677,6 +1677,7 @@ static const struct patch_asset patch_assets_rom[] = {
     { GAMEINFO_DIR,  ".gss"  },   /* screenshot                              */
     { GAMEINFO_DIR,  ".fmv"  },   /* clip                                    */
     { GAMEINFO_DIR,  ".pcm"  },   /* clip audio                              */
+    { GAMEINFO_DIR,  ".qoa"  },   /* clip audio, compressed (wins over .pcm) */
     { GAMEINFO_DIR,  ".yml"  },   /* metadata (carries the long description) */
     { GAMEINFO_DIR,  ".man"  },   /* guide 1                                 */
     { CHEAT_BASEDIR, ".yml"  },
