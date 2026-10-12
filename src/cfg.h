@@ -71,7 +71,6 @@
 #define CFG_GAME_INFO_VIDEO              ("GameInfoVideo")
 #define CFG_GAME_INFO_MUSIC             ("GameInfoMusic")
 #define CFG_ENABLE_CHEAT_OVERLAY         ("EnableCheatOverlay")
-#define CFG_ENABLE_BPS_COPIER            ("EnableBpsCopier")
 #define CFG_BUS_COMPAT                   ("BusCompat")
 #define CFG_A26_VIDEO_WIDTH              ("A26VideoWidth")
 #define CFG_CC_TIME_LIMIT                ("CompCartTimeLimit")
@@ -157,7 +156,7 @@ typedef struct __attribute__ ((__packed__)) _cfg_block {
   uint8_t  enable_wifi;             /* CFG @ $13F: RESERVED WiFi companion master switch (0=off). No ESP link in this branch; placed here (NOT $BD: that overlapped bgm_name @ $BC) so the future Companion port has no cfg-offset drift. */
   uint8_t  game_info_video;         /* CFG @ $140: play the animated .fmv clip on the game info screen (off -> static .gss snapshot) */
   uint8_t  game_info_music;         /* CFG @ $141: play the clip's .pcm soundtrack (only while the .fmv clip is shown; requires game_info_video) */
-  uint8_t  enable_bps_copier;       /* CFG @ $142: apply BPS via the FPGA copier (fast) instead of byte-by-byte. Only LoROM/HiROM, no special chip, and output+source-backup fit below the menu; everything else falls back to byte-by-byte. Default ON (hardware-validated; the core probe falls back safely on cores without the copier). */
+  uint8_t  bps_copier_rsvd;         /* CFG @ $142: RETIRED in 2.18 (was EnableBpsCopier, YAML only, default ON): a BPS is now always applied via the FPGA copier when the loaded core carries it, byte-by-byte otherwise. The byte stays at $142 for CFG offset stability; nothing reads it. */
   uint8_t  clear_ppu_rsvd;          /* CFG @ $143: RETIRED in 2.17 (was ClearPpuOnBoot: the menu now clears VRAM/CGRAM/OAM before EVERY launch, game_handshake). The byte stays at $143 for CFG offset stability; nothing reads it. */
   uint8_t  bus_compat;              /* CFG @ $144: bus-timing compat mode. ON restores the pre-1.11.1 (56dd166-reverted) pulse-end-strobe time sharing -> releases the cart databus EARLIER, avoiding bus contention on timing-sensitive 1-CHIP consoles (fixes games that hang or glitch there, e.g. DKC — the Nintendo-logo freeze is just the easiest repro; = v1.11.0 behavior). Default OFF (the wider window mrehkopf reverted TO, which most units need). Drives FPGA featurebits[13] via fpga_set_features. */
   uint8_t  enable_game_manual;      /* CFG @ $145: RETIRED in 2.17 (the EnableGameManual YAML flag and the "Game manual" menu toggle are gone: the guides are always on whenever a <rom>.man exists). The byte stays at $145 for CFG offset stability; nothing reads it. */

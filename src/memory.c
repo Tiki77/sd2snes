@@ -453,12 +453,11 @@ static uint8_t load_apply_patch(const load_ctx_t *c) {
      D3 forced headerless). */
   ips_header_adj_used = 0;
   /* Approach B: drive the FPGA copier from the MCU (the SNES is held in reset
-     here) for a BPS when EnableBpsCopier is on AND the currently-loaded core
-     carries the copier (probe).  IPS, the gate off, or a core without the copier
-     fall through to the byte-by-byte apply.  A copier op failure returns 0 and is
+     here) for a BPS when the currently-loaded core carries the copier (probe).
+     IPS or a core without the copier fall through to the byte-by-byte apply.  A copier op failure returns 0 and is
      treated as a patch error (the probe makes a runtime failure unlikely). */
   uint32_t ips_end;
-  uint8_t  copier_avail = CFG.enable_bps_copier && patch_copier_available();
+  uint8_t  copier_avail = patch_copier_available();
   if(copier_avail) {
     extern uint32_t patch_targetread_bytes;
     printf("BPS copier path (MCU-driven, SNES in reset)\n");
@@ -487,8 +486,8 @@ static uint8_t load_apply_patch(const load_ctx_t *c) {
                           SRAM_ROM_ADDR + romprops.load_address,
                           romprops.romsize_bytes, ips_header_size,
                           romprops.header_address);
-    /* B3 = gate on but copier not in this core (probe failed); B0 = gate off. */
-    sram_writebyte(CFG.enable_bps_copier ? 0xB3 : 0xB0, 0xFF0724L);
+    /* B3 = copier not in this core (probe failed) or an IPS. */
+    sram_writebyte(0xB3, 0xFF0724L);
   }
   ips_pending_index = 0;
   /* IPS header-convention breadcrumb (set by ips_apply; D0 for BPS):

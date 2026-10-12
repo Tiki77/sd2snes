@@ -417,7 +417,6 @@ static void cfg_make_allchanged(void) {
   CFG.enable_wifi = 1;
   CFG.game_info_video = 0;
   CFG.game_info_music = 0;
-  CFG.enable_bps_copier = 0;
   CFG.bus_compat = 1;
   /* L+R+X+Right: 4 buttons, includes a shoulder, and no subset of any reserved
      gesture -- cfg_check_menu_combo() has to accept it verbatim ("rXLR"). */

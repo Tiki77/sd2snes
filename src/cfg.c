@@ -71,7 +71,7 @@ _Static_assert(offsetof(cfg_t, show_game_info) == 0x13E, "cfg_t.show_game_info m
 _Static_assert(offsetof(cfg_t, enable_wifi) == 0x13F, "cfg_t.enable_wifi must stay at CFG_ADDR+$13F (RESERVED for the Companion port; NOT $BD which overlapped bgm_name @ $BC)");
 _Static_assert(offsetof(cfg_t, game_info_video) == 0x140, "cfg_t.game_info_video must stay at CFG_ADDR+$140");
 _Static_assert(offsetof(cfg_t, game_info_music) == 0x141, "cfg_t.game_info_music must stay at CFG_ADDR+$141");
-_Static_assert(offsetof(cfg_t, enable_bps_copier) == 0x142, "cfg_t.enable_bps_copier must stay at CFG_ADDR+$142");
+_Static_assert(offsetof(cfg_t, bps_copier_rsvd) == 0x142, "cfg_t.bps_copier_rsvd must stay at CFG_ADDR+$142");
 _Static_assert(offsetof(cfg_t, clear_ppu_rsvd) == 0x143, "cfg_t.clear_ppu_rsvd must stay at CFG_ADDR+$143");
 _Static_assert(offsetof(cfg_t, bus_compat) == 0x144, "cfg_t.bus_compat must stay at CFG_ADDR+$144");
 _Static_assert(offsetof(cfg_t, enable_game_manual) == 0x145, "cfg_t.enable_game_manual must stay at CFG_ADDR+$145");
@@ -147,7 +147,7 @@ const cfg_t CFG_DEFAULT = {
   .enable_wifi = 0,
   .game_info_video = 1,
   .game_info_music = 1,
-  .enable_bps_copier = 1,
+  .bps_copier_rsvd = 1,      /* retired, keeps the byte the old default had */
   .bus_compat = 0,
   .enable_game_manual = 1,
   .enable_sram_slots = 1,
@@ -314,7 +314,6 @@ static const cfg_item_t cfg_items[] = {
   CFGI(CFG_SORT_FAVORITES,              sort_favorites,             CK_BOOL,    0),
   CFGI(CFG_ENABLE_CHEAT_OVERLAY,        enable_cheat_overlay,       CK_BOOL,    0),
   CFGI(CFG_INGAME_BUTTONS_MENU,         ingame_buttons_menu,        CK_BUTTONS, 0),
-  CFGI(CFG_ENABLE_BPS_COPIER,           enable_bps_copier,          CK_BOOL,    0),
   CFGI(CFG_BUS_COMPAT,                  bus_compat,                 CK_BOOL,    0),
   CFGI(CFG_A26_VIDEO_WIDTH,             a26_video_width,            CK_NUM,     0x10),
   CFGI(CFG_CC_TIME_LIMIT,               cc_time_limit,              CK_NUM,     0xf3),

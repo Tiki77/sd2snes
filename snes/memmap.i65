@@ -971,7 +971,7 @@
 #define CFG_ENABLE_WIFI                 CFG_ADDR+$013F /* RESERVED (Companion master switch). Placed at $13F (NOT $BD: that overlapped CFG_MENU_MUSIC_FILE $BC, 128B) so the WiFi port slots in with no cfg-offset drift. Lockstep with src/cfg.h. */
 #define CFG_GAME_INFO_VIDEO             CFG_ADDR+$0140 /* play the .fmv clip on the game info screen (off -> static .gss snapshot) */
 #define CFG_GAME_INFO_MUSIC             CFG_ADDR+$0141 /* play the clip's .pcm soundtrack (requires CFG_GAME_INFO_VIDEO) */
-#define CFG_ENABLE_BPS_COPIER           CFG_ADDR+$0142 /* apply BPS via FPGA copier; lockstep with src/cfg.h */
+#define CFG_BPS_COPIER_RSVD             CFG_ADDR+$0142 /* RETIRED in 2.18 (was EnableBpsCopier: BPS always goes through the FPGA copier when the core has one); the byte only keeps the offsets. Lockstep with src/cfg.h. */
 #define CFG_CLEAR_PPU_RSVD              CFG_ADDR+$0143 /* RETIRED in 2.17 (was ClearPpuOnBoot: the PPU is now cleared before every launch); the byte only keeps the offsets. Lockstep with src/cfg.h. */
 #define CFG_BUS_COMPAT                  CFG_ADDR+$0144 /* bus-timing compat: narrow databus window (v1.11.0) for timing-sensitive 1-CHIP consoles; drives featurebits[13]; lockstep with src/cfg.h */
 #define CFG_ENABLE_SRAM_SLOTS           CFG_ADDR+$0146 /* multi-slot battery SRAM -- ALWAYS ON since 2.15 (the EnableSramSlots YAML flag + menu toggle were retired; cfg.c forces the byte to 1, kept at $0146 for offset stability). The SAVES tab is the 4-slot selector. Lockstep with src/cfg.h. */
