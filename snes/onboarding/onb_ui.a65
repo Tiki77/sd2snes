@@ -135,8 +135,10 @@ onb_hp_bg2:
   .al : .xl
   lda [onb_print_ptr]
   and #$00ff
-  cmp #$0002                  ; BTN_TOGGLE (gen_onb_lang.py): green on/off, no cell
-  bne +
+  cmp #$0002                  ; BTN_TOGGLE / BLUE_TOGGLE (gen_onb_lang.py): 2 green,
+  bcc +                       ; 3 blue, on/off, no cell
+  cmp #$0004
+  bcs +
   jsr onb_hp_toggle
   bra onb_hp_bg2
 + cmp #ONB_CJK_MARK           ; a CJK string's marker: at an even column it takes none
@@ -162,7 +164,9 @@ onb_hp_bg1:
   lda [onb_print_ptr]
   and #$00ff
   cmp #$0002
-  bne +
+  bcc +
+  cmp #$0004
+  bcs +
   jsr onb_hp_toggle
   bra onb_hp_bg1
 + cmp #ONB_CJK_MARK           ; the marker at an odd column: a blank, so the glyphs that
@@ -339,13 +343,35 @@ onb_hp2_cjk:
   jmp onb_hp_bg2
 + jmp onb_hp_end
 
-; onb_hp_toggle: step over a BTN_TOGGLE byte and flip the cell palette between the
-;   line's (white, 0) and the green of the key hints (ONB_PAL_DIM, 2): bit 11 of the
-;   tilemap word. .al/.xl in and out, X/Y untouched.
+; onb_hp_toggle: step over a toggle byte (A = 2 green, 3 blue: the palette it turns on,
+;   ONB_PAL_DIM / ONB_PAL_CYAN) and switch the cell palette (bits 10-12 of the tilemap
+;   word): to that one, or back to the line's (onb_print_pal) when it is already on.
+;   .al/.xl in and out, X/Y untouched.
 onb_hp_toggle:
   .al : .xl
   inc onb_print_ptr
+  xba                         ; palette << 10
+  asl
+  asl
+  pha
   lda @onb_print_temp
-  eor #$0800
+  and #$1c00
+  cmp $01, s
+  beq ohpt_line
+  lda @onb_print_temp
+  and #$e3ff
+  ora $01, s
+  sta @onb_print_temp
+  pla
+  rts
+ohpt_line:
+  .al : .xl
+  pla
+  lda @onb_print_pal
+  and #$00ff
+  xba
+  asl
+  asl
+  ora #$2000
   sta @onb_print_temp
   rts
