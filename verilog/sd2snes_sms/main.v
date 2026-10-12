@@ -534,7 +534,10 @@ ctx snes_ctx (
   .OE_PARD_ENABLE(ctx_pard_enable),
 
   .BUS_WRQ(CTX_WRQ),
-  .BUS_RDY(CTX_RDY),
+  // SMS: no savestate / in-game menu here, so nothing consumes the PSRAM mirror of PPU/WRAM/
+  // APU writes; every mirrored byte of the NMI's DMA just stole a slot from the Z80 and the
+  // translation. Never ready => ctx never requests a write.
+  .BUS_RDY(1'b0),
 
   .snescmd_unlock(snescmd_unlock),
 
@@ -927,12 +930,19 @@ always @(posedge CLK2)
     else               sms_pad_raw[15:8] <= SNES_DATA;   // $EF0001 JOY1H
   end
 wire [7:0] sms_pad1 = ~{2'b00,
-   (sms_pad_raw[14] | sms_pad_raw[7]),   // Button2 = SNES Y|A
-   (sms_pad_raw[15] | sms_pad_raw[7]),   // Button1 = SNES B|A (jump)
+   (sms_pad_raw[7]  | sms_pad_raw[6]),   // Button2 = SNES A|X
+   (sms_pad_raw[15] | sms_pad_raw[14]),  // Button1 = SNES B|Y
    sms_pad_raw[8],                       // Right
    sms_pad_raw[9],                       // Left
    sms_pad_raw[10],                      // Down
    sms_pad_raw[11]};                     // Up
+
+// Pause button = SNES Start (rising edge) -> NMI pulse into the Z80
+reg sms_start_d = 1'b0, sms_pause = 1'b0;
+always @(posedge CLK2) begin
+  sms_start_d <= sms_pad_raw[12];
+  sms_pause   <= sms_pad_raw[12] & ~sms_start_d;
+end
 
 // double-buffer with a ready handshake. The FPGA writes the BACK set; on FRAME_DONE
 // the back is complete (sms_ready=1). The player writes $EF0005 at NMI END (after its
@@ -955,6 +965,7 @@ reg [24:0] sms_ce_acc = 25'd0; reg sms_ce = 1'b0;
 always @(posedge CLK2) begin
   {sms_ce, sms_ce_acc} <= {1'b0, sms_ce_acc} + 26'd1251194;
 end
+reg sms_rd_last = 1'b0;  // the last SMS slot went to the ROM fetch (arbiter fairness)
 reg sms_wr_busy = 1'b0;   // double-issue guard: block re-latch until BUF_WRQ drops
 
 // SMS request latches; the STATE FSM services them on free slots
@@ -980,12 +991,13 @@ sms_core sms_inst (
   .CLK(CLK2), .RST(SNES_DEADr), .CE(sms_ce),
   .ROM_RRQ(sms_rom_rrq), .ROM_ADDR(sms_rom_addr), .ROM_DATA(SMS_DINr), .ROM_RDY(sms_rom_rdy),
   .BUF_WRQ(sms_buf_wrq), .BUF_ADDR(sms_buf_addr), .BUF_DATA(sms_buf_data), .BUF_WACK(sms_buf_wack),
-  .PAD1(sms_pad1), .FRAME_DONE(sms_frame_done),
+  .PAD1(sms_pad1), .PAUSE(sms_pause), .FRAME_DONE(sms_frame_done),
   .DBG_PC(), .DBG_VRAM_WRITES(), .DBG_DISPLAY_ON(), .DBG_TR_BUSY(),
   .DBG_VRAM_ADDR(14'd0), .DBG_VRAM_DATA(), .DBG_CRAM_ADDR(5'd0), .DBG_CRAM_DATA(),
   .DBG_VREGS(), .DBG_FORCE_TR(1'b0), .TR_GATE(sms_ready),
   .BACK_SET(~sms_buf_front),       // the set written this pass is the one NOT being read (front)
   .DBG_FORCE_FULL(1'b0),
+  .DBG_SWAP(sms_swap), .DBG_SWAP_OK(sms_ready),
   .APU_DAT(SMS_APU_DAT), .APU_CLK_EDGE(SMS_APU_CLK_EDGE)
 );
 
@@ -1158,6 +1170,20 @@ always @(posedge CLK2) begin
           STATE <= ST_CTX_WR_ADDR;
           ST_MEM_DELAYr <= ROM_CYCLE_LEN;
         end
+        else if(SMS_RD_PENDr & ~(SMS_WR_PENDr & sms_rd_last)) begin
+          // SMS ROM fetch and translation write share the slots 1:1 when both wait: a Z80
+          // in a tight loop re-requests the ROM at once and would otherwise starve the
+          // translation for ever. Both rank above the MCU (its sram_reliable() polling
+          // used to eat ~40% of the slots).
+          STATE <= ST_SMS_RD_ADDR;
+          ST_MEM_DELAYr <= ROM_CYCLE_LEN;
+          sms_rd_last <= 1'b1;
+        end
+        else if(SMS_WR_PENDr) begin
+          STATE <= ST_SMS_WR_ADDR;
+          ST_MEM_DELAYr <= ROM_CYCLE_LEN;
+          sms_rd_last <= 1'b0;
+        end
         else if(MCU_RD_PENDr) begin
           STATE <= ST_MCU_RD_ADDR;
           ST_MEM_DELAYr <= ROM_CYCLE_LEN;
@@ -1171,14 +1197,6 @@ always @(posedge CLK2) begin
         end
         else if(DMA_WR_PENDr) begin
           STATE <= ST_DMA_WR_ADDR;
-          ST_MEM_DELAYr <= ROM_CYCLE_LEN;
-        end
-        else if(SMS_RD_PENDr) begin
-          STATE <= ST_SMS_RD_ADDR;
-          ST_MEM_DELAYr <= ROM_CYCLE_LEN;
-        end
-        else if(SMS_WR_PENDr) begin
-          STATE <= ST_SMS_WR_ADDR;
           ST_MEM_DELAYr <= ROM_CYCLE_LEN;
         end
       end

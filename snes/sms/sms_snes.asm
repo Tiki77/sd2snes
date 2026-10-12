@@ -25,6 +25,14 @@
 !OAM_BANK     = $E3
 !BG1_CHAR = $0000
 !BG1_MAP  = $2000
+; BG2 = the underlay for palette-1 background cells: the SMS shows CRAM[16] where a
+; palette-1 tile has colour 0, the SNES draws colour 0 transparent (the backdrop,
+; CRAM[0], would show). BG2 holds a solid tile (tile 1, colour 1 of palette 2 =
+; CGRAM[33] = CRAM[16]) under every such cell, in low priority: BG1 and the OBJ
+; stay on top of it exactly as on the SMS.  Map high byte is constant $08 (palette
+; 2), the FPGA supplies one low byte per cell (0 empty / 1 solid) at $E3:1000.
+!BG2_CHAR = $3000
+!BG2_MAP  = $2400
 
 lorom
 
@@ -45,6 +53,9 @@ Reset:
                         ; through the $80 reset must be released before it
                         ; can fire again (see the IGR block in the NMI)
 
+    stz $12             ; DP $12 = 0: no front uploaded yet (the 1st NMI uploads for sure)
+    lda.b #$80
+    sta $1A             ; DP $1A = OAM entries on screen: unknown, so the 1st upload sends all 128
     lda.b #$8F
     sta $2100
     stz $4200
@@ -58,19 +69,115 @@ Reset:
     sta $2105           ; BGMODE 1 (BG1 4bpp)
     lda.b #$20
     sta $2107           ; BG1SC: map base word $2000, 32x32
-    lda.b #$00
-    sta $210B           ; BG1 char base word $0000
+    lda.b #$24
+    sta $2108           ; BG2SC: map base word $2400, 32x32
+    lda.b #$30
+    sta $210B           ; BG1 char base word $0000, BG2 char base word $3000
+    stz $210F           ; BG2 scroll 0
+    stz $210F
+    stz $2110
+    stz $2110
+    stz $20             ; DP $20..$23 = BG2 columns whose VRAM map holds solid cells
+    stz $21
+    stz $22
+    stz $23
     lda.b #$00
     sta $2101           ; OBSEL: OBJ char base $0000
-    lda.b #$11
-    sta $212C           ; TM: BG1 + OBJ
+    stz $212C           ; TM off until the first frame (the IRQ opens it, see NMI/IRQ)
+    lda.b #$13
+    sta $06             ; DP $06 = TM value while the picture is on (0 = VDP display off)
+    stz $05             ; DP $05 = IRQ phase (0 = next IRQ opens the picture at line 16,
+                        ; 1 = closes at 208, 2 = writes the game HOFS at 32 = scroll lock)
+    stz $1F             ; DP $1F = scroll lock (VDP reg0 bit6): top 2 tile rows keep HOFS 0
+    lda.b #$10
+    sta $4209           ; VTIME = 16: the IRQ fires in the hblank of line 16 (last border row)
+    stz $420A
+    lda.b #$14
+    sta $4207           ; HTIME = $114 = dot 276, inside the hblank
+    lda.b #$01
+    sta $4208
+    lda.b #$80
+    sta $4201           ; WRIO bit7 high: $2137 can latch the V counter
+
+    ; borders: window 1 = x 0..7 is the SMS left-column mask (reg0 bit5,
+    ; switched per frame through $212E in the NMI); the V-IRQ pair blanks the
+    ; lines outside the 192 SMS lines (no HDMA: it breaks the NMI DMAs here).
+    ; The menu leaves $21xx behind, so set every window/colour-math register.
+    stz $2123
+    stz $2124
+    stz $2125
+    stz $212A
+    stz $212B
+    stz $212E
+    stz $212F
+    stz $2130
+    stz $2131
+    stz $2126           ; W1 left  = 0
+    lda.b #$07
+    sta $2127           ; W1 right = 7
+    lda.b #$22
+    sta $2123           ; BG1 + BG2: window 1 enabled (inside = masked)
+    sta $2125           ; OBJ: window 1 enabled
+    ; backdrop colour: the core keeps CGRAM[0] = CRAM[0] (an opaque BG colour 0),
+    ; so the real backdrop (reg7) is painted only where the SMS shows it (masked
+    ; column, border lines): colour window 1 clips to black there and the fixed
+    ; colour $2132 is added to the backdrop layer. DP $08 = $2130 / DP $09 = W1
+    ; right edge while the picture is on; the border band always uses $90 / $FF.
+    lda.b #$22
+    sta $2125           ; OBJ + colour window: window 1 enabled
+    lda.b #$20
+    sta $2131           ; colour math on the backdrop only, add
+    lda.b #$90
+    sta $2130           ; clip to black inside W1, math only inside W1
+    lda.b #$FF
+    sta $2127           ; border band: W1 = the whole line
+    lda.b #$30
+    sta $08             ; picture band, no mask: no colour math at all
+    lda.b #$07
+    sta $09
+
+    ; BG2 VRAM (screen is in forced blank): tile 0 empty, tile 1 solid colour 1,
+    ; map = tile 0 / palette 2 everywhere (word $0800)
+    lda.b #$80
+    sta $2115
+    ldx.w #!BG2_CHAR
+    stx $2116
+    ldx.w #16
+Bg2InitT0:
+    stz $2118
+    stz $2119
+    dex
+    bne Bg2InitT0
+    ldx.w #8
+    lda.b #$FF
+Bg2InitT1:
+    sta $2118           ; bitplane 0 = $FF, plane 1 = 0
+    stz $2119
+    dex
+    bne Bg2InitT1
+    ldx.w #8
+Bg2InitT1b:
+    stz $2118           ; planes 2/3 = 0
+    stz $2119
+    dex
+    bne Bg2InitT1b
+    ldx.w #!BG2_MAP
+    stx $2116
+    ldx.w #$0400
+    lda.b #$08
+Bg2InitMap:
+    stz $2118
+    sta $2119
+    dex
+    bne Bg2InitMap
 
     jsr SmsApuUnmute    ; open the console's cart-DAC audio path
 
-    lda.b #$81
-    sta $4200           ; NMI + auto-joypad
+    lda.b #$B1
+    sta $4200           ; NMI + H/V-IRQ + auto-joypad
     lda.b #$0F
     sta $2100
+    cli
 
 MainLoop:
     wai
@@ -83,10 +190,33 @@ NMI:
     phy
     sep #$20
 
+    ; Same front as the one already in VRAM/CGRAM/OAM (the pass serial at $E2:0210
+    ; did not move: swap was empty)? Then there is nothing to upload and the
+    ; screen never needs to blank.  DP $10/$11 = serial uploaded, $12 = valid.
+    lda $12
+    cmp.b #$09
+    bcc NeedUpload
+    rep #$20
+    lda.l $E20210
+    cmp $10
+    sep #$20
+    bne NeedUpload
+    jmp SkipUpload
+NeedUpload:
+    rep #$20
+    lda.l $E20210
+    sta $10
+    sep #$20
+    lda $12             ; upload counter: 1..8 = full columns, 9 = trimmed from now on
+    cmp.b #$09
+    bcs UpCntDone
+    inc $12
+UpCntDone:
+
     lda.b #$8F
     sta $2100           ; force blank for DMA
 
-    ; CGRAM 512B ($E2) -> CGRAM 0
+    ; CGRAM: BG 64 B ($E2:0000 -> CGRAM 0) + OBJ 32 B ($E2:0100 -> CGRAM 128)
     stz $2121
     lda.b #$00
     sta $4300
@@ -96,7 +226,23 @@ NMI:
     stx $4302
     lda.b #!CGRAM_BANK
     sta $4304
-    ldx.w #$0200
+    ldx.w #$0040
+    stx $4305
+    lda.b #$01
+    sta $420B
+    lda.b #$80
+    sta $2121
+    ldx.w #$0100
+    stx $4302
+    ldx.w #$0020
+    stx $4305
+    lda.b #$01
+    sta $420B
+    lda.b #33
+    sta $2121           ; CGRAM[33] = palette 2 colour 1 = CRAM[16] (BG2 solid cell)
+    ldx.w #$0100
+    stx $4302
+    ldx.w #$0002
     stx $4305
     lda.b #$01
     sta $420B
@@ -160,40 +306,185 @@ NoHiTiles:
     sta $00                  ; dirty columns 0..15
     lda.l $E2020A
     sta $02                  ; dirty columns 16..31
+    ; BG2 upload mask: U = D & (H | nz) -> $24/$26, nz = (nz & ~D) | (H & D), where D = the
+    ; dirty columns, H = columns holding a palette-1 cell ($E2:0230) and nz = the columns
+    ; whose BG2 map is not all-empty in VRAM (so a column that lost its cells is cleared).
+    lda.l $E20230
+    sta $28
+    lda.l $E20232
+    sta $2A
+    lda $28
+    ora $20
+    and $00
+    sta $24
+    lda $2A
+    ora $22
+    and $02
+    sta $26
+    lda $00
+    eor.w #$FFFF
+    and $20
+    sta $20
+    lda $28
+    and $00
+    ora $20
+    sta $20
+    lda $02
+    eor.w #$FFFF
+    and $22
+    sta $22
+    lda $2A
+    and $02
+    ora $22
+    sta $22
     sep #$20
-    ldx.w #$0000             ; X = column 0
-TmCol:
+    ; Rows 0,1 and 27..31 of every column are constant blank cells (the FPGA only
+    ; builds content in rows 2..26), so after the first uploads (which also lay down
+    ; the blank rows) a column is 25 cells = 50 B from row 2 instead of 64 B.
+    lda $12
+    cmp.b #$09
     rep #$20
+    bcs TmTrim
+    stz $14                  ; DP $14 = column source offset in $E1 (+64 per column)
+    lda.w #!BG1_MAP
+    sta $16                  ; DP $16 = VRAM word dest (+1 per column)
+    lda.w #$0040
+    sta $18                  ; DP $18 = bytes per column
+    bra TmStart
+TmTrim:
+    lda $00
+    and $02
+    cmp.w #$FFFF
+    bne TmTrimGen
+    jmp TmFull
+TmTrimGen:
+    lda.w #$0004
+    sta $14                  ; row 2 = byte 4
+    lda.w #!BG1_MAP+64
+    sta $16                  ; row 2 = +64 words
+    lda.w #$0032
+    sta $18
+TmStart:
+    ldx.w #$0000             ; X = column 0
+TmCol:                       ; A 16-bit here
+    lda $00
+    ora $02
+    beq TmDone               ; nothing left dirty
+    txa
+    and.w #$0007
+    bne TmBit
+    sep #$20
+    lda $00
+    bne TmBit8               ; low byte has a dirty column
+    lda $01                  ; 8 clean columns: shift the bitmap by one byte
+    sta $00
+    lda $02
+    sta $01
+    lda $03
+    sta $02
+    stz $03
+    rep #$20
+    txa
+    clc
+    adc.w #$0008
+    tax
+    lda $14
+    clc
+    adc.w #$0200
+    sta $14
+    lda $16
+    clc
+    adc.w #$0008
+    sta $16
+    bra TmCol
+TmBit8:
+    rep #$20
+TmBit:
     lsr $02                  ; 32-bit bitmap >> 1: column X -> carry
     ror $00
     bcc TmColSkip            ; clean column -> skip DMA
-    txa
-    clc
-    adc.w #!BG1_MAP
+    lda $16
     sta $2116                ; VRAM dest = BG1_MAP + X (column start)
-    txa
-    asl
-    asl
-    asl
-    asl
-    asl
-    asl                      ; X*64 = column source offset in $E1
+    lda $14
     sta $4302
-    lda.w #$0040
-    sta $4305                ; 64 bytes — reload PER column: $4305 DECREMENTS to 0
-                             ; during the DMA (a "constant" here = 64KB DMA on the
-                             ; 2nd dirty column, wiping VRAM = the black-screen bug)
-    sep #$20
-    lda.b #$01
-    sta $420B                ; trigger DMA ch0
-    rep #$20
+    lda $18
+    sta $4305                ; column length, reloaded PER column: $4305 decrements to 0
+    lda.w #$0001
+    sta $420B                ; trigger DMA ch0 ($420C = 0 alongside: no HDMA here)
 TmColSkip:
+    lda $14
+    clc
+    adc.w #$0040
+    sta $14
+    inc $16
     inx
     cpx.w #$0020             ; 32 columns
     bne TmCol
+TmDone:
     sep #$20
 
-    ; OAM 544B ($E3) -> OAM
+    ; BG2 underlay: the 25 content rows of each column in $24/$26, one low byte per
+    ; cell ($E3:1000 + col*32 + row), mode 0 DMA to $2118 with the +32 step after the
+    ; low byte so the constant palette byte ($08) of the map stays untouched.
+    rep #$20
+    lda $24
+    ora $26
+    beq Bg2Done
+    sep #$20
+    lda.b #$01
+    sta $2115
+    lda.b #$00
+    sta $4300
+    lda.b #$18
+    sta $4301
+    lda.b #!OAM_BANK
+    sta $4304
+    rep #$20
+    lda.w #$1002
+    sta $14             ; source: row 2 of column 0
+    lda.w #!BG2_MAP+64
+    sta $16             ; VRAM word: row 2 of column 0
+Bg2Col:
+    lda $24
+    ora $26
+    beq Bg2Done
+    lsr $26
+    ror $24
+    bcc Bg2Skip
+    lda $16
+    sta $2116
+    lda $14
+    sta $4302
+    lda.w #25
+    sta $4305
+    lda.w #$0001
+    sta $420B
+Bg2Skip:
+    lda $14
+    clc
+    adc.w #$0020
+    sta $14
+    inc $16
+    bra Bg2Col
+Bg2Done:
+    sep #$20
+
+    ; OAM: only the entries this pass used or the previous one used (the buffer hides
+    ; the rest; everything past max(cur,last) is already hidden on the SNES), then the
+    ; 32-byte high table. DP $1A = entries sent last time ($E2:022E = this pass).
+    lda.l $E2022E
+    cmp.b #$81
+    bcc OamCntOk        ; an out-of-range count (older core) sends everything
+    lda.b #$80
+OamCntOk:
+    sta $1B
+    cmp $1A
+    bcs OamMaxSet
+    lda $1A
+OamMaxSet:
+    sta $1C             ; entries to send
+    lda $1B
+    sta $1A
     stz $2102
     stz $2103
     lda.b #$00
@@ -204,20 +495,138 @@ TmColSkip:
     stx $4302
     lda.b #!OAM_BANK
     sta $4304
-    ldx.w #$0220
+    lda $1C
+    beq OamHigh
+    rep #$20
+    and.w #$00FF
+    asl
+    asl
+    sta $4305
+    sep #$20
+    lda.b #$01
+    sta $420B
+OamHigh:
+    stz $2102
+    lda.b #$01
+    sta $2103           ; OAM word address $100 = the high table
+    ldx.w #$0200
+    stx $4302
+    ldx.w #$0020
     stx $4305
     lda.b #$01
     sta $420B
 
+    lda.b #$0F
+    sta $2100           ; screen on right after the last DMA (the rest is plain registers)
+SkipUpload:
     ; --- scroll: read hofs/vofs from $E2:0200 (FPGA-emitted) -> BG1 scroll ---
     lda.l $E20200
-    sta $210D           ; BG1HOFS low
+    sta $1D             ; DP $1D/$1E = the game's HOFS
     lda.l $E20201
+    sta $1E
+    lda.l $E2020C
+    and.b #$40
+    sta $1F             ; scroll lock: the top 16 SMS lines stay at HOFS 0,
+                        ; the IRQ at line 32 writes the real value for the rest
+
+    ; --- split queue: the game's own mid-frame HOFS writes (frame before) + the lock.
+    ; DP $30 = count (0..4), V (SNES line whose hblank gets the write) at $31..$34, HOFS lo at
+    ; $35..$38, hi at $39..$3C, ascending by V.  Pairs come from $E2:0234 (count) / $E2:0235
+    ; (line, lo, hi) x4; SMS line L takes effect on L+1 = SNES V L+18, so the write goes in hblank L+17.
+    ldy.w #$0000        ; Y = queue count
+    ldx.w #$0000        ; X = raw pair offset
+    lda.l $E20234
+    sta $3D             ; raw pairs left
+    cmp.b #$05
+    bcc BqCntOk
+    stz $3D             ; garbage before the first pass
+BqCntOk:
+    stz $3E             ; 1 = the lock event is queued
+    lda $1F
+    bne BqLoop
+    lda.b #$01
+    sta $3E             ; no lock: nothing to queue
+BqLoop:
+    lda $3D
+    beq BqEnd
+    lda.l $E20235,x
+    cmp.b #191
+    bcs BqNext          ; not a valid active line
+    sta $3F
+    lda $3E
+    bne BqNormal
+    lda $3F
+    cmp.b #15
+    bcs BqLockNow
+    lda.l $E20236,x     ; pair above the lock line: it only sets the value the lock event writes
+    sta $1D
+    lda.l $E20237,x
+    sta $1E
+    bra BqNext
+BqLockNow:
+    lda.b #32
+    sta $40
+    lda $1D
+    sta $41
+    lda $1E
+    sta $42
+    jsr BqAppend
+    lda.b #$01
+    sta $3E
+BqNormal:
+    lda $3F
+    clc
+    adc.b #17
+    sta $40
+    lda.l $E20236,x
+    sta $41
+    lda.l $E20237,x
+    sta $42
+    jsr BqAppend
+BqNext:
+    inx
+    inx
+    inx
+    dec $3D
+    bra BqLoop
+BqEnd:
+    lda $3E
+    bne BqDone
+    lda.b #32
+    sta $40
+    lda $1D
+    sta $41
+    lda $1E
+    sta $42
+    jsr BqAppend
+BqDone:
+    tya
+    sta $30
+    lda $1F
+    beq HofsGo
+    stz $210D
+    stz $210D
+    stz $210F
+    stz $210F           ; BG2 follows BG1 (a write pair each: the scroll latch is shared)
+    bra HofsDone
+HofsGo:
+    lda $1D
+    sta $210D           ; BG1HOFS low
+    lda $1E
     sta $210D           ; BG1HOFS high
+    lda $1D
+    sta $210F           ; BG2HOFS low
+    lda $1E
+    sta $210F           ; BG2HOFS high
+HofsDone:
     lda.l $E20202
     sta $210E           ; BG1VOFS low
     lda.l $E20203
     sta $210E           ; BG1VOFS high
+    lda.l $E20202
+    sta $2110           ; BG2VOFS low
+    lda.l $E20203
+    sta $2110           ; BG2VOFS high
 
     ; --- forward SNES pad (auto-joypad JOY1) to the FPGA control window $EF ---
     lda $4218
@@ -270,8 +679,135 @@ IgrDone:
     ; --- double-buffer: done reading the front -> swap if the FPGA has a ready back ---
     sta.l $EF0005
 
-    lda.b #$0F
-    sta $2100           ; screen on
+    ; --- borders: left-column mask (reg0 bit5) and the vertical mask / display off (reg1 bit6) ---
+    lda.l $E2020C
+    and.b #$20
+    beq LcmOff
+    lda.b #$13
+LcmOff:
+    sta $212E
+    lda.l $E2020D
+    and.b #$40
+    beq DispOff
+    lda.b #$13
+DispOff:
+    sta $06             ; TM value for the IRQs (0 = VDP display off)
+    lda.b #$30
+    sta $08             ; picture band, no mask: colour math prevented
+    lda.b #$07
+    sta $09
+    lda.l $E2020C
+    and.b #$20
+    beq NoMaskMath
+    lda.b #$90          ; left column masked: paint the backdrop in x 0..7
+    sta $08
+NoMaskMath:
+    lda $06
+    bne PicOnMath
+    lda.b #$90          ; display off: the whole picture band is backdrop
+    sta $08
+    lda.b #$FF
+    sta $09
+PicOnMath:
+    ; fixed colour = the real backdrop (BGR555 at $E2:020E/F)
+    lda.l $E2020E
+    sta $0A
+    lda.l $E2020F
+    sta $0B
+    lda $0A
+    and.b #$1F
+    ora.b #$20
+    sta $2132           ; R
+    rep #$20
+    lda $0A
+    lsr
+    lsr
+    lsr
+    lsr
+    lsr
+    sep #$20
+    and.b #$1F
+    ora.b #$40
+    sta $2132           ; G
+    rep #$20
+    lda $0A
+    lsr
+    lsr
+    lsr
+    lsr
+    lsr
+    lsr
+    lsr
+    lsr
+    lsr
+    lsr
+    sep #$20
+    and.b #$1F
+    ora.b #$80
+    sta $2132           ; B
+    lda.b #$14
+    sta $4207           ; HTIME = 276 (the lock phase moves it earlier, below)
+    lda.b #$01
+    sta $4208
+    lda $4211           ; ack a pending IRQ
+    lda $2137           ; latch the V counter
+    lda $213D
+    sta $07             ; V low
+    lda $213D
+    and.b #$01
+    bne TmShut          ; V >= 256: vblank
+    lda $07
+    cmp.b #17
+    bcc TmShut
+    cmp.b #209
+    bcs TmShut
+    lda $06             ; the NMI overran into the picture: show it now
+    sta $212C
+    lda $08
+    sta $2130
+    lda $09
+    sta $2127
+TmPop:
+    lda $30
+    beq TmClosePh       ; queue empty: nothing left to write this frame
+    lda $07
+    cmp $31
+    bcc TmSched         ; next write is still ahead
+    lda $35             ; already past: write it right away
+    sta $210D
+    lda $39
+    sta $210D
+    lda $35
+    sta $210F
+    lda $39
+    sta $210F
+    jsr BqPop
+    bra TmPop
+TmSched:
+    lda.b #$02
+    sta $05             ; next IRQ writes the HOFS of the first queued split
+    lda.b #$E6
+    sta $4207           ; HTIME 230: the handler's first write lands in the hblank
+    stz $4208
+    lda $31
+    bra TmSetV
+TmClosePh:
+    lda.b #$01
+    sta $05             ; next IRQ closes at 208
+    lda.b #208
+    bra TmSetV
+TmShut:
+    stz $212C           ; blank until line 16
+    lda.b #$90
+    sta $2130
+    lda.b #$FF
+    sta $2127
+    stz $05
+    lda.b #16
+TmSetV:
+    sta $4209
+    stz $420A
+
     lda $4210           ; ack NMI
 
     rep #$30
@@ -316,7 +852,142 @@ DmaTileSpan:
     rep #$20
     rts
 
+TmFull:
+    ; every column dirty (the scrolling case): straight-line code, no loop or
+    ; bitmap bookkeeping -- the instruction fetch from ROM is what costs here
+    sep #$20
+    ldy.w #$0032
+    lda.b #$01
+    !i #= 0
+    while !i < 32
+        ldx.w #!BG1_MAP+64+!i
+        stx $2116
+        ldx.w #4+(64*!i)
+        stx $4302
+        sty $4305
+        sta $420B
+        !i #= !i+1
+    endwhile
+    jmp TmDone
+
+; Queue helpers.  BqAppend: in $40 = V, $41/$42 = HOFS lo/hi, Y = count (16 bit); same V as the
+; last entry replaces it, a full queue drops the new one.  BqPop (A/X/Y untouched but A): drops entry 0.
+BqAppend:
+    cpy.w #$0000
+    beq BqaNew
+    lda.w $0030,y
+    cmp $40
+    bne BqaNew
+    dey
+    bra BqaStore
+BqaNew:
+    cpy.w #$0004
+    bcs BqaFull
+BqaStore:
+    lda $40
+    sta.w $0031,y
+    lda $41
+    sta.w $0035,y
+    lda $42
+    sta.w $0039,y
+    iny
+BqaFull:
+    rts
+
+BqPop:
+    dec $30
+    lda $32
+    sta $31
+    lda $33
+    sta $32
+    lda $34
+    sta $33
+    lda $36
+    sta $35
+    lda $37
+    sta $36
+    lda $38
+    sta $37
+    lda $3A
+    sta $39
+    lda $3B
+    sta $3A
+    lda $3C
+    sta $3B
+    rts
+
 Stub:
+    rti
+
+; H/V-IRQ trio (dot 276 = hblank; the V=32 one only with the scroll lock): the one on V=16 opens the layers for V=17 (picture row 16), the one on V=208 closes them (SMS has 192
+; lines, the PPU 224 with the picture centred; the rest stays backdrop).
+IRQ:
+    rep #$20
+    pha
+    sep #$20
+    lda $4211           ; ack
+    lda $05
+    bne IrqNot0
+    lda $06
+    sta $212C
+    lda $08
+    sta $2130
+    lda $09
+    sta $2127
+    lda $30
+    bne IrqFirst
+    lda.b #$01
+    sta $05
+    lda.b #208
+    sta $4209
+    bra IrqDone
+IrqFirst:
+    lda.b #$02
+    sta $05
+    lda.b #$E6
+    sta $4207           ; HTIME 230: the write lands in the hblank, not past it
+    stz $4208
+    lda $31
+    sta $4209
+    bra IrqDone
+IrqNot0:
+    cmp.b #$02
+    bne IrqClose
+    lda $35             ; hblank of a queued split line: the rest scrolls to the game value
+    sta $210D
+    lda $39
+    sta $210D
+    lda $35
+    sta $210F
+    lda $39
+    sta $210F
+    jsr BqPop
+    lda $30
+    beq IrqLast
+    lda $31
+    sta $4209           ; next split (HTIME stays 230)
+    bra IrqDone
+IrqLast:
+    lda.b #$14
+    sta $4207           ; HTIME back to 276
+    lda.b #$01
+    sta $4208
+    sta $05
+    lda.b #208
+    sta $4209
+    bra IrqDone
+IrqClose:
+    stz $212C
+    lda.b #$90
+    sta $2130
+    lda.b #$FF
+    sta $2127
+    stz $05
+    lda.b #16
+    sta $4209
+IrqDone:
+    rep #$20
+    pla
     rti
 
 
@@ -533,7 +1204,7 @@ org $00FFE4
     dw Stub
     dw NMI
     dw Stub
-    dw Stub
+    dw IRQ
 org $00FFF4
     dw Stub
     dw Stub

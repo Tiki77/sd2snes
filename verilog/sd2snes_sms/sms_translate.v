@@ -34,6 +34,10 @@ module sms_translate (
   input      [7:0]  DIRTY_HI_MIN, // changed-tile range, HIGH half (tiles 256..511 = sprites)
   input      [7:0]  DIRTY_HI_MAX,
   input      [31:0] DIRTY_COLS,   // dirty name-table columns (re-emit only these; clean stay)
+  input      [239:0] CNT,         // instrumentation counters, published at $E2:0210..022B
+  input      [2:0]  RAST_N,       // reg8 splits of the frame before: count, lines, values
+  input      [31:0] RAST_LINE,
+  input      [31:0] RAST_VAL,
 
   // VRAM read port (registered, 1-cycle latency)
   output reg [13:0] VRAM_ADDR,
@@ -62,18 +66,31 @@ module sms_translate (
   // phases
   localparam S_IDLE=0, S_PAL=1, S_BACK=2, S_TILES_A=3, S_TILES_D=4, S_TZERO=5,
              S_NT_A=6, S_NT_D=7, S_OAM_INIT=8, S_OAM_SCAN=9, S_OAM_EMIT=10,
-             S_OAM_HITAB=11, S_DONE=12, S_SCROLL=13;
-  reg [3:0]  st;
+             S_OAM_HITAB=11, S_DONE=12, S_SCROLL=13, S_OAMN=14, S_BG2M=15, S_RAST=16;
+  reg [4:0]  st;
   // VDP register SNAPSHOT, latched at START: the SMS now RUNS during the pass
   // (no CE freeze), so geometry/scroll regs must be pass-consistent even if the
   // game rewrites them mid-pass (the change lands in the next pass).
   reg [7:0]  r0, r1, r2, r5, r6, r7, r8, r9;
   reg [5:0]  pi;       // palette color index (0..47)
   reg        ph;       // palette byte half (0=lo,1=hi)
-  reg [1:0]  bh;       // backdrop byte half
-  reg [3:0]  sc;       // scroll/dirty/columns control-block byte counter (0..11)
+  reg [1:0]  bh;       // (unused)
+  reg [15:0] bd_col;   // real backdrop colour (BGR555)
+  reg [5:0]  sc;       // scroll/dirty/columns/counters control-block byte counter (0..39)
+  // 224-line mode (reg1 M1 + reg0 M2, no M3): the name table moves to (REG2 & 0x0C) << 10 | $700
+  // and the picture is the middle 192 of the 224 lines (SMS lines 16..207 on the player's 192-line
+  // window), so the BG scroll gains 16 lines, sprites and reg8 splits lose 16.
+  wire        m224     = r1[4] & r0[1] & ~r1[3];
   wire [9:0] hofs = 10'd0 - {2'd0, r8};     // SNES BG1 H-scroll = (0-reg8)&0x3FF
   wire [9:0] vofs = {7'd0, r9[2:0]} - 10'd1;     // BG1VOFS = fine V-scroll(reg9[2:0]) - 1; coarse is in nt_src
+  wire [5:0] rs_i  = sc - 6'd1;                       // S_RAST: byte index inside the pair table
+  wire [1:0] rs_e  = (rs_i >= 6'd9) ? 2'd3 : (rs_i >= 6'd6) ? 2'd2 : (rs_i >= 6'd3) ? 2'd1 : 2'd0;
+  wire [1:0] rs_k  = rs_i - {rs_e, 1'b0} - rs_e;      // 0 line, 1 lo, 2 hi
+  wire [7:0] rs_line_raw = RAST_LINE[{rs_e, 3'd0} +: 8];
+  wire [7:0] rs_line = !m224 ? rs_line_raw : (rs_line_raw < 8'd16) ? 8'd0 : (rs_line_raw - 8'd16);  // 224 mode: -16 lines of crop
+  wire [9:0] rs_hofs = 10'd0 - {2'd0, RAST_VAL[{rs_e, 3'd0} +: 8]};
+  reg        rs_ph;    // S_RAST: 0 = stage the byte, 1 = emit it
+  reg [7:0]  rs_q;     // S_RAST: staged byte
   reg [14:0] ti;       // tile src offset (0..16383)
   reg        tile_hi;  // 0 = uploading the LOW dirty range, 1 = the HIGH range
   reg [4:0]  tz;       // tile-511 zero counter
@@ -81,10 +98,14 @@ module sms_translate (
   reg        nbyte;    // which name-table source byte (0=lo,1=hi)
   reg [7:0]  nt_lo;    // captured low byte of the SMS name-table entry
   reg [1:0]  nstep;    // name-table per-cell step
+  reg        nt_p1;    // palette bit (hi[3]) of the cell being emitted
+  reg [31:0] bg2_has;  // columns with a palette-1 cell this pass (BG2 backdrop layer)
   // sprites (SAT -> OAM)
   reg [9:0]  oi;       // OAM init byte counter (0..511)
   reg [6:0]  si;       // SMS sprite index (0..63)
   reg [7:0]  so;       // SNES OAM sprite index (0..127)
+  reg [7:0]  so_vis;   // SNES OAM entries up to the last sprite that can be on screen
+  reg        vis_r;    // the sprite being emitted can be on screen (Y outside $C0..$EF)
   reg [2:0]  sstep;    // SAT read sub-step
   reg [3:0]  ec;       // emit byte counter
   reg [4:0]  hidx;     // high-table write counter (0..31)
@@ -94,7 +115,7 @@ module sms_translate (
   reg [7:0]  hi_tab [0:31];   // OAM high-table accumulator
   integer    ki;
 
-  wire [13:0] nt_base  = {r2[3:1], 11'd0};     // (REG2 & 0x0E) << 10 = REG2[3:1] << 11
+  wire [13:0] nt_base  = m224 ? {r2[3:2], 12'h700} : {r2[3:1], 11'd0};  // (REG2 & 0x0E) << 10 = REG2[3:1] << 11
   wire [13:0] sat_base = {r5[6:1], 8'd0};      // (REG5 & 0x7E) << 7
   wire [13:0] sat_xt   = sat_base + 14'h80 + {si, 1'b0};  // X/tile pair base for sprite si
   wire [8:0]  so_cur   = so + {8'd0, ec[2]};              // target SNES sprite (top/bottom)
@@ -145,15 +166,16 @@ module sms_translate (
   wire       content = (sr >= 5'd2) && (sr <= 5'd26);
   // V-scroll: the visible SMS rows are [reg9_row .. reg9_row+23] wrapping at 28, not
   // a fixed 0..23. coarse = reg9[7:3]; the source row = (coarse + (sr-2)) mod 28.
-  wire [4:0]  reg9_row = r9[7:3];
+  wire [4:0]  reg9_row = r9[7:3] + (m224 ? 5'd2 : 5'd0);                 // +16 lines of crop (5-bit wrap = 32 rows)
   wire [5:0]  win_sum  = {1'b0, reg9_row} + {2'b0, (sr - 5'd2)};
-  wire [5:0]  win_mod  = (win_sum >= 6'd28) ? (win_sum - 6'd28) : win_sum;
+  wire [5:0]  win_mod  = m224 ? {1'b0, win_sum[4:0]}                      // 224 mode: the scroll wraps at 256 lines
+                           : (win_sum >= 6'd28) ? (win_sum - 6'd28) : win_sum;
   wire [13:0] nt_src   = nt_base + (({win_mod[4:0], col}) << 1);
 
   always @(posedge CLK) begin
     if (RST) begin
       st <= S_IDLE; BUSY <= 0; DONE <= 0; OUT_WE <= 0;
-      pi <= 0; ph <= 0; bh <= 0; sc <= 0; ti <= 0; tile_hi <= 0; tz <= 0; nci <= 0; nbyte <= 0; nstep <= 0;
+      pi <= 0; ph <= 0; bh <= 0; sc <= 0; rs_ph <= 0; ti <= 0; tile_hi <= 0; tz <= 0; nci <= 0; nbyte <= 0; nstep <= 0;
       OUT_SEL <= 0; OUT_ADDR <= 0; OUT_DATA <= 0;
     end else if (!STALL) begin   // STALL freezes the FSM + holds OUT_* (PSRAM write backpressure)
       OUT_WE <= 0; DONE <= 0;
@@ -163,6 +185,7 @@ module sms_translate (
                   r0 <= REG0; r1 <= REG1; r2 <= REG2; r5 <= REG5;   // pass-consistent
                   r6 <= REG6; r7 <= REG7; r8 <= REG8; r9 <= REG9;   // reg snapshot
                   for (ki = 0; ki < 32; ki = ki + 1) hi_tab[ki] <= 8'd0;
+                  so_vis <= 8'd0; bg2_has <= 32'd0;
                 end
 
         // ---- palette: 32 BG (cgram 0..31) + 16 OBJ (cgram 128..143) ----
@@ -177,34 +200,38 @@ module sms_translate (
           end else ph <= 1'b1;
         end
 
-        // ---- backdrop: CGRAM[0] = conv(CRAM[16 + reg7&0xF]) ----
+        // ---- backdrop: CGRAM[0] keeps CRAM[0] (an opaque BG colour 0, written by S_PAL);
+        //      the real backdrop CRAM[16 + reg7&0xF] goes out at $E2:020E/F for the player,
+        //      which paints it only where the SMS shows it (masked column, border lines) ----
         S_BACK: begin
-          OUT_SEL <= 2'd2; OUT_WE <= 1'b1;
-          OUT_ADDR <= {15'd0, bh[0]};
-          OUT_DATA <= bh[0] ? pal_col[15:8] : pal_col[7:0];
-          if (bh[0]) begin ti <= 0; sc <= 0; st <= S_SCROLL; end
-          bh <= bh + 1'b1;
+          bd_col <= pal_col;
+          ti <= 0; sc <= 0; st <= S_SCROLL;
         end
 
         // ---- scroll: emit hofs/vofs to cgram region offset 0x200 (player reads $E2:0200) ----
         S_SCROLL: begin
           OUT_SEL <= 2'd2; OUT_WE <= 1'b1;
-          OUT_ADDR <= 16'h0200 + {12'd0, sc};
+          OUT_ADDR <= 16'h0200 + {10'd0, sc};
           case (sc)
-            4'd0: OUT_DATA <= hofs[7:0];
-            4'd1: OUT_DATA <= {6'd0, hofs[9:8]};
-            4'd2: OUT_DATA <= vofs[7:0];
-            4'd3: OUT_DATA <= {6'd0, vofs[9:8]};
-            4'd4: OUT_DATA <= DIRTY_LO_MIN;     // $E2:0204 low-half min  (tile 0..255)
-            4'd5: OUT_DATA <= DIRTY_LO_MAX;     // $E2:0205 low-half max
-            4'd6: OUT_DATA <= DIRTY_HI_MIN;     // $E2:0206 high-half min (absolute = 256 + idx)
-            4'd7: OUT_DATA <= DIRTY_HI_MAX;     // $E2:0207 high-half max
-            4'd8: OUT_DATA <= DIRTY_COLS[7:0];   // $E2:0208 dirty name-table columns 0..7
-            4'd9: OUT_DATA <= DIRTY_COLS[15:8];  // $E2:0209 columns 8..15
-            4'd10: OUT_DATA <= DIRTY_COLS[23:16];// $E2:020A columns 16..23
-            default: OUT_DATA <= DIRTY_COLS[31:24]; // $E2:020B columns 24..31
+            6'd0: OUT_DATA <= hofs[7:0];
+            6'd1: OUT_DATA <= {6'd0, hofs[9:8]};
+            6'd2: OUT_DATA <= vofs[7:0];
+            6'd3: OUT_DATA <= {6'd0, vofs[9:8]};
+            6'd4: OUT_DATA <= DIRTY_LO_MIN;     // $E2:0204 low-half min  (tile 0..255)
+            6'd5: OUT_DATA <= DIRTY_LO_MAX;     // $E2:0205 low-half max
+            6'd6: OUT_DATA <= DIRTY_HI_MIN;     // $E2:0206 high-half min (absolute = 256 + idx)
+            6'd7: OUT_DATA <= DIRTY_HI_MAX;     // $E2:0207 high-half max
+            6'd8: OUT_DATA <= DIRTY_COLS[7:0];   // $E2:0208 dirty name-table columns 0..7
+            6'd9: OUT_DATA <= DIRTY_COLS[15:8];  // $E2:0209 columns 8..15
+            6'd10: OUT_DATA <= DIRTY_COLS[23:16];// $E2:020A columns 16..23
+            6'd11: OUT_DATA <= DIRTY_COLS[31:24]; // $E2:020B columns 24..31
+            6'd12: OUT_DATA <= m224 ? (r0 & 8'hBF) : r0;               // $E2:020C VDP reg0 / reg1 snapshot
+            6'd13: OUT_DATA <= r1;               // $E2:020D
+            6'd14: OUT_DATA <= bd_col[7:0];      // $E2:020E real backdrop, BGR555 low
+            6'd15: OUT_DATA <= bd_col[15:8];     // $E2:020F high
+            default: OUT_DATA <= CNT[{sc - 6'd16, 3'd0} +: 8];   // $E2:0210.. counters, LSB first
           endcase
-          if (sc == 4'd11) begin                 // start the low range, then the high range
+          if (sc == 6'd45) begin                 // start the low range, then the high range
             if (lo_ne)      begin ti <= {2'b00, DIRTY_LO_MIN, 5'd0}; tile_hi <= 1'b0; st <= S_TILES_A; end
             else if (hi_ne) begin ti <= {2'b01, DIRTY_HI_MIN, 5'd0}; tile_hi <= 1'b1; st <= S_TILES_A; end
             else            begin tz <= 0; st <= S_TZERO; end   // nothing dirty -> skip tile emit
@@ -256,10 +283,19 @@ module sms_translate (
               OUT_DATA <= nt_lo;                       // low byte = tile[7:0]
               nstep <= 2'd2;
             end
-            default: begin
+            2'd2: begin
               OUT_SEL <= 2'd1; OUT_WE <= 1'b1; OUT_ADDR <= {nci, 1'b0} + 16'd1;
               // SNES entry[15:8] = {v,h,prio, 0,0, pal, 0, tile8}; SMS hi: tile8=0,h=1,v=2,pal=3,prio=4
               OUT_DATA <= {VRAM_DATA[2], VRAM_DATA[1], VRAM_DATA[4], 2'b00, VRAM_DATA[3], 1'b0, VRAM_DATA[0]};
+              nt_p1 <= VRAM_DATA[3]; nstep <= 2'd3;
+            end
+            default: begin
+              // BG2 underlay byte: 1 = solid tile (a palette-1 cell shows CRAM[16] where its
+              // colour 0 is transparent), 0 = empty. One byte per cell, column-major.
+              OUT_SEL <= 2'd3; OUT_WE <= 1'b1; OUT_ADDR <= 16'h1000 + {6'd0, nci[9:0]};
+              OUT_DATA <= {7'd0, nt_p1};
+              if (nt_p1) bg2_has[col] <= 1'b1;
+              nstep <= 2'd0;
               if (nci == 11'd1023) begin oi <= 0; st <= S_OAM_INIT; end else begin nci <= nci + 1'b1; st <= S_NT_A; end
             end
           endcase
@@ -278,8 +314,9 @@ module sms_translate (
           case (sstep)
             3'd0: begin sstep <= 3'd1; end
             3'd1: begin
-              if (VRAM_DATA == 8'hD0 || si == 7'd64 || so >= 8'd128) begin hidx <= 0; st <= S_OAM_HITAB; end
-              else begin ey0_r <= VRAM_DATA + 9'd17; ey1_r <= VRAM_DATA + 9'd17 + 9'd8;
+              if ((VRAM_DATA == 8'hD0 && !m224) || si == 7'd64 || so >= 8'd128) begin hidx <= 0; st <= S_OAM_HITAB; end
+              else begin vis_r <= (VRAM_DATA < (m224 ? 8'hE0 : 8'hC0)) | (VRAM_DATA >= 8'hF0);
+                         ey0_r <= VRAM_DATA + (m224 ? 9'd1 : 9'd17); ey1_r <= VRAM_DATA + (m224 ? 9'd1 : 9'd17) + 9'd8;
                          sstep <= 3'd2; end
             end
             3'd2: begin ex_r <= {1'b0, VRAM_DATA} - (r0[3] ? 9'd8 : 9'd0); sstep <= 3'd3; end
@@ -317,6 +354,7 @@ module sms_translate (
           if (ec == (tall_r ? 4'd7 : 4'd3)) begin
             si <= si + 1'b1;
             so <= so + (tall_r ? 8'd2 : 8'd1);
+            if (vis_r) so_vis <= so + (tall_r ? 8'd2 : 8'd1);
             sstep <= 0; st <= S_OAM_SCAN;
           end else ec <= ec + 1'b1;
         end
@@ -325,7 +363,37 @@ module sms_translate (
         S_OAM_HITAB: begin
           OUT_SEL <= 2'd3; OUT_WE <= 1'b1; OUT_ADDR <= 16'd512 + {11'd0, hidx};
           OUT_DATA <= hi_tab[hidx];
-          if (hidx == 5'd31) st <= S_DONE; else hidx <= hidx + 1'b1;
+          if (hidx == 5'd31) st <= S_OAMN; else hidx <= hidx + 1'b1;
+        end
+
+        // ---- SNES OAM entries used this pass -> $E2:022E (the player DMAs only those) ----
+        S_OAMN: begin
+          OUT_SEL <= 2'd2; OUT_WE <= 1'b1; OUT_ADDR <= 16'h022E; OUT_DATA <= so_vis;
+          sc <= 6'd0; st <= S_BG2M;
+        end
+
+        // ---- columns that hold a palette-1 cell -> $E2:0230..0233 (player: BG2 upload mask) ----
+        S_BG2M: begin
+          OUT_SEL <= 2'd2; OUT_WE <= 1'b1; OUT_ADDR <= 16'h0230 + {14'd0, sc[1:0]};
+          OUT_DATA <= bg2_has[{sc[1:0], 3'd0} +: 8];
+          if (sc[1:0] == 2'd3) begin sc <= 6'd0; rs_ph <= 1'b0; st <= S_RAST; end else sc <= sc + 1'b1;
+        end
+
+        // ---- reg8 splits -> $E2:0234 count, then 4 x {line, hofs lo, hofs hi} (player: IRQ chain) ----
+        S_RAST: begin
+          if (!rs_ph) begin               // stage the byte in a register first (keeps OUT_DATA's cone shallow)
+            if (sc == 6'd0) rs_q <= {5'd0, RAST_N};
+            else case (rs_k)
+              2'd0: rs_q <= rs_line;
+              2'd1: rs_q <= rs_hofs[7:0];
+              default: rs_q <= {6'd0, rs_hofs[9:8]};
+            endcase
+            rs_ph <= 1'b1;
+          end else begin
+            OUT_SEL <= 2'd2; OUT_WE <= 1'b1; OUT_ADDR <= 16'h0234 + {10'd0, sc}; OUT_DATA <= rs_q;
+            rs_ph <= 1'b0;
+            if (sc == 6'd12) st <= S_DONE; else sc <= sc + 1'b1;
+          end
         end
 
         S_DONE: begin BUSY <= 0; DONE <= 1; st <= S_IDLE; end

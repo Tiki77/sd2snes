@@ -32,6 +32,7 @@ module sms_core (
   input             BUF_WACK,
 
   input  [7:0]  PAD1,
+  input         PAUSE,
   output        FRAME_DONE,        // pulses when a translated frame is complete
 
   output [15:0] DBG_PC,
@@ -51,6 +52,8 @@ module sms_core (
   input         DBG_FORCE_FULL,    // test: force a full tilemap emit (all columns dirty)
   output [1:0]  DBG_WAIT,          // Z80 wait-stall live: bit0=ROM, bit1=WRAM (perf instr.)
   output        DBG_FRAME_TICK,    // SMS vblank tick (frame pacing, perf instrumentation)
+  input         DBG_SWAP,          // main.v: the player wrote the buffer-swap register (any swap)
+  input         DBG_SWAP_OK,       // ...and a finished back buffer was there to be shown
   // audio to dac.v's cartridge channel: {ch1[9:0], ch0[9:0]}, both fed the
   // same mono sample, plus one strobe per sample (see AUDIO CONDITIONING below)
   output [19:0] APU_DAT,
@@ -71,6 +74,12 @@ module sms_core (
   wire [7:0]  vdp_cram_data;
   wire [127:0] vregs;
   wire         frame_tick;
+  wire         sms_active;      // VDP in its 192 active lines
+  wire         sms_late;        // VDP past the middle of the active lines
+  wire         cm_mode;         // Codemasters mapper active (published at $E2:022B)
+  wire [239:0] cnt_bus;         // instrumentation counters (see HW instrumentation below)
+  reg          tr_start;
+  reg          tr_stall;
   wire [7:0]   sms_dlo_min, sms_dlo_max, sms_dhi_min, sms_dhi_max;
 
   // when translating, the VDP read port follows the engine; otherwise the debug read
@@ -93,30 +102,31 @@ module sms_core (
   // the gate) AND stalls the dac.v cartridge CIC (its output rate is edge/64).
   // If a CE gate ever comes back, the PSG has to be moved out of it and fed the
   // raw CE, and APU_CLK_EDGE with it.
+  wire [2:0]  rast_n;
+  wire [31:0] rast_line, rast_val;
   wire sms_ce_gated = CE;
   wire [10:0] psg_mix;
   wire        psg_tick;
   sms u_sms (
     .CLK(CLK), .RST(RST), .CE(sms_ce_gated),
     .ROM_RRQ(ROM_RRQ), .ROM_ADDR(ROM_ADDR), .ROM_DATA(ROM_DATA), .ROM_RDY(ROM_RDY),
-    .PAD1(PAD1),
+    .PAD1(PAD1), .PAUSE(PAUSE), .CM_MODE(cm_mode),
     .TR_VRAM_ADDR(vdp_vram_addr), .TR_VRAM_DATA(vdp_vram_data),
     .TR_CRAM_ADDR(vdp_cram_addr), .TR_CRAM_DATA(vdp_cram_data),
     .DBG_PC(DBG_PC), .DBG_BANK0(), .DBG_BANK1(), .DBG_BANK2(),
     .DBG_VRAM_WRITES(DBG_VRAM_WRITES), .DBG_REG_WRITES(), .DBG_CRAM_WRITES(),
     .DBG_REG1(), .DBG_REG2(), .DBG_DISPLAY_ON(DBG_DISPLAY_ON),
-    .VREGS(vregs), .FRAME_TICK(frame_tick),
+    .VREGS(vregs), .FRAME_TICK(frame_tick), .ACTIVE_DISP(sms_active), .ACTIVE_LATE(sms_late),
     .DIRTY_LO_MIN(sms_dlo_min), .DIRTY_LO_MAX(sms_dlo_max),
     .DIRTY_HI_MIN(sms_dhi_min), .DIRTY_HI_MAX(sms_dhi_max), .DIRTY_SNAP(tr_start),
     .BACK_SET(BACK_SET), .DIRTY_COLS(sms_dcols), .DBG_FORCE_FULL(DBG_FORCE_FULL),
     .DBG_WAIT(DBG_WAIT),
-    .PSG_MIX(psg_mix), .PSG_TICK(psg_tick)
+    .PSG_MIX(psg_mix), .PSG_TICK(psg_tick),
+    .RAST_N(rast_n), .RAST_LINE(rast_line), .RAST_VAL(rast_val)
   );
   assign DBG_FRAME_TICK = frame_tick;
 
   // ---- translation ----
-  reg        tr_start;
-  reg        tr_stall;
 
   sms_translate u_tr (
     .CLK(CLK), .RST(RST), .START(tr_start), .STALL(tr_stall),
@@ -128,16 +138,70 @@ module sms_core (
     .DIRTY_HI_MIN(sms_dhi_min), .DIRTY_HI_MAX(sms_dhi_max), .DIRTY_COLS(sms_dcols),
     .VRAM_ADDR(tr_vram_addr), .VRAM_DATA(vdp_vram_data),
     .CRAM_ADDR(tr_cram_addr), .CRAM_DATA(vdp_cram_data),
-    .OUT_WE(tr_out_we), .OUT_SEL(tr_out_sel), .OUT_ADDR(tr_out_addr), .OUT_DATA(tr_out_data)
+    .RAST_N(rast_n), .RAST_LINE(rast_line), .RAST_VAL(rast_val),
+    .CNT(cnt_bus), .OUT_WE(tr_out_we), .OUT_SEL(tr_out_sel), .OUT_ADDR(tr_out_addr), .OUT_DATA(tr_out_data)
   );
+
+
+  // ---- HW instrumentation: free-running counters published by the translation pass in the
+  // control block ($E2:0210..), read back over USB. Rates come from two reads a few seconds
+  // apart. ce/ce_wait: Z80 clock enables and those spent waiting for the ROM fetch.
+  reg [15:0] k_tick, k_defer_gate, k_defer_busy, k_swap, k_swap_empty, k_pass;
+  reg [15:0] k_lost;               // SMS frames that never became a pass (tick while one was pending)
+  reg [31:0] k_ce, k_ce_wait;
+  reg [23:0] k_cyc, k_last, k_max;
+  reg        k_busy_d;
+  always @(posedge CLK) begin
+    if (RST) begin
+      k_tick <= 0; k_defer_gate <= 0; k_defer_busy <= 0; k_swap <= 0; k_swap_empty <= 0; k_pass <= 0;
+      k_ce <= 0; k_ce_wait <= 0; k_cyc <= 0; k_last <= 0; k_max <= 0; k_busy_d <= 0;
+    end else begin
+      if (frame_tick) begin
+        k_tick <= k_tick + 1'b1;
+        if (tr_busy | tr_start) k_defer_busy <= k_defer_busy + 1'b1;
+        else if (TR_GATE)       k_defer_gate <= k_defer_gate + 1'b1;
+      end
+      if (tr_start) k_pass <= k_pass + 1'b1;
+      if (DBG_SWAP &  DBG_SWAP_OK) k_swap <= k_swap + 1'b1;
+      if (DBG_SWAP & ~DBG_SWAP_OK) k_swap_empty <= k_swap_empty + 1'b1;
+      if (CE) begin
+        k_ce <= k_ce + 1'b1;
+        if (DBG_WAIT[0]) k_ce_wait <= k_ce_wait + 1'b1;
+      end
+      k_busy_d <= tr_busy;
+      if (tr_busy) k_cyc <= k_cyc + 1'b1;
+      else if (k_busy_d) begin k_last <= k_cyc; if (k_cyc > k_max) k_max <= k_cyc; end
+      if (tr_start) k_cyc <= 0;
+    end
+  end
+  assign cnt_bus = {k_lost, 7'd0, cm_mode, k_max, 8'd0, k_last, k_ce_wait, k_ce, k_swap_empty, k_swap, k_defer_busy, k_defer_gate, k_tick, k_pass};
 
   assign FRAME_DONE  = tr_done;
   assign DBG_TR_BUSY = tr_busy;
 
-  // start one translation pass per SMS vblank (when idle); DBG_FORCE_TR also triggers
+  // start one translation pass per SMS frame. A tick that finds the previous pass still
+  // running or the previous back buffer still unread is NOT dropped: it stays pending and
+  // the pass starts as soon as the gate opens (while the VDP is in its active lines, so
+  // the game's vblank VDP writes are never caught half done).
+  // A frame that starts with the display OFF waits for it to come back on: games that turn
+  // the display off in vblank to load art (Sonic 2) re-enable it a few lines into the
+  // active area when the Z80 runs late on PSRAM waits, and a pass taken at line 0 would show
+  // the whole frame as backdrop. Still off at the middle line = a deliberate blank.
+  reg        tr_pend;
+  wire       disp_on = vregs[14];
+  wire       tr_want = (frame_tick & disp_on) | DBG_FORCE_TR | (tr_pend & sms_active & (disp_on | sms_late));
+  // ~tr_done: on the DONE cycle main.v has not raised sms_ready yet (it registers it from
+  // DONE), so without it a pending tick starts a second pass into the SAME back set one clock
+  // after the first, republishing + clearing the dirty ranges before the player read them.
+  wire       tr_go   = tr_want & ~tr_busy & ~tr_start & ~tr_done & ~TR_GATE;
   always @(posedge CLK) begin
-    if (RST) tr_start <= 1'b0;
-    else     tr_start <= (frame_tick | DBG_FORCE_TR) & ~tr_busy & ~tr_start & ~TR_GATE;
+    if (RST) begin tr_start <= 1'b0; tr_pend <= 1'b0; k_lost <= 16'd0; end
+    else begin
+      tr_start <= tr_go;
+      if (frame_tick & tr_pend & ~tr_go) k_lost <= k_lost + 1'b1;
+      if (tr_go) tr_pend <= 1'b0;
+      else if (frame_tick) tr_pend <= 1'b1;
+    end
   end
 
   // OUT_SEL -> PSRAM byte offset
