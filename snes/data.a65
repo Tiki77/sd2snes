@@ -717,4 +717,9 @@ media_dark      .byt 0     ; a player's warm reset left the screen black: media_
 media_keys      .byt 0     ; a player read the pad since its last (re)start: its key legend may show
                            ;   (a warm reset forgets the mouse until that read: the legend would flip)
 
+;----------The browser row's name position (dirent_icon, diricon.a65 -> print_direntry) ------
+; Written by dirent_icon before every row it is asked to draw, read right after.
+di_name_off     .word 0    ; cells from cursor_x to the name: 3 with the icons, 0 without
+di_name_w       .byt 0     ; the name's width in cells: 51 with the icons, 54 without
+
 _END            .byt 0

@@ -89,6 +89,7 @@
 #define CFG_ONBOARDING_VERSION           ("OnboardingVersion")
 #define CFG_BOOT_INTRO                   ("BootIntro")
 #define CFG_WARN_EXPERIMENTAL            ("WarnExperimental")
+#define CFG_BROWSER_ICONS                ("BrowserIcons")
 
 #define CFG_MENU_COMBO_MIN_BUTTONS       (3)
 
@@ -263,6 +264,10 @@ typedef struct __attribute__ ((__packed__)) _cfg_block {
      check passed (load_confirm_experimental in src/memory.c). The box's "don't warn again"
      answer clears it. YAML WarnExperimental + menu "Experimental core warning" (browser
      settings). Default 1. */
+  uint8_t  browser_icons;           /* CFG @ $1D8: the file-type icon at the start of every
+     browser row (snes/diricon.a65). Read only by the menu: with 0 the name starts in the icon's
+     column again, as before 2.17. YAML BrowserIcons + menu "File type icons" (browser settings).
+     Default 1. */
 } cfg_t;
 
 int cfg_save(void);

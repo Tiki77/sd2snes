@@ -6,6 +6,8 @@
 ; formats), and a folder that opens as its MSU-1 game by the 'M' the firmware leaves in it (msu_probe_page,
 ; asked for the page by msu_probe_visible in msufolder.a65). The glyphs are two font tiles each (utils/fontedit.py BROWSER_ICONS) and the
 ; colour is the row's print palette, so one shape can serve two types.
+; With BrowserIcons off (CFG_BROWSER_ICONS) nothing is drawn: di_name_off / di_name_w tell
+; print_direntry to start the name in the icon's column, 54 cells wide, as before the icons.
 
 .link page $c1
 #include "memmap.i65"
@@ -41,6 +43,20 @@ dirent_icon:
   lda #$7e
   pha
   plb
+  rep #$20 : .al            ; where print_direntry starts the name and how wide it is:
+  lda #$0003                ; one blank after the icon...
+  sta di_name_off
+  sep #$20 : .as
+  lda #51
+  sta di_name_w
+  lda @CFG_BROWSER_ICONS
+  bne di_on
+  stz di_name_off           ; ...or, with the icons off (BrowserIcons), the icon's column
+  lda #54                   ; (the high byte is already 0) and the old 54 cells
+  sta di_name_w
+  bra di_out
+di_on:
+  .as : .xl
   lda dirent_type
   bit #TYPE_PARENT
   bne di_parent
@@ -121,6 +137,21 @@ di_print:
   lda #2
   sta print_count
   jsl @gi_call_hiprint
+  lda cursor_x              ; and the blank between it and the name: with the icons just
+  clc                       ; switched on, that cell still holds a letter of the name
+  adc #2
+  sta print_x
+  lda #^di_str
+  sta print_bank
+  rep #$20 : .al
+  lda #!di_str              ; DI_NONE: two spaces
+  sta print_src
+  sep #$20 : .as
+  lda #1
+  sta print_count
+  jsl @gi_call_hiprint
+di_out:
+  .as : .xl
   plb
   pld
   plp
@@ -139,11 +170,12 @@ di_rom_kind:
   lda dirent_bank
   sta print_ptr+2
   ldy #$0000
-- lda [print_ptr], y        ; Y = the name's length
-  beq +
+di_rk_len:
+  .as : .xl
+  lda [print_ptr], y        ; Y = the name's length
+  beq di_rk_dot
   iny
-  bra -
-+
+  bra di_rk_len
 di_rk_dot:                  ; back to the last dot
   .as : .xl
   cpy #$0000

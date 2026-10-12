@@ -90,7 +90,7 @@
  "name_38": "Super 20 in 1/Gamars/.sfrom",
  "text_38": "Super 20 in 1合卡会打开自带的游戏菜单，Gamars Puzzle可以运行，SNES Classic的|.sfrom|文件也能像普通ROM一样载入。",
  "name_39": "列表中的图标",
- "text_39": "文件列表每一行开头都有表示类型的图标：SNES游戏、NES、Master System、Game Boy、Atari 2600、音乐、主题、文件夹。可作为|MSU-1|游戏打开的文件夹显示为黄色手柄。",
+ "text_39": "文件列表每一行开头都有表示类型的图标：SNES游戏、NES、Master System、Game Boy、Atari 2600、音乐、主题、文件夹。可作为|MSU-1|游戏打开的文件夹显示为黄色手柄。选「{no}」则像以前一样只显示名称。",
  "name_40": "从游戏信息打开金手指",
  "text_40": "在游戏信息画面按[SELECT]打开该游戏的金手指列表：开关、添加或编辑代码，设好后即可开始游戏。",
  "name_41": "2.18新功能",

@@ -383,6 +383,7 @@ mtext_scic_vmode_game             .byt " ",129,"Game video mode", 0
 mtext_scic_buscompat              .byt "Bus timing compat", 0
 mtext_browser_sort                .byt "Sort directories", 0
 mtext_browser_hide_ext            .byt "Hide file extensions", 0
+mtext_browser_icons               .byt "File type icons", 0
 mtext_browser_msu_folders         .byt "Open MSU-1 folders as games", 0
 mtext_browser_sd2snes_dir         .byt "Show sd2snes folder", 0
 mtext_browser_screensaver         .byt "Screensaver", 0
@@ -464,6 +465,7 @@ mdesc_scic_vmode_game             .byt "Set video mode for games", 0
 mdesc_scic_buscompat              .byt "Narrow cart bus timing for consoles where some games hang or glitch. Enable only if you see freezes on this console.", 0
 mdesc_browser_sort                .byt "Choose whether to sort file lists", 0
 mdesc_browser_hide_ext            .byt "Choose whether to hide file extensions", 0
+mdesc_browser_icons               .byt "Show an icon of the file type at the start of every row of the file list", 0
 mdesc_browser_msu_folders         .byt "A on a folder whose only ROM is MSU-1 opens that game", 0
 mdesc_browser_sd2snes_dir         .byt "Show /sd2snes in the file list", 0
 mdesc_browser_screensaver         .byt "Fade-out the screen after some time", 0

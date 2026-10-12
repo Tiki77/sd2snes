@@ -268,7 +268,7 @@ print_direntry:
   sta print_y
   inc
   sta cursor_y
-  jsl @dirent_icon      ; the type's icon in the two cells at cursor_x (diricon.a65)
+  jsl @dirent_icon      ; the type's icon in the two cells at cursor_x (diricon.a65); sets di_name_off/_w
 
   lda dirent_bank
   ldx dirent_addr
@@ -320,12 +320,12 @@ dirent_type_cont
 
   lda cursor_x
   clc
-  adc #3                ; the name starts one blank after the icon
+  adc di_name_off       ; the name starts one blank after the icon (0 with the icons off)
   sta print_x
 
   sep #$20 : .as
   ldx fd_fnoff
-  lda #51
+  lda di_name_w
   sta print_count
   stx print_src
   lda dirent_bank
@@ -333,14 +333,14 @@ dirent_type_cont
   jsr hiprint
   lda cursor_x
   clc
-  adc #3
+  adc di_name_off
   adc print_done
   sta print_x
 
   lda print_over
   ldy direntry_fits_idx
   sta !direntry_fits, y
-  lda #51
+  lda di_name_w
   sec
   sbc print_done
   sta print_count

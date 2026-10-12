@@ -184,6 +184,20 @@ menu_enttab_browser:
  .byt  0,0,0
 
  .byt  MTYPE_VALUE
+ .word !mtext_browser_icons
+ .byt  ^mtext_browser_icons
+ .word !kv_onoff
+ .byt  ^kv_onoff
+ .byt  OPTTYPE_KVBYTE
+ .word !CFG_BROWSER_ICONS
+ .byt  ^CFG_BROWSER_ICONS
+ .word !mdesc_browser_icons
+ .byt  ^mdesc_browser_icons
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+
+ .byt  MTYPE_VALUE
  .word !mtext_browser_msu_folders
  .byt  ^mtext_browser_msu_folders
  .word !kv_onoff

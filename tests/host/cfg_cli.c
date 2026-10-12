@@ -431,6 +431,7 @@ static void cfg_make_allchanged(void) {
   CFG.onboarding_version = 1;                    /* the first-boot tour already seen */
   CFG.boot_intro = 0;                            /* no power-on screen */
   CFG.warn_experimental = 0;                     /* no experimental-core question */
+  CFG.browser_icons = 0;                         /* no file-type icons in the browser */
 }
 
 /* ---- the alternating-booleans config ------------------------------------

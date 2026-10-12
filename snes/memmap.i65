@@ -992,6 +992,7 @@
 #define CFG_ONBOARDING_VERSION          CFG_ADDR+$01D5 /* the tour version seen (0 = never). The gate (snes/onboarding/onboarding_gate.a65) asks while it is below ONB_VERSION; the gate on B and the tour at its end write ONB_VERSION. YAML OnboardingVersion, no menu entry. Lockstep with src/cfg.h. */
 #define CFG_BOOT_INTRO                  CFG_ADDR+$01D6 /* the power-on screen on/off (the MCU folds it into BOOT_INTRO; the menu only edits it). YAML BootIntro. Lockstep with src/cfg.h. */
 #define CFG_WARN_EXPERIMENTAL           CFG_ADDR+$01D7 /* ask before an experimental console core starts (expwarn.a65; the firmware skips the question when 0). YAML WarnExperimental. Lockstep with src/cfg.h. */
+#define CFG_BROWSER_ICONS               CFG_ADDR+$01D8 /* 0/1: the file-type icon at the start of every browser row (dirent_icon, snes/diricon.a65; 0 = the name starts in the icon's column). YAML BrowserIcons. Lockstep with src/cfg.h. */
 #define ONB_VERSION                     2              /* the first-boot tour's version: bump it when a release adds cards to the tour (tag them with it, +ONB_FD_SINCE), and the tour comes back once showing only them. Lockstep with snes/onboarding/onb_memmap.i65. */
 
 #define MENU_ENTRY_SIZE             23

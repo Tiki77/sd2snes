@@ -145,7 +145,7 @@ onb_demo_map
   .byt 43, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 36 2.17: the shortcut/hook list
   .byt 44, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 37 2.17: Seta chips, bootlegs
   .byt 45, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 38 2.17: Super 20 in 1, Gamars, .sfrom
-  .byt 46, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 39 2.17: the browser icons
+  .byt 46, 8, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 39 2.17: the browser icons (No: the plain list of covers_off, names only -- $CB has no room for a picture of its own)
   .byt 47, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 40 2.17: cheats from the game info card
   .byt 77, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 41 2.18: what's new
   .byt 76, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 42 2.18: the RP2040 cartridge
@@ -282,7 +282,7 @@ onb_feat_table:
   .word 0, 1, onb_f38_name, onb_f38_text, 0, 0   ; 38 2.17: Super 20 in 1, Gamars, .sfrom
   .byt ONB_PAL_GREEN, ONB_OPT_INFO : .word 0
   .word 0, 1, onb_f39_name, onb_f39_text, 0, 0   ; 39 2.17: the browser icons
-  .byt ONB_PAL_RED, ONB_OPT_INFO : .word 0
+  .byt ONB_PAL_RED, ONB_OPT_ONOFF : .word !CFG_BROWSER_ICONS
   .word 0, 1, onb_f40_name, onb_f40_text, 0, 0   ; 40 2.17: cheats from the game info card
   .byt ONB_PAL_PURPLE, ONB_OPT_INFO : .word 0
   .word 0, 2, onb_f41_name, onb_f41_text, 0, ONB_FF_SECTION   ; 41 2.18: what's new (Settings > tour: section 2)

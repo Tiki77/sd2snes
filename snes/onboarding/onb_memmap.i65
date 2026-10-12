@@ -71,6 +71,7 @@
 #define CFG_OPEN_MSU_FOLDERS        CFG_ADDR+$01CF  /* bool */
 #define CFG_SHOW_SD2SNES_FOLDER     CFG_ADDR+$01D0  /* bool */
 #define CFG_ENABLE_INGAME_PAD2      CFG_ADDR+$01D3  /* bool */
+#define CFG_BROWSER_ICONS           CFG_ADDR+$01D8  /* bool */
 #define CFG_ONBOARDING_VERSION      CFG_ADDR+$01D5  /* the tour version seen, 0 = never (src/cfg.h) */
 
 /* The MCU's status block (src/snes.h mcu_status_t, status_load_to_menu): published on every
