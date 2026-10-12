@@ -68,6 +68,9 @@ uint32_t menu_music_samples(void);        /* DAC samples since loop start (FMV f
 void menu_music_pause(int paused);        /* freeze/unfreeze the DAC, keeping the clip open */
 uint32_t menu_music_tell(void);           /* byte read position in the clip (progress display) */
 uint32_t menu_music_size(void);           /* clip size in bytes, header included */
+void menu_music_noloop(int on);           /* play the .pcm once: stop at EOF, no loop point */
+int  menu_music_ended(void);              /* nonzero once a noloop clip played out */
+int  menu_music_seek(uint32_t pos);       /* .pcm: refill the DAC from body byte pos; 0 = failed */
 
 uint8_t msu_readbyte(uint16_t addr);
 uint16_t msu_readshort(uint16_t addr);

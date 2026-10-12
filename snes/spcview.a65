@@ -1,0 +1,896 @@
+; SPC player screen -- plays a .spc (an S-SMP snapshot) picked in the browser.
+;
+; THE SAME SCREEN AS THE PCM PLAYER (pcmplay.a65), and it borrows that one's machinery: the
+; window (spcstart_win_*), the line engine (mt_* in memtest.a65, pcm_flush), the clock
+; (pcm_put_time), the folder walk (media_find) and the cursor put back on the track at the
+; end (media_place_cursor).  Layout: 0 title, 1 game - artist, 2 bar, 3 clock, 4 blank,
+; 5-6 keys.
+;
+; WHAT AN SPC CANNOT DO.  Once uploaded, the S-SMP runs the game's own sound driver and
+; nothing on the S-CPU side reaches the S-DSP: no pause, no seek, no fade, and the only way
+; to stop it is to reset the console (a warm reset, the menu's usual trick: bgm_silence_reset).
+; So the clock is the S-CPU's own frame count since the upload, and the length is what the
+; ID666 tag says (play time + fade).  When it runs out, the next .spc of the folder plays;
+; after the last one the console is silenced (the fade the tag asks for is out of reach, so
+; that is a cut) and the screen stays on "End".  A: the next track (on "End": the first),
+; L/R: previous / next, B: close.  Every change of track is a warm reset + a ~1 s upload.
+;
+; WHY $C1: the old player lived in $C0, which is down to its last bytes; only the trampolines
+; stay there (ui_call_spcload: spc700_load, shared with the menu music; ui_call_wdraw).
+;
+; ENTRY POINT (jsl, self-contained -- forces DP=0 and DB=$00):
+;   spc_session - the browser's A action on a TYPE_SPC entry (filesel.a65 select_spc)
+.link page $c1
+#include "memmap.i65"
+// memmap.i65 re-asserts '.link page $c0' on include; re-declare $c1 AFTER it.
+.link page $c1
+
+#define SPC_BAR_CELLS   32
+#define SPC_BAR_X       4        // the PCM player's PCM_BAR_X: same window, same bar
+#define SPC_GLYPH_TRACK 18
+#define SPC_GLYPH_FILL  19
+// ID666 (the header's first 256 bytes, staged at SPC_HEADER by load_spc)
+#define ID_TAG          $23      // $1A = the tag is there
+#define ID_SONG         $2e      // 32 chars
+#define ID_GAME         $4e      // 32 chars
+#define ID_SECS         $a9      // 3 text digits, or binary (16 bits are enough)
+#define ID_FADE         $ac      // 5 text digits of ms, or 4 bytes binary
+#define ID_ARTIST       $b0      // 32 chars; one byte later in the text format (spc_artist_off)
+
+
+spc_session:
+  php
+  phb
+  phd
+  rep #$30 : .al : .xl
+  pea $0000
+  pld                         ; DP = 0
+  sep #$20 : .as
+  lda #$00
+  pha
+  plb                         ; DB = $00, as pcmplay.a65 explains (absolute register pokes)
+  jsr spc_screen
+  pld
+  plb
+  plp
+  rtl
+
+
+; ======================================================================
+;  spc_screen -- the whole session.  Entry/exit .as/.xl, DB=$00, DP=0.
+; ======================================================================
+spc_screen:
+  php
+  sep #$20 : .as
+  rep #$10 : .xl
+  lda longptr+2               ; borrowed by the line engine, like the PCM player does
+  pha
+  rep #$20 : .al
+  lda longptr
+  pha
+  sep #$20 : .as
+  lda bar_xl                  ; the browser's selection bar, parked off-screen meanwhile
+  pha
+  lda bar_yl
+  pha
+  lda bar_wl
+  pha
+  lda #$ff
+  sta bar_xl
+  sta bar_yl
+  sta bar_wl
+  sta mouse_pbrow             ; no bar to click: an SPC cannot seek
+  sta mouse_pseek
+  stz spc_open
+  stz media_dark              ; (WRAM is $55 at boot: a gate has to be cleared before use)
+  lda $213f                   ; bit 4: a PAL console (50 frames per second)
+  and #$10
+  beq spc_scr_ntsc
+  lda #50
+  bra spc_scr_fps
+spc_scr_ntsc:
+  .as : .xl
+  lda #60
+spc_scr_fps:
+  .as : .xl
+  sta spc_fps
+  rep #$20 : .al
+  jsr media_sel_offset
+  sta spc_cur
+  sep #$20 : .as
+  jsr spc_load_track
+  bcc spc_loop
+  lda #$04                    ; not an SPC (or no answer): the error blip, nothing opens
+  sta @SFX_MAILBOX
+  jmp spc_scr_restore
+
+spc_loop:
+  .as : .xl
+  lda isr_done
+  beq spc_loop
+  stz isr_done
+  jsr spc_tick                ; the clock; the end of the tag's length moves on
+  lda @mouse_lseen            ; a mouse plugged in or out: the legend changes its keys
+  cmp pcm_seen_mouse
+  beq spc_lp_keys
+  jsr spc_draw_all
+spc_lp_keys:
+  .as : .xl
+  jsl @mouse_playermode
+  jsl @ui_call_pad
+  lda media_keys
+  bne spc_lp_legend
+  inc media_keys              ; the first read since the upload: the mouse is known now,
+  jsr spc_draw_all            ; so the key legend comes up with the right buttons
+spc_lp_legend:
+  .as : .xl
+  lda pad_b
+  bne spc_out
+  lda pad_a
+  beq spc_lp_nota
+  lda spc_state
+  cmp #$02
+  beq spc_lp_top              ; "End": the folder again from the top
+  lda #$00
+  jsr spc_step
+  bra spc_loop
+spc_lp_top:
+  .as : .xl
+  rep #$20 : .al
+  lda #$fffc
+  ldx #TYPE_SPC
+  ldy #$0000
+  jsr media_find
+  bcc spc_lp_none
+  jsr spc_goto
+  bra spc_loop
+spc_lp_none:
+  .al : .xl
+  sep #$20 : .as
+  bra spc_loop
+spc_lp_nota:
+  .as : .xl
+  lda pad_r
+  beq spc_lp_notr
+  lda #$00
+  jsr spc_step
+  bra spc_loop
+spc_lp_notr:
+  .as : .xl
+  lda pad_l
+  beq spc_loop
+  lda #$01
+  jsr spc_step
+  bra spc_loop
+
+spc_out:
+  .as : .xl
+  lda @BGM_STATE
+  cmp #$01
+  bne spc_out_close           ; "End": already silenced, nothing to hide
+  jsr mt_fade_out             ; to black first: the reset below is not pretty to watch
+  jsr spc_out_pop
+  lda #$00
+  sta @BGM_STATE
+  jsl @ui_call_bgm_silence    ; the only way to stop the S-SMP; returns after the warm boot
+  sep #$20 : .as
+  rep #$10 : .xl
+  lda #$80
+  sta @$002100                ; held black while the browser repaints...
+  lda #$00
+  sta @cur_bright
+  sta @tgt_bright
+  lda @mt_bright_bak
+  sta @menu_brightness
+  lda #$01
+  sta @gi_relight             ; ...and fileselloop fades it in when the list is whole, like
+  bra spc_out_quiet           ; the way back from game info (gi_relight_check)
+spc_out_close:
+  .as : .xl
+  jsr spc_out_pop
+spc_out_quiet:
+  .as : .xl
+  lda #$00                    ; S-SMP at IPL: bgm_update brings the menu music (or the
+  sta @BGM_STATE              ; DSP stub) back on its own
+  lda #$01
+  sta filesel_dirty           ; the warm boot cleared the tile buffers
+  rep #$20 : .al
+  lda spc_cur
+  jsr media_place_cursor      ; the browser comes back on the track that was playing
+  sep #$20 : .as
+spc_scr_restore:
+  .as : .xl
+  lda #$ff
+  sta mouse_pbrow
+  pla
+  sta bar_wl
+  pla
+  sta bar_yl
+  pla
+  sta bar_xl
+  rep #$20 : .al
+  pla
+  sta longptr
+  sep #$20 : .as
+  pla
+  sta longptr+2
+  plp
+  .as : .xl
+  rts
+
+
+; spc_out_pop: the player's window, then the grey under it.
+spc_out_pop:
+  .as : .xl
+  jsr spc_win_geom            ; pop_window counts rows with window_h
+  jsl @ui_call_wclose
+  jmp media_undim
+
+; ----------------------------------------------------------------------
+;  spc_step -- A = 0 next / 1 previous .spc of the folder; at either end, nothing.
+;  spc_goto -- A (16-bit) = an entry offset: play it (a load that fails ends the session's
+;  playback there, on "End").  Entry .as (spc_step) / .al (spc_goto); exit .as/.xl.
+; ----------------------------------------------------------------------
+spc_step:
+  .as : .xl
+  rep #$20 : .al
+  and #$00ff
+  tay
+  lda spc_cur
+  ldx #TYPE_SPC
+  jsr media_find
+  bcs spc_goto
+  sep #$20 : .as
+  rts
+spc_goto:
+  .al : .xl
+  sta spc_cur
+  sep #$20 : .as
+  jsr spc_load_track
+  bcc spc_go_ok
+  jsr spc_end_here
+spc_go_ok:
+  .as : .xl
+  rts
+
+
+; ----------------------------------------------------------------------
+;  spc_tick -- once per frame: count the second; past the tag's length, move on.
+; ----------------------------------------------------------------------
+spc_tick:
+  .as : .xl
+  lda spc_state
+  cmp #$01
+  bne spc_tk_out
+  inc spc_frames
+  lda spc_frames
+  cmp spc_fps
+  bcc spc_tk_out
+  stz spc_frames
+  rep #$20 : .al
+  inc spc_sec
+  sep #$20 : .as
+  jsr spc_bar_step
+  jsr spc_draw_time
+  rep #$20 : .al
+  lda spc_total
+  beq spc_tk_out16            ; no length in the tag: plays until closed
+  cmp spc_sec
+  beq spc_tk_end
+  bcs spc_tk_out16            ; total > sec: not yet
+spc_tk_end:
+  .al : .xl
+  lda spc_cur
+  ldx #TYPE_SPC
+  ldy #$0000
+  jsr media_find
+  bcc spc_tk_last
+  jmp spc_goto
+spc_tk_last:
+  .al : .xl
+  sep #$20 : .as
+  jmp spc_end_here
+spc_tk_out16:
+  .al : .xl
+  sep #$20 : .as
+spc_tk_out:
+  .as : .xl
+  rts
+
+
+; spc_bar_step: one more second -> spc_cells = floor(spc_sec * 32 / spc_total), kept with a
+; running remainder instead of a divide.
+spc_bar_step:
+  .as : .xl
+  rep #$20 : .al
+  lda spc_total
+  beq spc_bs_out
+  lda spc_acc
+  clc
+  adc #SPC_BAR_CELLS
+spc_bs_loop:
+  .al : .xl
+  cmp spc_total
+  bcc spc_bs_done
+  sbc spc_total               ; carry set by the cmp
+  sep #$20 : .as
+  inc spc_cells               ; byte-wide: spc_acc sits right after it
+  rep #$20 : .al
+  bra spc_bs_loop
+spc_bs_done:
+  .al : .xl
+  sta spc_acc
+spc_bs_out:
+  .al : .xl
+  sep #$20 : .as
+  rts
+
+
+; ----------------------------------------------------------------------
+;  spc_end_here -- the folder's last track ran out (or the next one would not load): silence
+;  the console and stay on "End".
+; ----------------------------------------------------------------------
+spc_end_here:
+  .as : .xl
+  jsr spc_silence
+  lda #$02
+  sta spc_state
+  jsr spc_draw_all
+  jsr pcm_wait_frame
+  jsr media_light
+  rts
+
+
+; ----------------------------------------------------------------------
+;  spc_load_track -- stage spc_cur (CMD_LOADSPC), check it, read its tag, get the S-SMP back
+;  to IPL, open (or keep) the window and upload it.  Carry SET = not loaded (not an SPC, or
+;  the MCU did not answer); the S-SMP is left as it was then.  Entry/exit .as/.xl.
+; ----------------------------------------------------------------------
+spc_load_track:
+  .as : .xl
+  stz spc_state               ; "Loading" from here: spc_silence repaints with it
+  stz media_keys              ; no key legend until the loop has read the pad again
+  stz spc_id
+  stz spc_cells
+  stz spc_frames
+  rep #$20 : .al
+  stz spc_total
+  stz spc_sec
+  stz spc_acc
+  sep #$20 : .as
+  jsl @ui_call_coversync      ; the cover-request hazard pcmplay.a65 describes
+  ldy spc_cur                 ; MCU_PARAM = cwd + direntry, exactly like a ROM launch
+  iny
+  iny
+  rep #$20 : .al
+  lda [dirstart_addr], y
+  and #$00ff
+  sta @MCU_PARAM+6
+  dey
+  dey
+  lda [dirstart_addr], y
+  sta @MCU_PARAM+4
+  lda #!FILESEL_CWD
+  sta @MCU_PARAM
+  sep #$20 : .as
+  lda #^FILESEL_CWD
+  sta @MCU_PARAM+2
+  lda #$00
+  sta @MCU_PARAM+3
+  sta @SPC_HEADER+1           ; a load that fails silently must not leave the last header
+  lda #CMD_LOADSPC
+  sta @MCU_CMD
+  jsr pcm_wait_mcu
+  bcs spc_lt_fail
+  ldx #$000a                  ; "SNES-SPC700" (the same check the menu music does)
+spc_lt_magic:
+  .as : .xl
+  lda @SPC_HEADER, x
+  cmp @text_spcid, x
+  bne spc_lt_fail
+  dex
+  bne spc_lt_magic
+  jsr spc_id666
+  jsr spc_silence             ; the S-SMP has to be at IPL for the upload
+  lda spc_open
+  bne spc_lt_opened
+  jsr media_dim               ; the browser behind goes grey, like under any modal
+  jsr spc_win_geom
+  jsl @ui_call_wopen
+  lda #$01
+  sta spc_open
+spc_lt_opened:
+  .as : .xl
+  jsr spc_draw_all            ; "Loading", on screen before the upload stops the NMI (~1 s)
+  jsr pcm_wait_frame
+  jsr media_light_wait        ; fade in over the finished screen, before the NMI stops
+  jsl @ui_call_spcload
+  sep #$20 : .as
+  rep #$10 : .xl
+  lda #$01
+  sta @BGM_STATE              ; the S-SMP is busy now: leaving has to reset it
+  sta spc_state
+  stz spc_frames
+  jsr spc_draw_all
+  clc
+  rts
+spc_lt_fail:
+  .as : .xl
+  stz spc_id
+  sec
+  rts
+
+
+; ----------------------------------------------------------------------
+;  spc_silence -- S-SMP back to IPL when something runs on it (a track, the menu music, the
+;  DSP stub): a warm reset, after which the list and our window are painted again (the boot
+;  cleared the tile buffers).  Entry/exit .as/.xl.
+; ----------------------------------------------------------------------
+spc_silence:
+  .as : .xl
+  lda @BGM_STATE
+  beq spc_si_out
+  cmp #$02
+  beq spc_si_out
+  jsr media_reset_dark        ; behind a fade to black; the caller lights it (media_light)
+  jsl @ui_call_listrepaint
+  lda spc_open
+  beq spc_si_wait
+  jsr media_regrey            ; the repaint was bright
+  jsr spc_win_geom
+  jsl @ui_call_wdraw
+  jsr spc_draw_all
+spc_si_wait:
+  .as : .xl
+  jsr pcm_wait_frame          ; let the NMI put it on screen
+spc_si_out:
+  .as : .xl
+  rts
+
+
+; spc_win_geom: the window globals (draw_window / push_window / pop_window read them).
+spc_win_geom:
+  .as : .xl
+  lda #^text_spcplay
+  sta window_tbank
+  ldx #!text_spcplay
+  stx window_taddr
+  lda @spcstart_win_x
+  sta window_x
+  stz print_x+1
+  lda @spcstart_win_y
+  sta window_y
+  stz print_y+1
+  lda @spcstart_win_w
+  sta window_w
+  lda @spcstart_win_h
+  sta window_h
+  stz print_pal
+  rts
+
+
+; ======================================================================
+;  Drawing.  spc_draw_all: every row; spc_draw_time: the bar and the clock (once a second).
+; ======================================================================
+spc_draw_all:
+  .as : .xl
+  lda @mouse_lseen
+  sta pcm_seen_mouse
+  stz mt_row
+  jsr spc_row_title           ; row 0
+  jsr spc_row_sub             ; row 1
+  jsr spc_rows_time           ; rows 2-3
+  jsr pcm_row_blank           ; row 4
+  lda media_keys
+  beq spc_da_nokeys           ; loading, or not read the pad since: no legend yet
+  jsr pcm_wait_frame          ; at the start of a frame: the rows and their glyphs are done
+                              ; before the next NMI uploads them (pcm_draw has the story)
+  lda #^text_spc_prompt
+  ldx #!text_spc_prompt
+  jsr pcm_row_str             ; row 5
+  jsl @hint_keys
+  jmp media_keys2_spc         ; row 6 (with a mouse: its held buttons)
+spc_da_nokeys:
+  .as : .xl
+  jsr pcm_row_blank           ; row 5
+  jmp pcm_row_blank           ; row 6
+
+spc_draw_time:
+  .as : .xl
+  lda #$02
+  sta mt_row
+  jmp spc_rows_time
+
+
+; row 0: the tag's song title, else the file name
+spc_row_title:
+  .as : .xl
+  lda spc_id
+  beq spc_rt_name
+  lda @SPC_HEADER+ID_SONG
+  cmp #$21
+  bcc spc_rt_name             ; empty (or blank-led): the file name says more
+  jsr mt_blank
+  ldx #ID_SONG
+  jsr spc_emit_field
+  jmp pcm_flush
+spc_rt_name:
+  .as : .xl
+  rep #$20 : .al
+  lda spc_cur
+  jsr media_name_row
+  sep #$20 : .as
+  rts
+
+; row 1: "game - artist" (either alone when the other is missing)
+spc_row_sub:
+  .as : .xl
+  jsr mt_blank
+  lda spc_id
+  beq spc_rs_flush
+  lda @SPC_HEADER+ID_GAME
+  cmp #$21
+  bcc spc_rs_artist
+  ldx #ID_GAME
+  jsr spc_emit_field
+  jsr spc_artist_off
+  lda @SPC_HEADER, x
+  cmp #$21
+  bcc spc_rs_flush
+  lda #$20
+  jsr mt_emit
+  lda #$2d                    ; '-'
+  jsr mt_emit
+  lda #$20
+  jsr mt_emit
+spc_rs_artist:
+  .as : .xl
+  jsr spc_artist_off
+  lda @SPC_HEADER, x
+  cmp #$21
+  bcc spc_rs_flush
+  jsr spc_emit_field
+spc_rs_flush:
+  .as : .xl
+  jmp pcm_flush
+
+; spc_artist_off: X = where the artist starts.  The SPC format's own ambiguity: the text
+; format's fade field is 5 bytes where the binary one has 4, pushing the artist one byte
+; on, so a first byte that is a digit (the fade's last) or a control code means "one on".
+spc_artist_off:
+  .as : .xl
+  ldx #ID_ARTIST
+  lda @SPC_HEADER+ID_ARTIST
+  cmp #$20
+  bcc spc_ao_next
+  cmp #$30
+  bcc spc_ao_out
+  cmp #$3a
+  bcs spc_ao_out
+spc_ao_next:
+  .as : .xl
+  inx
+spc_ao_out:
+  .as : .xl
+  rts
+
+; spc_emit_field: up to 32 bytes of SPC_HEADER from X, stopping at a control code.  The tag
+; is 8-bit text in whatever the ripper used: anything past ASCII becomes '?' -- these codes
+; are the font's accents and Cyrillic (and $FA+ starts a CJK pair), never what was meant.
+spc_emit_field:
+  .as : .xl
+  ldy #$0020
+spc_ef_loop:
+  .as : .xl
+  lda @SPC_HEADER, x
+  cmp #$20
+  bcc spc_ef_out
+  cmp #$7f
+  bcc spc_ef_put
+  lda #$3f                    ; '?'
+spc_ef_put:
+  .as : .xl
+  jsr mt_emit                 ; keeps X (and Y)
+  inx
+  dey
+  bne spc_ef_loop
+spc_ef_out:
+  .as : .xl
+  rts
+
+; rows 2-3: the bar (only with a length) and the clock -- "Loading" while uploading,
+; "m:ss" or "m:ss / m:ss", plus "End" after the folder's last track.
+spc_rows_time:
+  .as : .xl
+  jsr mt_blank
+  lda spc_state
+  beq spc_rw_nobar
+  rep #$20 : .al
+  lda spc_total
+  sep #$20 : .as
+  beq spc_rw_nobar16
+  rep #$20 : .al
+  lda #SPC_BAR_X
+  sta mt_col
+  sep #$20 : .as
+  ldx #$0000
+spc_rw_cell:
+  .as : .xl
+  txa
+  cmp spc_cells
+  bcs spc_rw_track
+  lda #SPC_GLYPH_FILL
+  bra spc_rw_put
+spc_rw_track:
+  .as : .xl
+  lda #SPC_GLYPH_TRACK
+spc_rw_put:
+  .as : .xl
+  jsr mt_emit
+  inx
+  cpx #SPC_BAR_CELLS
+  bne spc_rw_cell
+  bra spc_rw_nobar
+spc_rw_nobar16:
+  .as : .xl
+spc_rw_nobar:
+  .as : .xl
+  jsr pcm_flush               ; row 2
+  jsr mt_blank
+  rep #$20 : .al
+  lda #SPC_BAR_X
+  sta mt_col
+  sep #$20 : .as
+  lda spc_state
+  bne spc_rw_clock
+  lda #^text_spcload
+  ldx #!text_spcload
+  jsr mt_put_str
+  jmp pcm_flush               ; row 3
+spc_rw_clock:
+  .as : .xl
+  rep #$20 : .al
+  lda spc_sec
+  sta pcm_tmp
+  sep #$20 : .as
+  jsr pcm_put_time
+  rep #$20 : .al
+  lda spc_total
+  sep #$20 : .as
+  beq spc_rw_end
+  lda #$20
+  jsr mt_emit
+  lda #$2f                    ; '/'
+  jsr mt_emit
+  lda #$20
+  jsr mt_emit
+  rep #$20 : .al
+  lda spc_total
+  sta pcm_tmp
+  sep #$20 : .as
+  jsr pcm_put_time
+spc_rw_end:
+  .as : .xl
+  lda spc_state
+  cmp #$02
+  bne spc_rw_flush
+  lda #$20
+  jsr mt_emit
+  jsr mt_emit
+  lda #^text_pcm_ended
+  ldx #!text_pcm_ended
+  jsr mt_put_str
+spc_rw_flush:
+  .as : .xl
+  jmp pcm_flush               ; row 3
+
+
+; ======================================================================
+;  spc_id666 -- spc_id and spc_total (seconds, play + fade; 0 = unknown) out of the tag.
+;  The format is ambiguous (text or binary fields, same offsets); this follows what the
+;  common players do: the length is text when it reads as digits (one lone digit counts only
+;  when the artist field agrees), else a binary 16-bit value; anything at $1FFF or more is
+;  taken as no length.  The fade follows the length's format.  Entry/exit .as/.xl.
+; ======================================================================
+spc_id666:
+  .as : .xl
+  stz spc_id
+  rep #$20 : .al
+  stz spc_total
+  stz spc_tmp
+  sep #$20 : .as
+  lda @SPC_HEADER+ID_TAG
+  cmp #$1a
+  beq spc_id_tag
+  rts
+spc_id_tag:
+  .as : .xl
+  lda #$01
+  sta spc_id
+  ldx #$0000
+spc_id_sd:
+  .as : .xl
+  cpx #$0003
+  bcs spc_id_sdend
+  lda @SPC_HEADER+ID_SECS, x
+  sec
+  sbc #$30
+  cmp #10
+  bcs spc_id_sdend
+  jsr spc_mul10_add
+  inx
+  bra spc_id_sd
+spc_id_sdend:
+  .as : .xl
+  cpx #$0001
+  bne spc_id_chk
+  lda @SPC_HEADER+ID_ARTIST   ; one digit then not a digit: text only when the artist
+  bne spc_id_bin              ; field starts where the text format puts it
+  lda @SPC_HEADER+ID_ARTIST+1
+  beq spc_id_bin
+spc_id_chk:
+  .as : .xl
+  rep #$20 : .al
+  lda spc_tmp
+  beq spc_id_bin16
+  cmp #$1fff
+  bcs spc_id_bin16
+  sta spc_total
+  sep #$20 : .as
+  lda #$03                    ; tag + text format
+  sta spc_id
+  jsr spc_fade_text
+  bra spc_id_add
+spc_id_bin16:
+  .al : .xl
+  sep #$20 : .as
+spc_id_bin:
+  .as : .xl
+  rep #$20 : .al
+  lda @SPC_HEADER+ID_SECS
+  cmp #$1fff
+  bcs spc_id_none16
+  sta spc_total
+  sep #$20 : .as
+  jsr spc_fade_bin
+spc_id_add:
+  .as : .xl
+  rep #$20 : .al
+  lda spc_total
+  beq spc_id_none16           ; no length: the fade alone means nothing
+  clc
+  adc spc_tmp
+  sta spc_total
+  sep #$20 : .as
+  rts
+spc_id_none16:
+  .al : .xl
+  stz spc_total
+  sep #$20 : .as
+  rts
+
+; spc_fade_text: spc_tmp = the fade in whole seconds, rounded up, from up to 5 text digits
+; of ms -- all the digits but the last three, plus one when those are not all zero.  (The
+; number itself can pass 65535.)
+spc_fade_text:
+  .as : .xl
+  rep #$20 : .al
+  stz spc_tmp
+  sep #$20 : .as
+  ldx #$0000
+spc_ft_count:
+  .as : .xl
+  cpx #$0005
+  bcs spc_ft_n
+  lda @SPC_HEADER+ID_FADE, x
+  sec
+  sbc #$30
+  cmp #10
+  bcs spc_ft_n
+  inx
+  bra spc_ft_count
+spc_ft_n:
+  .as : .xl
+  stx pcm_tmp                 ; n digits
+  ldx #$0000
+spc_ft_sec:
+  .as : .xl
+  rep #$20 : .al
+  txa
+  clc
+  adc #$0003
+  cmp pcm_tmp
+  sep #$20 : .as
+  bcs spc_ft_frac             ; X + 3 >= n: the rest are the ms
+  lda @SPC_HEADER+ID_FADE, x
+  sec
+  sbc #$30
+  jsr spc_mul10_add
+  inx
+  bra spc_ft_sec
+spc_ft_frac:
+  .as : .xl
+  cpx pcm_tmp
+  bcs spc_ft_out
+  lda @SPC_HEADER+ID_FADE, x
+  cmp #$30
+  bne spc_ft_up
+  inx
+  bra spc_ft_frac
+spc_ft_up:
+  .as : .xl
+  rep #$20 : .al
+  inc spc_tmp
+  sep #$20 : .as
+spc_ft_out:
+  .as : .xl
+  rts
+
+; spc_fade_bin: spc_tmp = the binary fade (32-bit ms, taken only up to 99999) in seconds,
+; rounded up, by subtraction: at most 100 passes.
+spc_fade_bin:
+  .as : .xl
+  rep #$20 : .al
+  stz spc_tmp
+  stz pcm_tmp
+  sep #$20 : .as
+  lda @SPC_HEADER+ID_FADE+3
+  bne spc_fb_out
+  lda @SPC_HEADER+ID_FADE+2
+  cmp #$02
+  bcs spc_fb_out
+  sta pcm_tmp                 ; the high byte (0 or 1); pcm_tmp+1 stays 0
+  rep #$20 : .al
+  lda @SPC_HEADER+ID_FADE
+  ldx pcm_tmp
+  beq spc_fb_loop
+  cmp #$86a0                  ; 1:$869F = 99999
+  bcs spc_fb_out16
+spc_fb_loop:
+  .al : .xl
+  ldx pcm_tmp
+  bne spc_fb_sub
+  cmp #$0000
+  beq spc_fb_out16
+  cmp #1000
+  bcc spc_fb_last
+spc_fb_sub:
+  .al : .xl
+  sec
+  sbc #1000
+  bcs spc_fb_count
+  dec pcm_tmp                 ; borrow out of the high byte
+spc_fb_count:
+  .al : .xl
+  inc spc_tmp
+  bra spc_fb_loop
+spc_fb_last:
+  .al : .xl
+  inc spc_tmp
+spc_fb_out16:
+  .al : .xl
+  sep #$20 : .as
+spc_fb_out:
+  .as : .xl
+  rts
+
+; spc_mul10_add: spc_tmp = spc_tmp * 10 + A (a digit, 8-bit).  Keeps X.
+spc_mul10_add:
+  .as : .xl
+  rep #$20 : .al
+  and #$00ff
+  pha                         ; the digit
+  lda spc_tmp
+  asl                         ; x2
+  pha
+  asl
+  asl                         ; x8
+  clc
+  adc $01, s                  ; x10
+  clc
+  adc $03, s                  ; + the digit
+  sta spc_tmp
+  pla
+  pla
+  sep #$20 : .as
+  rts

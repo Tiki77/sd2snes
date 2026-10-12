@@ -44,6 +44,16 @@ void     menu_music_lock(int l)         { clip_locked = l; }
 int      menu_music_locked(void)        { return clip_locked; }
 uint32_t menu_music_tell(void)          { return clip_pos; }
 uint32_t menu_music_size(void)          { return clip_size; }
+static int      clip_noloop, clip_ended, clip_seek_ok = 1;
+static uint32_t clip_seek_to = 0xffffffffu;      /* last body offset menu_music_seek got */
+void     menu_music_noloop(int on)      { clip_noloop = on; }
+int      menu_music_ended(void)         { return clip_ended; }
+int      menu_music_seek(uint32_t pos)  {
+  clip_seek_to = pos;
+  if(!clip_seek_ok) { clip_playing = 0; return 0; }
+  clip_ended = 0; clip_playing = 1; clip_pos = 8 + pos + MSU_DAC_BUFSIZE;
+  return 1;
+}
 
 /* ---- harness ---------------------------------------------------------------------- */
 static int fails;
@@ -184,6 +194,77 @@ int main(void) {
   check("idle: no redundant writes", writes, 0);
   at(11u * BPS);                                     /* the clock ticked -> exactly one write */
   check("tick: one write", writes, 1);
+  pcmplay_stop();
+
+  /* --- starting a track always writes the block, even one identical to the last: the
+         menu zeroed the magic before the command and reads it back as its sentinel -------- */
+  body = 20u * BPS;
+  play(body, 0);
+  blk[0] = blk[1] = 0;                               /* what the menu does */
+  play(body, 0);                                     /* same length, same block */
+  check("restart: magic rewritten", b8(0), PCMPLAY_MAGIC0);
+
+  /* --- the player plays a track ONCE (the menu moves on to the next one) --------- */
+  body = 100u * BPS;
+  play(body, 0);
+  check("start: noloop", clip_noloop, 1);
+
+  /* --- seek by seconds: exact byte target, clamped to the track BEFORE the multiply
+         (65535 s * 176400 wraps 32 bits; the engine itself keeps the last DAC buffer) -- */
+  pcmplay_seek_sec(40);
+  check("seek: target", (long)clip_seek_to, 40L * BPS);
+  check("seek: published at once", b16(4), 40);
+  check("seek: still playing", b8(3), PCMPLAY_STATE_PLAYING);
+  pcmplay_seek_sec(0xffff);
+  check("seek: clamped target", (long)clip_seek_to, 100L * BPS);
+  pcmplay_seek_sec(0);
+  check("seek: start", (long)clip_seek_to, 0);
+  check("seek: start pos", b16(4), 0);
+
+  /* --- seek by fraction (a click on the bar) ------------------------------------- */
+  pcmplay_seek_frac(128);
+  check("frac: target", (long)clip_seek_to, (long)((body >> 8) * 128u));
+  check("frac: pos", b16(4), 50);
+  {   /* a 4-minute track: body * frac would wrap 32 bits, (body >> 8) * frac does not */
+    uint32_t big = 400u * BPS;
+    play(big, 0);
+    pcmplay_seek_frac(255);
+    check("frac big: no wrap", (long)clip_seek_to, (long)((big >> 8) * 255u));
+    check("frac big: pos", b16(4), (long)(((big >> 8) * 255u + MSU_DAC_BUFSIZE) / BPS));
+  }
+
+  /* --- a seek keeps the pause ----------------------------------------------------- */
+  play(body, 0);
+  pcmplay_pause(1);
+  pcmplay_seek_sec(30);
+  check("paused seek: state", b8(3), PCMPLAY_STATE_PAUSED);
+  check("paused seek: pos", b16(4), 30);
+  pcmplay_pause(0);
+
+  /* --- the end: ENDED (not an error), the bar full, the DAC still claimed ---------- */
+  clip_pos = 8 + body;
+  clip_playing = 0;
+  clip_ended = 1;
+  pcmplay_publish();
+  check("end: state", b8(3), PCMPLAY_STATE_ENDED);
+  check("end: pos", b16(4), 100);
+  check("end: progress", b8(8), 255);
+  check("end: still claimed", menu_music_locked(), 1);
+  pcmplay_pause(1);                                  /* nothing to pause */
+  check("end: pause ignored", b8(3), PCMPLAY_STATE_ENDED);
+  pcmplay_seek_sec(90);                              /* a seek plays it again from there */
+  check("end+seek: playing", b8(3), PCMPLAY_STATE_PLAYING);
+  check("end+seek: pos", b16(4), 90);
+
+  /* --- a seek whose refill read fails reports the read error ---------------------- */
+  clip_seek_ok = 0;
+  pcmplay_seek_sec(10);
+  check("seekfail: state", b8(3), PCMPLAY_STATE_ERR_OPEN);
+  check("seekfail: released", menu_music_locked(), 0);
+  clip_seek_ok = 1;
+  clip_seek_to = 0xffffffffu;
+  pcmplay_seek_sec(10);                              /* nothing open: no engine call */
+  check("seek on error: ignored", (long)clip_seek_to, (long)0xffffffffu);
   pcmplay_stop();
 
   /* --- cold-boot clear ------------------------------------------------------------ */

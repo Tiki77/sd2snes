@@ -406,19 +406,22 @@ def saves_tab():
 
 
 def pcm_player():
-    """The menu's MSU-1 track player over the file list."""
+    """The menu's MSU-1 track player (pcmplay.a65) over the folder, greyed like under any
+    modal: the track, its bar and clock, and the two key rows (seek and track keys). The
+    2.18 music players card shows it too."""
     scr = Screen(default_look())
     scr.band_logo()
-    rows = [("Homebrew/", DIRS, "<dir>"), ("MSU-1 Adventure/", DIRS, "<dir>"), ("msu1adventure.sfc", FILES, "2048K")]
-    rows += [("msu1adventure-%d.pcm" % k, PCM, "%dM" % (8 + k % 5)) for k in range(1, 9)]
+    rows = [("../", DIM, "<dir>"), ("msu1adventure.msu", DIM, "16"), ("msu1adventure.sfc", DIM, "2048K")]
+    rows += [("msu1adventure-%d.pcm" % k, DIM, "%dM" % (8 + k % 5)) for k in range(1, 12)]
     for r, (name, col, right) in enumerate(rows):
-        scr.row(r, name, col, right, sel=(r == 4))
-    scr.window(40, 90, 176, 72, "PCM Player")
-    scr.words(48, 100, "msu1adventure-2.pcm", FILES)
-    scr.d.rectangle([64, 122, 188, 123], fill=FILES)
-    scr.d.rectangle([64, 121, 110, 124], fill=PCM)
-    scr.words(64, 132, "0:48 / 2:15", FILES)
-    scr.words(48, 150, "A: Play/Pause   B: Close", FILES)
+        scr.row(r, name, col, right)
+    scr.window(40, 91, 176, 80, "PCM Player")
+    scr.words(48, 107, "msu1adventure-2.pcm", FILES)
+    scr.d.rectangle([64, 124, 191, 125], fill=FILES)
+    scr.d.rectangle([64, 123, 110, 126], fill=PCM)
+    scr.words(64, 131, "0:48 / 2:15", FILES)
+    scr.words(48, 147, "A: Play/Pause   B: Close", FILES)
+    scr.words(48, 155, "<>: -5s/+5s   L/R: Prev/Next track", FILES)
     scr.footer(FOOTER)
     return scr.done()
 

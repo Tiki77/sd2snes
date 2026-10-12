@@ -6,10 +6,10 @@ strtab independent of the menu's const_lang*.a65). Mirrors the menu's resolve_st
 dispatch format: each localized label is a ROW of N word pointers living between
 `onb_strtab_lo` and `onb_strtab_hi`; onb_resolve_str (onb_ui.a65) recognizes a
 pointer in that range and swaps the column by onb_cur_lang (the menu's language
-index, 8 columns). The per-language strings live outside the dispatch range, in a
-pool split by language over two banks (POOL_B_LANGS): pool A (en/pt/es/it) after
-onb_strtab_hi in $C1, pool B (de/fr/ru/nl) in onb_const_lang_b.a65, in the code bank
-$C0; onb_strpool_bank gives each column its bank. Accent/Cyrillic encoding is
+index, 8 columns). The tables live in the code bank $C0 (onb_const_lang_b.a65, ahead
+of pool B). The per-language strings live outside the dispatch range, in a pool split
+by language over two banks (POOL_B_LANGS): pool A (en/pt/es/it) in $C1, pool B
+(de/fr/ru/nl) in $C0; onb_strpool_bank gives each column its bank. Accent/Cyrillic encoding is
 build_const.encode_string's; a character the font has no tile for aborts the build
 (_cells), and so does a string wider than the cells the engine prints it with (_budget).
 
@@ -130,8 +130,8 @@ for _m in range(3, 19):
                                            for l in LANGS)
 
 # The descriptors in tour order, by name: the base tour's cards (1-32, "and more" last),
-# the 2.17 and 2.18 sections (33-40 and 41-43: each its separator card, then the release's cards), then the
-# "and more" items (44-51, ONB_MORE_FIRST in onboarding_main.a65). Per language.
+# the 2.17 and 2.18 sections (33-40 and 41-44: each its separator card, then the release's cards), then the
+# "and more" items (45-52, ONB_MORE_FIRST in onboarding_main.a65). Per language.
 NAMES = [
   # 1 language
   ('Language', 'Idioma', 'Idioma', 'Sprache', 'Langue', 'Lingua', 'Язык', 'Taal'),
@@ -233,21 +233,23 @@ NAMES = [
   ('Xeno Crisis',)*8,
   # 43 the SNES Mouse in the menu (2.18)
   ('SNES Mouse',)*8,
-  # 44 the PPU is cleared before every game boots
+  # 44 the music players: .pcm (seek, playlist) and .spc (2.18)
+  ('Music players', 'Tocadores de música', 'Reproductores de música', 'Musik-Player', 'Lecteurs de musique', 'Lettori musicali', 'Музыкальные плееры', 'Muziekspelers'),
+  # 45 the PPU is cleared before every game boots
   ('Clear PPU on boot', 'Limpar PPU no boot', 'Limpiar PPU al arrancar', 'PPU beim Start löschen', 'Effacer le PPU au boot', "Pulisci PPU all'avvio", 'Очистка PPU при старте', 'Leeg PPU bij starten'),
-  # 45 bus timing compat
+  # 46 bus timing compat
   ('Bus timing compat', 'Compat. de barramento', 'Compat. de bus', 'Bus-Timing-Kompat.', 'Compat. timing bus', 'Compat. timing bus', 'Совместимость шины', 'Compat. bustiming'),
-  # 46 the hardware model in System Information
+  # 47 the hardware model in System Information
   ('Hardware model', 'Modelo do hardware', 'Modelo de hardware', 'Hardware-Modell', 'Modèle du matériel', "Modello dell'hardware", 'Модель устройства', 'Hardwaremodel'),
-  # 47 BS-X and the Memory Pack
+  # 48 BS-X and the Memory Pack
   ('BS-X and Memory Pack', 'BS-X e Memory Pack', 'BS-X y Memory Pack', 'BS-X und Memory Pack', 'BS-X et Memory Pack', 'BS-X e Memory Pack', 'BS-X и Memory Pack', 'BS-X en Memory Pack'),
-  # 48 delete files and saves
+  # 49 delete files and saves
   ('Delete files and saves', 'Apagar arquivos e saves', 'Borrar archivos y saves', 'Dateien/Saves löschen', 'Effacer fichiers/saves', 'Eliminare file e save', 'Удаление файлов', 'Bestanden/saves wissen'),
-  # 49 missing BIOS warning
+  # 50 missing BIOS warning
   ('Missing BIOS warning', 'Aviso de BIOS faltando', 'Aviso de BIOS que falta', 'Fehlendes BIOS melden', 'Alerte de BIOS manquant', 'Avviso di BIOS mancante', 'Нет файла BIOS', 'Melding: BIOS ontbreekt'),
-  # 50 the clock question on boot and the date format
+  # 51 the clock question on boot and the date format
   ('Clock and date', 'Relógio e data', 'Reloj y fecha', 'Uhr und Datum', 'Horloge et date', 'Orologio e data', 'Часы и дата', 'Klok en datum'),
-  # 51 a description for each option
+  # 52 a description for each option
   ('Option descriptions', 'Descrição das opções', 'Descripción de opciones', 'Optionsbeschreibungen', 'Description des options', 'Descrizione opzioni', 'Описание опций', 'Uitleg bij opties'),
 ]
 
@@ -640,7 +642,16 @@ TEXTS = [
    'Collega un SNES Mouse a una delle due porte e il menu mostra un puntatore. Il clic sinistro è [A], il destro è [B], i due insieme sono [X] e tenere premuto il destro è [Y]. Spingi il puntatore contro il bordo in alto o in basso per scorrere la lista. Questa è una prima versione.',
    'Подключи SNES Mouse к любому порту, и в меню появится курсор. Левая кнопка работает как [A], правая как [B], обе вместе как [X], а удержание правой как [Y]. Упри курсор в верхний или нижний край, чтобы прокрутить список. Это первая версия.',
    'Sluit een SNES Mouse aan op een van beide poorten en het menu toont een aanwijzer. Linksklikken is [A], rechtsklikken [B], beide samen [X] en rechts ingedrukt houden [Y]. Duw de aanwijzer tegen de boven- of onderrand om door de lijst te scrollen. Dit is een eerste versie.'),
-  # 44 the PPU is cleared before every game boots
+  # 44 the music players: .pcm (seek, playlist) and .spc (2.18)
+  ("A .pcm or .spc in the list opens its player, and the folder is a playlist: the next track plays when one ends, [L]/[R] skip tracks. On a .pcm, [Left]/[Right] jump 5 s (hold for more) and a click on the bar seeks. An .spc shows its length, then moves on.",
+   'Um .pcm ou .spc na lista abre o tocador, e a pasta vira playlist: quando uma faixa acaba toca a próxima, [L]/[R] trocam de faixa. No .pcm, [Esquerda]/[Direita] pulam 5 s (segure para mais) e um clique na barra pula para lá. O .spc mostra a duração e depois segue.',
+   'Un .pcm o .spc de la lista abre su reproductor y la carpeta es una lista: al acabar una pista suena la siguiente, [L]/[R] cambian de pista. En un .pcm, [Izquierda]/[Derecha] saltan 5 s (mantén para más) y un clic en la barra salta ahí. Un .spc muestra su duración y luego sigue.',
+   'Eine .pcm oder .spc in der Liste öffnet ihren Player, der Ordner wird zur Playlist: nach einem Titel kommt der nächste, [L]/[R] wechseln. Bei .pcm springen [Links]/[Rechts] 5 s (halten für mehr), ein Klick auf den Balken springt dorthin. Eine .spc zeigt ihre Länge und geht dann weiter.',
+   "Un .pcm ou .spc de la liste ouvre son lecteur, le dossier devient une playlist : la piste suivante démarre à la fin, [L]/[R] changent de piste. Sur un .pcm, [Gauche]/[Droite] sautent de 5 s (maintenir pour plus) et un clic sur la barre y va. Un .spc affiche sa durée puis enchaîne.",
+   'Un .pcm o .spc nella lista apre il suo lettore e la cartella diventa una playlist: finita una traccia parte la successiva, [L]/[R] cambiano traccia. In un .pcm, [Sinistra]/[Destra] saltano 5 s (tieni premuto per di più) e un clic sulla barra va lì. Un .spc mostra la durata e poi prosegue.',
+   '.pcm или .spc в списке открывает плеер, а папка становится плейлистом: после трека играет следующий, [L]/[R] переключают треки. В .pcm [Влево]/[Вправо] прыгают на 5 с (удержание больше), щелчок по полосе переходит туда. .spc показывает длину и потом идёт дальше.',
+   'Een .pcm of .spc in de lijst opent de speler, de map wordt een afspeellijst: na een nummer start het volgende, [L]/[R] wisselen. Bij een .pcm springen [Links]/[Rechts] 5 s (vasthouden voor meer) en een klik op de balk springt daarheen. Een .spc toont zijn lengte en gaat dan door.'),
+  # 45 the PPU is cleared before every game boots
   ("Some romhacks draw their intro without clearing the video memory, and on a real console the menu's leftovers show as garbage. The sd2snes+ wipes it before every game starts.",
    'Alguns romhacks desenham a abertura sem limpar a memória de vídeo, e num console de verdade as sobras do menu aparecem como lixo. O sd2snes+ limpa tudo antes de qualquer jogo começar.',
    'Algunos romhacks dibujan su intro sin limpiar la memoria de vídeo, y en una consola real los restos del menú salen como basura. El sd2snes+ la borra antes de que empiece cualquier juego.',
@@ -649,7 +660,7 @@ TEXTS = [
    "Alcune romhack disegnano l'intro senza pulire la memoria video, e su una console vera gli avanzi del menu appaiono come spazzatura. L'sd2snes+ la pulisce prima che parta qualsiasi gioco.",
    'Некоторые ромхаки рисуют заставку, не очищая видеопамять, и на настоящей консоли остатки меню видны как мусор. sd2snes+ очищает её перед запуском любой игры.',
    'Sommige romhacks tekenen hun intro zonder het videogeheugen te wissen, en op een echte console verschijnen restjes van het menu als rommel. De sd2snes+ wist het voordat elk spel start.'),
-  # 45 bus timing compat
+  # 46 bus timing compat
   ('A game that freezes or glitches right after the logo on some consoles, mostly 1-CHIP ones? Try {cfg} > {ingame} > {buscompat}: it frees the cartridge bus a little earlier, like firmware 1.11.0 did.',
    'Um jogo trava ou dá glitch logo depois do logo em alguns consoles, quase sempre 1-CHIP? Tente {cfg} > {ingame} > {buscompat}: ela libera o barramento do cartucho um pouco antes, como a firmware 1.11.0 fazia.',
    '¿Un juego se cuelga o falla justo tras el logo en algunas consolas, casi siempre 1-CHIP? Prueba {cfg} > {ingame} > {buscompat}: libera el bus del cartucho un poco antes, como hacía el firmware 1.11.0.',
@@ -658,7 +669,7 @@ TEXTS = [
    "Un gioco si blocca o dà glitch subito dopo il logo su alcune console, quasi sempre 1-CHIP? Prova {cfg} > {ingame} > {buscompat}: libera il bus della cartuccia un po' prima, come il firmware 1.11.0.",
    'Игра зависает или сбоит сразу после логотипа на некоторых консолях, чаще 1-CHIP? Попробуй {cfg} > {ingame} > {buscompat}: шина картриджа освобождается чуть раньше, как в прошивке 1.11.0.',
    'Loopt een spel vast of hapert het net na het logo op sommige consoles, meestal 1-CHIP? Probeer {cfg} > {ingame} > {buscompat}: de cartridgebus wordt iets eerder vrijgegeven, zoals firmware 1.11.0 deed.'),
-  # 46 the hardware model in System Information
+  # 47 the hardware model in System Information
   ('{sysinfo} in the main menu ([X]) now also shows which hardware it runs on: sd2snes Mk.II, sd2snes Mk.III or FXPAK PRO STM32.',
    '{sysinfo} no menu principal ([X]) agora mostra também em que hardware ele roda: sd2snes Mk.II, sd2snes Mk.III ou FXPAK PRO STM32.',
    '{sysinfo} en el menú principal ([X]) ahora también muestra en qué hardware corre: sd2snes Mk.II, sd2snes Mk.III o FXPAK PRO STM32.',
@@ -667,7 +678,7 @@ TEXTS = [
    '{sysinfo} nel menu principale ([X]) ora mostra anche su quale hardware gira: sd2snes Mk.II, sd2snes Mk.III o FXPAK PRO STM32.',
    '{sysinfo} в главном меню ([X]) теперь показывает и модель устройства: sd2snes Mk.II, sd2snes Mk.III или FXPAK PRO STM32.',
    '{sysinfo} in het hoofdmenu ([X]) toont nu ook op welke hardware het draait: sd2snes Mk.II, sd2snes Mk.III of FXPAK PRO STM32.'),
-  # 47 BS-X and the Memory Pack
+  # 48 BS-X and the Memory Pack
   ('Satellaview games that use the 8M Memory Pack slot read it from /sd2snes/saves as <rom>.mpk: saved sound novels, downloaded races and the like. The game still boots without a pack.',
    'Jogos do Satellaview que usam o slot de Memory Pack de 8M leem o pack de /sd2snes/saves como <rom>.mpk: sound novels salvas, corridas baixadas e afins. O jogo boota mesmo sem o pack.',
    'Los juegos de Satellaview que usan el slot de Memory Pack de 8M lo leen de /sd2snes/saves como <rom>.mpk: sound novels guardadas, carreras descargadas y más. El juego arranca incluso sin pack.',
@@ -676,7 +687,7 @@ TEXTS = [
    'I giochi Satellaview che usano lo slot Memory Pack da 8M lo leggono da /sd2snes/saves come <rom>.mpk: sound novel salvate, corse scaricate e simili. Il gioco parte anche senza pack.',
    'Игры Satellaview со слотом Memory Pack 8M читают его из /sd2snes/saves как <rom>.mpk: сохранённые звуковые новеллы, скачанные гонки и прочее. Игра запускается и без Memory Pack.',
    'Satellaview-spellen met een 8M Memory Pack-slot lezen het pack uit /sd2snes/saves als <rom>.mpk: opgeslagen sound novels, gedownloade races en meer. Het spel start ook zonder pack.'),
-  # 48 delete files and saves
+  # 49 delete files and saves
   ("From the [Y] menu of the file list, {del} erases the selected file and {delsrm} only the game's saves, all 4 slots. Deleting a ROM also takes its cover, info card, guides and cheats along.",
    'No menu do [Y] da lista de arquivos, {del} apaga o arquivo selecionado e {delsrm} só os saves do jogo, nos 4 slots. Apagar uma ROM leva junto a capa, a ficha, as guias e os cheats dela.',
    'Desde el menú [Y] de la lista, {del} borra el archivo elegido y {delsrm} solo los saves del juego, las 4 ranuras. Borrar una ROM también se lleva su carátula, ficha, guías y cheats.',
@@ -685,7 +696,7 @@ TEXTS = [
    'Dal menu [Y] della lista, {del} cancella il file scelto e {delsrm} solo i salvataggi del gioco, tutti e 4 gli slot. Eliminare una ROM porta via anche copertina, scheda, guide e cheat.',
    'В списке файлов по кнопке [Y] пункт {del} удаляет выбранный файл, а {delsrm} только сохранения игры, все 4 слота. Вместе с игрой удаляются её обложка, карточка, руководства и читы.',
    'Vanuit het [Y]-menu van de lijst wist {del} het gekozen bestand en {delsrm} alleen de saves van het spel, alle 4 plekken. Een gewiste ROM neemt ook hoes, spelinfo, gidsen en cheats mee.'),
-  # 49 missing BIOS warning
+  # 50 missing BIOS warning
   ('Games with special chips (DSP, Super FX, SA-1, S-DD1, CX4, Super Game Boy, BS-X...) need support files on the card. If one is missing, the menu names the file and stays up, instead of freezing or starting a broken game.',
    'Jogos com chips especiais (DSP, Super FX, SA-1, S-DD1, CX4, Super Game Boy, BS-X...) precisam de arquivos de apoio no cartão. Se faltar algum, o menu diz qual é e continua de pé, em vez de travar ou abrir um jogo quebrado.',
    'Los juegos con chips especiales (DSP, Super FX, SA-1, S-DD1, CX4, Super Game Boy, BS-X...) necesitan archivos de apoyo en la tarjeta. Si falta uno, el menú dice cuál y sigue en pie, en vez de colgarse o abrir un juego roto.',
@@ -694,7 +705,7 @@ TEXTS = [
    'I giochi con chip speciali (DSP, Super FX, SA-1, S-DD1, CX4, Super Game Boy, BS-X...) vogliono file di supporto sulla scheda. Se ne manca uno, il menu dice quale e resta attivo, invece di bloccarsi o avviare un gioco rotto.',
    'Играм со специальными чипами (DSP, Super FX, SA-1, S-DD1, CX4, Super Game Boy, BS-X...) нужны файлы BIOS на карте. Если какого-то нет, меню показывает его название и остаётся открытым, а не зависает и не запускает сломанную игру.',
    'Spellen met speciale chips (DSP, Super FX, SA-1, S-DD1, CX4, Super Game Boy, BS-X...) hebben hulpbestanden op de kaart nodig. Ontbreekt er een, dan noemt het menu het bestand en blijft het open, in plaats van te hangen.'),
-  # 50 the clock question on boot and the date format
+  # 51 the clock question on boot and the date format
   ("When the cartridge's clock is not set, the menu asks for the time on start. {askclock} in {browser} turns the question off. The date at the bottom of the list follows the language: month first in English, day first in the others.",
    'Quando o relógio do cartucho não está acertado, o menu pede a hora ao iniciar. {askclock} em {browser} desliga a pergunta. A data no rodapé da lista segue o idioma: mês primeiro em inglês, dia primeiro nos outros.',
    'Si el reloj del cartucho no está en hora, el menú la pide al iniciar. {askclock} en {browser} quita la pregunta. La fecha al pie de la lista sigue el idioma: primero el mes en inglés, el día en los demás.',
@@ -703,7 +714,7 @@ TEXTS = [
    "Se l'orologio della cartuccia non è impostato, il menu chiede l'ora all'avvio. {askclock} in {browser} toglie la domanda. La data in fondo alla lista segue la lingua: prima il mese in inglese, il giorno nelle altre.",
    'Если часы картриджа не выставлены, меню спрашивает время при старте. {askclock} в {browser} отключает вопрос. Дата внизу списка следует языку: в английском сначала месяц, в остальных день.',
    'Is de klok van de cartridge niet ingesteld, dan vraagt het menu bij de start om de tijd. {askclock} in {browser} zet dat uit. De datum onder de lijst volgt de taal: in het Engels eerst de maand, anders de dag.'),
-  # 51 a description for each option
+  # 52 a description for each option
   ("Every option in {cfg} shows a sentence in a box on screen explaining what it does, in the menu's language, so each setting makes sense without a manual.",
    'Cada opção em {cfg} mostra uma frase numa caixa na tela explicando o que ela faz, no idioma do menu, para cada ajuste fazer sentido sem manual.',
    'Cada opción de {cfg} muestra una frase en un recuadro explicando lo que hace, en el idioma del menú, para entender cada ajuste sin manual.',
@@ -765,7 +776,7 @@ def _cells(text):
 
 
 TEXT_W = 30          # == ONB_TEXT_W: cols 1..30
-MORE_FIRST = 43      # == ONB_MORE_FIRST: the "and more" items are the descriptors from here
+MORE_FIRST = 44      # == ONB_MORE_FIRST: the "and more" items are the descriptors from here
 MORE_NAME_W = 24     # an answer row's width (onb_draw_option_value prints labels with 24)
 TEXT_MAX_LINES = 11  # the answer list starts 2 rows below the text and the longest
                      # list (8 languages) has to fit above the progress bar
@@ -1054,14 +1065,18 @@ def main():
     L.append("onb_cjk_sheet_bank .byt " + ", ".join("^onb_sheet_" + l if l in CJK_LANGS else "0"
                                                      for l in LANGS))
     L.append("")
-    L.append("; ---- dispatch tables (one row of %d word pointers per label) ----" % nlang)
-    L.append("onb_strtab_lo:")
+    # The dispatch tables live in the code bank $C0, ahead of pool B, and not in $C1 with
+    # pool A: $C1 ran out (the font, pool A and the Chinese pool). Every reader takes their
+    # bank from ^onb_strtab_lo, and pool B follows onb_strtab_hi, outside the table range.
+    T = ["; ---- dispatch tables (one row of %d word pointers per label) ----" % nlang,
+         "onb_strtab_lo:"]
     for label in STRINGS:
-        L.append("%s:" % label)
+        T.append("%s:" % label)
         for lang in LANGS:
-            L.append("  .word !%s_%s" % (label, lang))
-    L.append("onb_strtab_hi:")
-    L.append("")
+            T.append("  .word !%s_%s" % (label, lang))
+    T.append("onb_strtab_hi:")
+    T.append("")
+    B[B.index("onb_pool_b:"):B.index("onb_pool_b:")] = T
     S0 = S[CJK_LANGS[0]]
     S0.append("; the common glyphs (0..%d), in every language" % (len(common_map) - 1))
     S0.append("onb_cjk_common:")

@@ -422,18 +422,19 @@
 #define PCMPLAY_BLK                 $FF07C0
 #define PCM_MAGIC0                  0   /* 'P' ($50) */
 #define PCM_MAGIC1                  1   /* 'C' ($43) */
-#define PCM_VERSION                 2   /* u8, 1 = the layout below */
+#define PCM_VERSION                 2   /* u8, 1 = the layout below; 2 = + CTL_SEEK/SEEKFRAC, ST_ENDED */
+#define PCM_VER_SEEK                2   /* the first version the menu may send a seek to */
 #define PCM_STATE                   3   /* u8 PCM_ST_* */
 #define PCM_ST_NONE                 0   /* nothing playing (also what the firmware parks here at cold boot) */
 #define PCM_ST_PLAYING              1
 #define PCM_ST_PAUSED               2   /* DAC read pointer frozen; the track stays open at its position */
 #define PCM_ST_ERR_OPEN             3   /* the file would not open */
 #define PCM_ST_ERR_MAGIC            4   /* opened, but it is not an "MSU1" PCM */
+#define PCM_ST_ENDED                5   /* v2: played to EOF; the menu starts the folder's next track */
 #define PCM_POS                     4   /* u16 LE: elapsed seconds */
 #define PCM_TOTAL                   6   /* u16 LE: track length in seconds */
 #define PCM_PROGRESS                8   /* u8 0..255: position fraction, pre-divided for the bar */
-#define PCM_FLAGS                   9   /* u8, bits below */
-#define PCM_F_LOOPS                 $01 /* bit0: the header carries a non-zero loop point */
+#define PCM_FLAGS                   9   /* u8, reserved: published 0 (src/pcmplay.h) */
 #define PCM_SIZE                    32
 #define MANUAL_S1META               $FF0770 /* scale-1 (1x) page meta, 16B after MANUAL_META: +0 flags (bit0 = staged and ready), +1 nrows, +2..3 pix_h u16 LE, +4 staged page, +5 staged guide, +6..7 page count u16 LE. Lockstep with SRAM_MANUAL_S1META_ADDR in src/memmap.h. */
 #define MAN_S1_F_READY              $01
@@ -802,6 +803,8 @@
 #define PCM_CTL_STOP                0
 #define PCM_CTL_PAUSE               1   /* freezes the DAC only -- the file stays open at its position */
 #define PCM_CTL_RESUME              2
+#define PCM_CTL_SEEK                3   /* v2: MCU_PARAM+1..2 = target in whole seconds (u16 LE) */
+#define PCM_CTL_SEEKFRAC            4   /* v2: MCU_PARAM+1 = target as 0..255 of the track */
 /* WiFi-in-menu commands RESERVED for the Companion port (lockstep with src/snes.h):
    WiFi owns $30-$33, so game-info lives at $34-$37. No menu/MCU handler in this
    branch -- reserved so adding WiFi later needs zero command renumbering. */

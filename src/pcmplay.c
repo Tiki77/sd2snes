@@ -32,7 +32,8 @@ static void pcm_write_blk(void) {
   blk.version  = PCMPLAY_VERSION;
   blk.state    = pcm_state;
 
-  if(pcm_state == PCMPLAY_STATE_PLAYING || pcm_state == PCMPLAY_STATE_PAUSED) {
+  if(pcm_state == PCMPLAY_STATE_PLAYING || pcm_state == PCMPLAY_STATE_PAUSED
+     || pcm_state == PCMPLAY_STATE_ENDED) {
     blk.total_sec = pcm_total_sec;
     pos = menu_music_tell();
     pos = (pos > MSU_PCM_OFFSET_WAVEDATA) ? (pos - MSU_PCM_OFFSET_WAVEDATA) : 0;
@@ -71,6 +72,7 @@ void pcmplay_start(const char *filename) {
   if(res == 0xA0) {
     uint32_t size = menu_music_size();
     menu_music_lock(1);        /* the FMV stop paths must leave our track alone */
+    menu_music_noloop(1);      /* play it once: at the end the menu moves to the next track */
     pcm_body_bytes = (size > MSU_PCM_OFFSET_WAVEDATA) ? (size - MSU_PCM_OFFSET_WAVEDATA) : 0;
     pcm_total_sec  = (uint16_t)(pcm_body_bytes / PCM_BYTES_PER_SEC);
     pcm_state      = PCMPLAY_STATE_PLAYING;
@@ -79,6 +81,10 @@ void pcmplay_start(const char *filename) {
        paths, so there is nothing to unwind here -- just report it. */
     pcm_state = (res == 0x02) ? PCMPLAY_STATE_ERR_MAGIC : PCMPLAY_STATE_ERR_OPEN;
   }
+  /* ALWAYS write: the menu zeroed the magic before this command (its capability sentinel),
+     and a track of the same length as the last one would publish a block identical to the
+     cached one -- skipped, magic left at zero, the menu reporting "update the firmware". */
+  pcm_last_valid = 0;
   pcm_write_blk();
 }
 
@@ -89,6 +95,32 @@ void pcmplay_stop(void) {
   pcm_total_sec  = 0;
   pcm_body_bytes = 0;
   pcm_write_blk();
+}
+
+static void pcm_seek(uint32_t pos) {
+  if(pcm_state != PCMPLAY_STATE_PLAYING && pcm_state != PCMPLAY_STATE_PAUSED
+     && pcm_state != PCMPLAY_STATE_ENDED) return;
+  if(menu_music_seek(pos)) {
+    if(pcm_state == PCMPLAY_STATE_ENDED) pcm_state = PCMPLAY_STATE_PLAYING;
+  } else if(!menu_music_active() && !menu_music_ended()) {
+    /* the refill read failed and stopped the clip: say so, as pcmplay_publish would */
+    menu_music_lock(0);
+    menu_music_stop();
+    pcm_state = PCMPLAY_STATE_ERR_OPEN;
+  }
+  pcm_write_blk();
+}
+
+void pcmplay_seek_sec(uint16_t sec) {
+  /* clamp BEFORE multiplying: 65535 s * 176400 B/s does not fit 32 bits, a real track's
+     length does (its body is a 32-bit file size) */
+  if(sec > pcm_total_sec) sec = pcm_total_sec;
+  pcm_seek((uint32_t)sec * PCM_BYTES_PER_SEC);
+}
+
+void pcmplay_seek_frac(uint8_t frac) {
+  /* body >> 8 first for the same reason; the 255 bytes it drops are a fraction of a ms */
+  pcm_seek((pcm_body_bytes >> 8) * (uint32_t)frac);
 }
 
 void pcmplay_pause(int paused) {
@@ -104,7 +136,9 @@ void pcmplay_publish(void) {
      inside menu_sfx_pump) -- must not leave the screen showing a track that is no longer
      playing.  Reported as the READ error it is, rather than as plain "nothing playing":
      the latter would repaint an empty bar and 0:00 with no explanation at all. */
-  if(pcm_state == PCMPLAY_STATE_PLAYING && !menu_music_active()) {
+  if(pcm_state == PCMPLAY_STATE_PLAYING && menu_music_ended()) {
+    pcm_state = PCMPLAY_STATE_ENDED;      /* played out: the menu decides what comes next */
+  } else if(pcm_state == PCMPLAY_STATE_PLAYING && !menu_music_active()) {
     menu_music_lock(0);
     menu_music_stop();                    /* already stopped; this only drops the handle */
     pcm_state = PCMPLAY_STATE_ERR_OPEN;

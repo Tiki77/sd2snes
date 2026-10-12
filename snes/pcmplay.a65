@@ -26,8 +26,24 @@
 ; screen: same 40-column geometry, and the two can never be open at once.  Only the flush
 ; is our own, because this window is not the memtest one.
 ;
+; THE FOLDER IS THE PLAYLIST.  A track plays once (the firmware stops at EOF and reports
+; PCM_ST_ENDED, PCMPLAY_VERSION 2+); the next .pcm of the directory table -- the browser's
+; own order, which puts the .pcm files last and in natural order (sort.c) -- starts on its
+; own, and L/R step back and forth.  After the last one the screen stays on "End"; A then
+; starts over from the first.  The track being played is pcm_cur, a byte offset into the
+; directory table, and closing the screen leaves the browser's cursor on it.
+;
+; SEEK.  Left/Right move -/+5 s, more per step the longer they are held (pcm_seek_key);
+; a left click on the bar seeks to that cell (mouse_playermode / mouse_pseek).  The firmware
+; refills the whole DAC buffer at the target, keeps a pause, and republishes the block at
+; once, so the bar and the clock move right away.  Version-1 firmware takes an unknown
+; control code as STOP, so every seek is gated on pcm_ver.
+;
 ; ENTRY POINT (jsl, self-contained -- forces DP=0 and DB=$00):
 ;   select_pcm  - the browser's A action on a TYPE_PCM entry (filesel.a65 sel_is_pcm)
+; Shared with the SPC player (spcview.a65, same bank): pcm_flush / pcm_row_blank /
+; pcm_row_str / pcm_put_time / pcm_wait_mcu / pcm_wait_frame / media_name_row /
+; media_sel_offset / media_find / media_place_cursor.
 .link page $c1
 #include "memmap.i65"
 // memmap.i65 re-asserts '.link page $c0' on include; re-declare $c1 AFTER it (last
@@ -48,6 +64,12 @@
 // whole 2 KB DAC buffer, so it is the slow one; everything else is immediate.  A timeout
 // closes the screen instead of hanging the menu (same contract as the manual viewer).
 #define PCM_TIMEOUT_HI  $0020
+// Seek keys: a repeat comes every 3 frames once the d-pad has been held 16 (pad.a65).  Every
+// other one seeks (a seek is a file seek + a 2 KB read on the MCU), with a step that grows:
+// 5 s, then 10 s from the 6th repeat, then 30 s from the 16th (about a second in).
+#define PCM_REP_DELAY   $0d      // pad1delay as read_pad leaves it on an auto-repeat (pad.a65)
+#define PCM_STEP_MID    6
+#define PCM_STEP_FAST   16
 
 
 ; ======================================================================
@@ -105,7 +127,10 @@ pcm_screen:
   ; still inside that cover command, finishing it re-enters menu_main_loop, whose first
   ; statement zeroes MCU_CMD -- erasing our CMD_RESET before it is ever dispatched, and
   ; hanging the console for good.
+  stz media_dark              ; (WRAM is $55 at boot: a gate has to be cleared before use)
+  stz media_keys              ; no key legend until the loop has read the pad
   jsl @ui_call_coversync
+  jsr pcm_init_cur            ; the track = the browser's selection (WRAM: survives the reset)
   jsr pcm_prepare_audio       ; may warm-reset; repaints the list itself if it does
   jsr pcm_start               ; sets pcm_nosup when this firmware has no handler
 
@@ -123,6 +148,7 @@ pcm_screen:
   sta bar_yl
   sta bar_wl
 
+  jsr media_dim               ; the browser behind goes grey, like under any modal
   lda #^text_pcm_title
   sta window_tbank
   ldx #!text_pcm_title
@@ -144,32 +170,82 @@ pcm_screen:
   lda #$ff
   sta pcm_seen                ; no state rendered yet -> force the first draw
   sta pcm_seen_pos
+  sta mouse_pseek
+  stz pcm_rep
+  jsr pcm_bar_geom
   jsr pcm_draw
+  jsr media_light             ; after a warm reset: fade in over the finished screen
 pcm_loop:
   lda isr_done
   beq pcm_loop
   stz isr_done
   jsr pcm_draw                ; self-gating: recomposes only when something changed
+  jsr pcm_check_end           ; a track that played out -> the next one
+  jsl @mouse_playermode
   jsl @ui_call_pad
+  lda media_keys
+  bne pcm_k_legend
+  inc media_keys              ; the first read: the mouse is known now (a warm reset forgot
+  lda #$ff                    ; it), so the legend comes up once, with the right buttons
+  sta pcm_seen
+pcm_k_legend:
+  .as : .xl
   lda pad_b
   bne pcm_scr_out
-  lda pad_a
-  beq pcm_loop
   lda pcm_nosup
-  bne pcm_loop                ; nothing is playing: A has nothing to toggle
-  jsr pcm_toggle
+  bne pcm_loop                ; nothing is playing: no other key has anything to act on
+  lda pad_a
+  beq pcm_k_nota
+  jsr pcm_key_a
+  bra pcm_loop
+pcm_k_nota:
+  lda pad_l
+  beq pcm_k_notl
+  lda #$01
+  jsr pcm_track_key
+  bra pcm_loop
+pcm_k_notl:
+  lda pad_r
+  beq pcm_k_notr
+  lda #$00
+  jsr pcm_track_key
+  bra pcm_loop
+pcm_k_notr:
+  lda pad_left
+  beq pcm_k_notleft
+  lda #$01
+  jsr pcm_seek_key
+  bra pcm_loop
+pcm_k_notleft:
+  lda pad_right
+  beq pcm_k_notright
+  lda #$00
+  jsr pcm_seek_key
+  bra pcm_loop
+pcm_k_notright:
+  lda mouse_pseek
+  cmp #$ff
+  beq pcm_loop
+  jsr pcm_seek_click
   bra pcm_loop
 
 pcm_scr_out:
   jsr pcm_stop
   jsl @ui_call_wclose
+  jsr media_undim
   pla
   sta bar_wl
   pla
   sta bar_yl
   pla
   sta bar_xl
+  lda #$ff
+  sta mouse_pbrow             ; no bar on screen any more
   jsr pcm_restore_audio
+  rep #$20 : .al
+  lda pcm_cur
+  jsr media_place_cursor      ; the browser comes back on the track that was playing
+  sep #$20 : .as
   rep #$20 : .al
   pla
   sta longptr
@@ -208,11 +284,7 @@ pcm_prepare_audio:
   cmp #$01
   bne pcm_pa_stub             ; 0/2: at IPL already
   ; --- music playing: silence it the only way there is ---
-  lda #$00
-  sta @BGM_STATE              ; snescom has no long stz
-  jsl @ui_call_bgm_silence    ; returns HERE, after the warm boot (APU back at IPL)
-  sep #$20 : .as              ; the warm boot's plp restored the caller's P, so re-assert
-  rep #$10 : .xl
+  jsr media_reset_dark        ; the warm reset, behind a fade to black (pcm_screen lights it)
   lda #$01
   sta filesel_dirty           ; the browser owes itself a repaint when we hand it back
   jsl @ui_call_listrepaint    ; ...but the window opens NOW, so paint the list first
@@ -271,16 +343,16 @@ pcm_start:
   php
   sep #$20 : .as
   rep #$10 : .xl
-  jsr pcm_sel_index           ; Y = byte offset of the selected direntry
+  ldy pcm_cur                 ; Y = byte offset of the track's direntry
   iny
   iny
   rep #$20 : .al
-  lda [dirptr_addr], y        ; +2: bank byte (high half is the type, masked off)
+  lda [dirstart_addr], y      ; +2: bank byte (high half is the type, masked off)
   and #$00ff
   sta @MCU_PARAM+6
   dey
   dey
-  lda [dirptr_addr], y        ; +0: address
+  lda [dirstart_addr], y      ; +0: address
   sta @MCU_PARAM+4
   lda #!FILESEL_CWD
   sta @MCU_PARAM
@@ -301,8 +373,11 @@ pcm_start:
   bcs pcm_st_nosup            ; timed out -> treat it like "not supported"
   jsr pcm_magic_ok
   bcs pcm_st_nosup
+  lda @PCMPLAY_BLK+PCM_VERSION
+  sta pcm_ver
   stz pcm_paused
   stz pcm_nosup
+  stz pcm_last
   plp
   .as : .xl
   rts
@@ -416,19 +491,29 @@ pcm_mo_no:
 
 
 ; ----------------------------------------------------------------------
-;  pcm_sel_index -- Y = byte offset of the selected entry inside the direntry table.
-;  Recomputed from filesel_sel (a WRAM var) rather than carried in a register, because
-;  the warm reset in pcm_prepare_audio destroys registers but not WRAM.
-;  Entry .as/.xl; exit .as/.xl, Y = offset.
+;  pcm_init_cur -- pcm_cur = the selected entry's byte offset in the directory table
+;  (from its start, dirstart_addr: the page is dirptr_addr, the row filesel_sel).  Kept in
+;  WRAM, not a register: the warm reset in pcm_prepare_audio destroys registers, not WRAM.
+;  Entry/exit .as/.xl.
 ; ----------------------------------------------------------------------
-pcm_sel_index:
+pcm_init_cur:
   rep #$20 : .al
+  jsr media_sel_offset
+  sta pcm_cur
+  sep #$20 : .as
+  rts
+
+; media_sel_offset: A (16-bit) = the browser selection's offset from dirstart_addr.
+media_sel_offset:
+  .al : .xl
   lda filesel_sel
   and #$00ff
   asl
   asl
-  tay
-  sep #$20 : .as
+  clc
+  adc dirptr_addr
+  sec
+  sbc dirstart_addr
   rts
 
 
@@ -445,6 +530,488 @@ pcm_wf_loop:
   stz isr_done
   plp
   .as : .xl
+  rts
+
+
+; ----------------------------------------------------------------------
+;  pcm_bar_geom -- tell the mouse where the bar is (row 2 of the layout, PCM_BAR_X cells in),
+;  or that there is none to click: no handler, or a firmware that cannot seek.
+;  Entry/exit .as/.xl.
+; ----------------------------------------------------------------------
+pcm_bar_geom:
+  lda pcm_nosup
+  bne pcm_bg_none
+  lda pcm_ver
+  cmp #PCM_VER_SEEK
+  bcc pcm_bg_none
+  lda @spcstart_win_y
+  clc
+  adc #$04                    ; + 2 (the window's first text row) + 2 (layout row of the bar)
+  sta mouse_pbrow
+  lda @spcstart_win_x
+  clc
+  adc #2+PCM_BAR_X
+  sta mouse_pbcol
+  rts
+pcm_bg_none:
+  lda #$ff
+  sta mouse_pbrow
+  rts
+
+
+; ----------------------------------------------------------------------
+;  pcm_check_end -- once a track reports PCM_ST_ENDED, start the folder's next one; after the
+;  last, stay (pcm_last) and let the screen say "End".  Once per frame, before the keys.
+;  Entry/exit .as/.xl, DB=$00, DP=0.
+; ----------------------------------------------------------------------
+pcm_check_end:
+  lda pcm_nosup
+  bne pcm_ce_out
+  lda pcm_last
+  bne pcm_ce_out
+  jsr pcm_magic_ok
+  bcs pcm_ce_out
+  lda @PCMPLAY_BLK+PCM_STATE
+  cmp #PCM_ST_ENDED
+  bne pcm_ce_out
+  rep #$20 : .al
+  lda pcm_cur
+  ldx #TYPE_PCM
+  ldy #$0000                  ; forward
+  jsr media_find
+  bcc pcm_ce_last
+  jmp pcm_switch              ; A (16-bit) = the next track
+pcm_ce_last:
+  .al : .xl
+  sep #$20 : .as
+  lda #$01
+  sta pcm_last
+  lda #$ff
+  sta pcm_seen                ; redraw: "End"
+pcm_ce_out:
+  .as : .xl
+  rts
+
+
+; ----------------------------------------------------------------------
+;  pcm_key_a -- play/pause; on "End" after the last track, the folder again from the top.
+; ----------------------------------------------------------------------
+pcm_key_a:
+  lda pcm_last
+  bne pcm_ka_top
+  jmp pcm_toggle
+pcm_ka_top:
+  .as : .xl
+  rep #$20 : .al
+  lda #$fffc                  ; "before the first entry": media_find starts at +4 = 0
+  ldx #TYPE_PCM
+  ldy #$0000
+  jsr media_find
+  bcc pcm_ka_out
+  jmp pcm_switch
+pcm_ka_out:
+  .al : .xl
+  sep #$20 : .as
+  rts
+
+
+; ----------------------------------------------------------------------
+;  pcm_track_key -- A = 0 next / 1 previous .pcm of the folder (L/R).  At either end of the
+;  list nothing happens.  Entry/exit .as/.xl.
+; ----------------------------------------------------------------------
+pcm_track_key:
+  rep #$20 : .al
+  and #$00ff
+  tay
+  lda pcm_cur
+  ldx #TYPE_PCM
+  jsr media_find
+  bcc pcm_tk_out
+  jmp pcm_switch
+pcm_tk_out:
+  .al : .xl
+  sep #$20 : .as
+  rts
+
+
+; ----------------------------------------------------------------------
+;  pcm_switch -- A (16-bit) = a track's entry offset: play it in place of the current one.
+;  CMD_PLAY_PCM stops and closes the old track on the firmware side (menu_music_play), so
+;  there is nothing to stop first.  Exit .as/.xl.
+; ----------------------------------------------------------------------
+pcm_switch:
+  .al : .xl
+  sta pcm_cur
+  sep #$20 : .as
+  jsr pcm_start               ; clears pcm_paused / pcm_last
+  lda #$ff
+  sta pcm_seen                ; new name, new clock: redraw it all
+  jsr pcm_bar_geom
+  rts
+
+
+; ----------------------------------------------------------------------
+;  pcm_seek_key -- A = 0 forward / 1 back: Left/Right, held or not.
+;  read_pad's own counter tells a press from its auto-repeat: a repeat leaves pad1delay at
+;  PCM_REP_DELAY, a fresh press well below it.  A press seeks 5 s; of the repeats only every
+;  other one seeks, with the step growing with pcm_rep.  (Counting loop passes between edges
+;  instead broke as soon as a redraw took a frame longer: a quick second press read as a
+;  repeat and was dropped.)  The target is the published position +/- the step; the
+;  firmware clamps the far end, the near one is clamped here.  Entry/exit .as/.xl.
+; ----------------------------------------------------------------------
+pcm_seek_key:
+  pha
+  lda pad1delay
+  cmp #PCM_REP_DELAY
+  bcc pcm_sk_new
+  lda pcm_rep
+  inc
+  beq pcm_sk_sat
+  sta pcm_rep
+pcm_sk_sat:
+  .as : .xl
+  lda pcm_rep
+  lsr
+  bcc pcm_sk_go               ; even repeats seek, odd ones only count
+  pla
+  rts
+pcm_sk_new:
+  .as : .xl
+  stz pcm_rep
+pcm_sk_go:
+  .as : .xl
+  jsr pcm_can_seek
+  bcs pcm_sk_drop
+  ldx #5
+  lda pcm_rep
+  cmp #PCM_STEP_MID
+  bcc pcm_sk_step
+  ldx #10
+  cmp #PCM_STEP_FAST
+  bcc pcm_sk_step
+  ldx #30
+pcm_sk_step:
+  .as : .xl
+  stx pcm_tmp
+  pla
+  rep #$20 : .al
+  and #$00ff
+  bne pcm_sk_back
+  lda @PCMPLAY_BLK+PCM_POS
+  clc
+  adc pcm_tmp
+  bcc pcm_sk_send
+  lda #$ffff                  ; the firmware clamps it to the track
+  bra pcm_sk_send
+pcm_sk_back:
+  .al : .xl
+  lda @PCMPLAY_BLK+PCM_POS
+  sec
+  sbc pcm_tmp
+  bcs pcm_sk_send
+  lda #$0000
+pcm_sk_send:
+  .al : .xl
+  sta @MCU_PARAM+1
+  sep #$20 : .as
+  lda #PCM_CTL_SEEK
+  jmp pcm_seek_send
+pcm_sk_drop:
+  .as : .xl
+  pla
+  rts
+
+; pcm_seek_click: the mouse clicked bar cell mouse_pseek (0..31): seek to the middle of it.
+pcm_seek_click:
+  lda mouse_pseek
+  pha
+  lda #$ff
+  sta mouse_pseek
+  jsr pcm_can_seek
+  pla
+  bcs pcm_sc_out
+  asl
+  asl
+  asl
+  ora #$04
+  sta @MCU_PARAM+1
+  lda #PCM_CTL_SEEKFRAC
+  jmp pcm_seek_send
+pcm_sc_out:
+  .as : .xl
+  rts
+
+; pcm_can_seek: carry CLEAR when a seek may go out -- a v2 firmware, and a track that is
+; playing, paused or played out (never an error state, where nothing is open).
+pcm_can_seek:
+  lda pcm_ver
+  cmp #PCM_VER_SEEK
+  bcc pcm_cs_no
+  jsr pcm_magic_ok
+  bcs pcm_cs_no
+  lda @PCMPLAY_BLK+PCM_STATE
+  cmp #PCM_ST_ENDED
+  beq pcm_cs_yes
+  cmp #PCM_ST_PLAYING
+  beq pcm_cs_yes
+  cmp #PCM_ST_PAUSED
+  beq pcm_cs_yes
+pcm_cs_no:
+  .as : .xl
+  sec
+  rts
+pcm_cs_yes:
+  .as : .xl
+  clc
+  rts
+
+; pcm_seek_send: A = PCM_CTL_SEEK / SEEKFRAC, its target already at MCU_PARAM+1.  A seek on
+; "End" plays that track again, so the playlist is live again too.
+pcm_seek_send:
+  .as : .xl
+  jsr pcm_ctl
+  stz pcm_last
+  lda #$ff
+  sta pcm_seen                ; the new second may share its low byte with the old one
+  rts
+
+
+; ----------------------------------------------------------------------
+;  media_keys2 -- the players' second key row: with a mouse in, its held buttons (previous /
+;  next track) and no seek keys, which a mouse cannot press (it seeks with a click on the
+;  bar); else the .pcm row (seek + L/R) or, media_keys2_spc, the SPC row (L/R).  The
+;  redraw on a mouse plugged in or out (pcm_seen_mouse) picks the other one.
+;  Entry/exit .as/.xl.
+; ----------------------------------------------------------------------
+media_keys2:
+  lda @mouse_lseen
+  beq mk2_pad
+  lda #^text_media_mouse2
+  ldx #!text_media_mouse2
+  bra mk2_put
+mk2_pad:
+  .as : .xl
+  lda #^text_pcm_prompt2
+  ldx #!text_pcm_prompt2
+mk2_put:
+  .as : .xl
+  jsr pcm_row_str
+  jsl @hint_keys
+  rts
+
+media_keys2_spc:
+  lda @mouse_lseen
+  beq mk2s_pad
+  lda #^text_media_mouse2
+  ldx #!text_media_mouse2
+  bra mk2_put
+mk2s_pad:
+  .as : .xl
+  lda #^text_spc_prompt2
+  ldx #!text_spc_prompt2
+  bra mk2_put
+
+; ----------------------------------------------------------------------
+;  media_dim / media_undim / media_regrey -- the browser behind a player is dimmed the way
+;  every modal over it is (mainmenu, the context menus): its rectangle pushed and greyed,
+;  and popped back bright at the end.  media_regrey greys it again after a warm reset has
+;  repainted the list (the SPC player's track changes); the push from before still holds.
+;  Entry/exit .as/.xl.
+; ----------------------------------------------------------------------
+media_dim:
+  jsr media_dim_geom
+  jsl @ui_call_wpush
+  jsl @ui_call_greyout
+  rts
+
+media_undim:
+  jsr media_dim_geom
+  jsl @ui_call_wclose
+  rts
+
+media_regrey:
+  jsr media_dim_geom
+  jsl @ui_call_greyout
+  rts
+
+; ----------------------------------------------------------------------
+;  media_reset_dark / media_light -- the warm reset that stops the S-SMP, hidden.  The
+;  reset clears the tile buffers and the boot relights the screen at once, so what showed
+;  was a flash of an empty screen and then the list and the window being redrawn.  Now:
+;  a ramp to black first (mt_fade_out: it pins all three brightness variables, which keeps
+;  the NMI's screensaver from pulling the level back up while a key is held), the reset,
+;  forced blank while everything is repainted, and media_light fades back in once the
+;  screen is whole -- waiting for the ramp, because the next thing may be an SPC upload,
+;  which stops the NMI that drives it.  Entry/exit .as/.xl.
+; ----------------------------------------------------------------------
+media_reset_dark:
+  jsr mt_fade_out             ; level saved in mt_bright_bak (WRAM: survives the reset)
+  lda #$00
+  sta @BGM_STATE              ; S-SMP at IPL after the reset
+  jsl @ui_call_bgm_silence    ; returns after the warm boot, which lit the screen again
+  sep #$20 : .as
+  rep #$10 : .xl
+  lda #$80
+  sta @$002100                ; black again, before anything shows
+  lda #$00
+  sta @cur_bright
+  sta @tgt_bright
+  lda #$01
+  sta media_dark
+  rts
+
+media_light:
+  .as : .xl
+  lda media_dark
+  beq mli_out
+  stz media_dark
+  lda #$00
+  sta @fade_count
+  lda #$01
+  sta @fade_speed             ; the NMI ramp, one step every other frame
+  jmp mt_fade_in              ; unblank at 0, target = the saved level; the NMI does the rest
+
+; media_light_wait: the same, and wait for the ramp to finish -- before an SPC upload, which
+; stops the NMI that drives it.  Not elsewhere: the keys are not read while it waits.
+media_light_wait:
+  .as : .xl
+  lda media_dark
+  beq mli_out
+  jsr media_light
+  ldx #$0040                  ; bounded: 16 steps take ~32 frames
+mli_wait:
+  .as : .xl
+  lda @cur_bright
+  cmp @tgt_bright
+  beq mli_out
+  jsr pcm_wait_frame
+  dex
+  bne mli_wait
+mli_out:
+  .as : .xl
+  rts
+
+media_dim_geom:
+  lda #$02
+  sta window_x
+  lda #$09
+  sta window_y
+  lda #60
+  sta window_w
+  lda #18
+  sta window_h
+  rts
+
+
+; ----------------------------------------------------------------------
+;  media_find -- the next entry of type X (TYPE_PCM / TYPE_SPC) after the one at offset A,
+;  in the directory table's order (= the browser's): forward with Y = 0, back with Y = 1.
+;  A = $fffc with Y = 0 finds the first one.  Carry SET = found, A = its offset; CLEAR = none
+;  that way.  Bounded by the table: the end is dirend_addr (entries * 4) or an entry whose
+;  bank byte is 0 (the terminator scan_dir writes), the start is offset 0.
+;  Entry .al/.xl, DP=0; exit .al/.xl.  Uses pcm_tmp.
+; ----------------------------------------------------------------------
+media_find:
+  .al : .xl
+  stx pcm_tmp
+  cpy #$0000
+  bne mf_back
+mf_fwd:
+  .al : .xl
+  clc
+  adc #$0004
+  cmp dirend_addr
+  bcs mf_none
+  tay
+  iny
+  iny
+  lda [dirstart_addr], y      ; low byte +2 (bank), high byte +3 (type)
+  and #$00ff
+  beq mf_none                 ; bank 0: the terminator
+  lda [dirstart_addr], y
+  dey
+  dey
+  xba
+  and #$00ff
+  cmp pcm_tmp
+  beq mf_hit
+  tya
+  bra mf_fwd
+mf_back:
+  .al : .xl
+  cmp #$0004
+  bcc mf_none
+  sec
+  sbc #$0004
+  tay
+  iny
+  iny
+  lda [dirstart_addr], y
+  dey
+  dey
+  xba
+  and #$00ff
+  cmp pcm_tmp
+  beq mf_hit
+  tya
+  bra mf_back
+mf_hit:
+  .al : .xl
+  tya
+  sec
+  rts
+mf_none:
+  .al : .xl
+  clc
+  rts
+
+
+; ----------------------------------------------------------------------
+;  media_place_cursor -- A (16-bit) = an entry's offset from dirstart_addr: put the
+;  browser's cursor on it.  On the page already shown it just moves the row; otherwise the
+;  page scrolls so the entry is its LAST row (fnl_place_cursor's rule, filesel.a65), or
+;  starts at the top when the entry is within the first page.  The caller has the browser
+;  repaint (filesel_dirty).  Entry .al/.xl; exit .al/.xl.
+; ----------------------------------------------------------------------
+media_place_cursor:
+  .al : .xl
+  pha
+  clc
+  adc dirstart_addr
+  sec
+  sbc dirptr_addr
+  bcc mpc_scroll              ; above the page
+  lsr
+  lsr
+  cmp listdisp
+  bcs mpc_scroll              ; below it
+  sta filesel_sel
+  pla
+  rts
+mpc_scroll:
+  .al : .xl
+  pla
+  lsr
+  lsr                         ; the entry's index
+  cmp listdisp
+  bcs mpc_last
+  sta filesel_sel
+  lda dirstart_addr
+  sta dirptr_addr
+  rts
+mpc_last:
+  .al : .xl
+  sec
+  sbc listdisp
+  inc
+  asl
+  asl
+  clc
+  adc dirstart_addr
+  sta dirptr_addr
+  lda listdisp
+  dec
+  sta filesel_sel
   rts
 
 
@@ -469,35 +1036,77 @@ pcm_draw:
   lda @PCMPLAY_BLK+PCM_STATE
   cmp pcm_seen
   bne pcm_dr_go
+  lda @mouse_lseen            ; a mouse plugged in or out: the legend changes its keys
+  cmp pcm_seen_mouse
+  bne pcm_dr_go
   lda @PCMPLAY_BLK+PCM_POS
   cmp pcm_seen_pos
   beq pcm_dr_done
+  ; Only the second ticked: the bar and the clock, nothing else.  Recomposing the key
+  ; legend every second showed it raw for a frame now and then: it is printed first and
+  ; its keys turned into green / mouse glyphs after (hint_keys), and an NMI in between
+  ; uploads the half-done row.
+  sta pcm_seen_pos
+  lda @PCMPLAY_BLK+PCM_STATE
+  cmp #PCM_ST_ENDED
+  beq pcm_dr_tick
+  cmp #PCM_ST_ERR_OPEN
+  bcs pcm_dr_done             ; an error shows no clock
+pcm_dr_tick:
+  .as : .xl
+  lda #$02
+  sta mt_row
+  jsr pcm_row_bar             ; row 2
+  jsr pcm_row_time            ; row 3
+  bra pcm_dr_done
 pcm_dr_go:
+  .as : .xl
   lda @PCMPLAY_BLK+PCM_STATE
   sta pcm_seen
   lda @PCMPLAY_BLK+PCM_POS
   sta pcm_seen_pos
+  lda @mouse_lseen
+  sta pcm_seen_mouse
 
-  stz mt_row                  ; layout: 0 name, 1 blank, 2 bar, 3 clock, 4 blank, 5 keys.
+  stz mt_row                  ; layout: 0 name, 1 blank, 2 bar, 3 clock, 4 blank, 5-6 keys.
                               ;   pcm_flush advances the row, so the call order below IS
                               ;   the layout -- keep the blanks, they hold the positions.
-  jsr pcm_row_name            ; row 0
+  rep #$20 : .al
+  lda pcm_cur
+  jsr media_name_row          ; row 0
+  sep #$20 : .as
   jsr pcm_row_blank           ; row 1
   lda @PCMPLAY_BLK+PCM_STATE
+  cmp #PCM_ST_ENDED
+  beq pcm_dr_ok               ; played out: still a bar and a clock (at the end)
   cmp #PCM_ST_ERR_OPEN
   bcs pcm_dr_err
+pcm_dr_ok:
+  .as : .xl
   jsr pcm_row_bar             ; row 2
   jsr pcm_row_time            ; row 3
   bra pcm_dr_tail
 pcm_dr_err:
+  .as : .xl
   jsr pcm_row_blank           ; row 2
   jsr pcm_row_errmsg          ; row 3
 pcm_dr_tail:
+  .as : .xl
   jsr pcm_row_blank           ; row 4
+  lda media_keys
+  beq pcm_dr_nokeys           ; the pad not read yet: no legend (see media_keys)
+  jsr pcm_wait_frame          ; at the start of a frame: both rows printed and their keys
+                              ; turned into glyphs before the next NMI uploads them
   lda #^text_pcm_prompt
   ldx #!text_pcm_prompt
   jsr pcm_row_str             ; row 5
   jsl @hint_keys              ; keys in green (pcm_flush is a hiprint; manhost.a65)
+  jsr media_keys2             ; row 6
+  bra pcm_dr_done
+pcm_dr_nokeys:
+  .as : .xl
+  jsr pcm_row_blank           ; row 5
+  jsr pcm_row_blank           ; row 6
 pcm_dr_done:
   plp
   .as : .xl
@@ -509,7 +1118,10 @@ pcm_dr_nosup:
   beq pcm_dr_done
   stz pcm_seen
   stz mt_row
-  jsr pcm_row_name            ; row 0
+  rep #$20 : .al
+  lda pcm_cur
+  jsr media_name_row          ; row 0
+  sep #$20 : .as
   jsr pcm_row_blank           ; row 1
   jsr pcm_row_blank           ; row 2
   lda #^text_pcm_nosup
@@ -520,10 +1132,11 @@ pcm_dr_nosup:
   ldx #!text_pcm_promptb
   jsr pcm_row_str             ; row 5
   jsl @hint_keys
+  jsr pcm_row_blank           ; row 6
   bra pcm_dr_done
 
 
-; -- row 0: the selected file's name, straight out of the direntry --------------
+; -- row 0: a directory entry's file name, straight out of the dir buffer -------------
 ; Its own copy loop rather than mt_put_str, for one reason: with "Hide extensions" on,
 ; scan_dir overwrites the DOT with code 1 instead of truncating (fileops.c), and 1 is a
 ; string terminator to hiprint but not to mt_put_str.  Feeding it through that helper
@@ -531,26 +1144,30 @@ pcm_dr_nosup:
 ; leaving the rest of the row unpainted, i.e. showing whatever the previous frame drew.
 ; Stopping at anything below 2 is also what makes resolve_str irrelevant here: this is
 ; raw text out of the dir buffer, never a language-table pointer.
-pcm_row_name:
+; media_name_row: A (16-bit) = the entry's byte offset from dirstart_addr (the track, not
+; the browser's selection: the players walk the folder).  Entry .al/.xl; P is kept.
+media_name_row:
+  .al : .xl
   php
+  pha
   sep #$20 : .as
-  rep #$10 : .xl
-  jsr mt_blank
-  jsr pcm_sel_index
+  jsr mt_blank                ; clobbers A and X
   rep #$20 : .al
-  lda [dirptr_addr], y        ; +0: entry address
+  ply
+  lda [dirstart_addr], y      ; +0: entry address
   clc
   adc #$0006                  ; the name starts 6 bytes into the entry
   sta longptr
   iny
   iny
   sep #$20 : .as
-  lda [dirptr_addr], y        ; +2: bank, relative to $C0 like every dir pointer
+  lda [dirstart_addr], y      ; +2: bank, relative to $C0 like every dir pointer
   clc
   adc #$c0
   sta longptr+2
   ldy #$0000
 pcm_rn_loop:
+  .as : .xl
   lda [longptr], y
   cmp #$02
   bcc pcm_rn_done             ; 0 = end of name, 1 = the hidden extension marker
@@ -561,9 +1178,9 @@ pcm_rn_loop:
   cpy #PCM_COLS               ; mt_emit drops the overflow anyway; stop walking for it
   bcc pcm_rn_loop
 pcm_rn_done:
+  .as : .xl
   jsr pcm_flush
   plp
-  .as : .xl
   rts
 
 pcm_row_blank:
@@ -668,14 +1285,26 @@ pcm_row_time:
   jsr pcm_put_time
   lda @PCMPLAY_BLK+PCM_STATE
   cmp #PCM_ST_PAUSED
+  beq pcm_rt_paused
+  cmp #PCM_ST_ENDED
   bne pcm_rt_flush
+  lda #^text_pcm_ended
+  ldx #!text_pcm_ended
+  bra pcm_rt_label
+pcm_rt_paused:
+  .as : .xl
+  lda #^text_pcm_paused
+  ldx #!text_pcm_paused
+pcm_rt_label:
+  .as : .xl
+  pha
   lda #$20
   jsr mt_emit
   jsr mt_emit
-  lda #^text_pcm_paused
-  ldx #!text_pcm_paused
+  pla
   jsr mt_put_str
 pcm_rt_flush:
+  .as : .xl
   jsr pcm_flush
   plp
   .as : .xl

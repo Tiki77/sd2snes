@@ -576,6 +576,11 @@ static int menusfx_locked = 0;             /* 1 = a caller claimed the DAC exclu
                                               menu_music_lock) */
 static uint32_t menusfx_samples = 0;       /* FMV music: stereo samples fed to the DAC since the
                                               loop start -> the FMV video frame clock (sync) */
+static uint8_t menusfx_noloop = 0;         /* 1 = play the clip once and stop at EOF (the menu
+                                              PCM player moves on to the next track itself) */
+static uint8_t menusfx_eof = 0;            /* noloop: EOF read, the DAC is on the last full half */
+static uint8_t menusfx_ended = 0;          /* noloop: the clip played out, DAC paused at its end */
+static uint8_t menusfx_paused = 0;         /* menu_music_pause: a seek must not unpause */
 
 /* A QOA clip soundtrack (<rom>.qoa) is not streamed through the 2 KB dac_buf like a .pcm.
    The MCU decodes it into the PSRAM ROM area, idle while the menu runs, and the FPGA SFX
@@ -946,10 +951,24 @@ void menu_sfx_pump(void) {
   now = fpga_status();
   /* refill the half the FPGA just finished reading (DAC_READ_MSB toggles) */
   if((now & MSU_FPGA_STATUS_DAC_READ_MSB) != (menusfx_fpga_prev & MSU_FPGA_STATUS_DAC_READ_MSB)) {
+    if(menusfx_eof) {
+      /* noloop: the DAC just left the last full half for the one EOF cut short.  Stop it
+         here: past the bytes that read delivered, that half still holds audio from two
+         halves back, and playing it would sound a few ms of stale track at the very end.
+         Cutting the partial tail instead loses under 6 ms of what is nearly always the
+         track's closing silence. */
+      dac_pause();
+      menusfx_active = 0;
+      menusfx_eof = 0;
+      menusfx_ended = 1;
+      return;
+    }
     set_dac_addr((now & MSU_FPGA_STATUS_DAC_READ_MSB) ? 0 : (MSU_DAC_BUFSIZE / 2));
     ff_sd_offload = 1; sd_offload_tgt = 1;
     f_read(&menusfx_fil, file_buf, MSU_DAC_BUFSIZE / 2, &menusfx_bytes_read);
-    if(menusfx_bytes_read < MSU_DAC_BUFSIZE / 2) {
+    if(menusfx_bytes_read < MSU_DAC_BUFSIZE / 2 && menusfx_noloop) {
+      menusfx_eof = 1;                        /* stop at the next toggle, see above */
+    } else if(menusfx_bytes_read < MSU_DAC_BUFSIZE / 2) {
       /* EOF: seek to the loop point and fill the rest of this half (the FPGA
          write pointer auto-advanced, so do NOT re-set the DAC address). The
          loop region of an effect is pure silence; after two wraps the
@@ -982,6 +1001,10 @@ int menu_music_play(const char *filename) {
 
   menu_sfx_stop();                     /* free the DAC from any blip */
   menusfx_close();                     /* always reopen fresh (music isn't retriggered per blip) */
+  menusfx_noloop = 0;                  /* loops unless the caller says otherwise afterwards */
+  menusfx_eof = 0;
+  menusfx_ended = 0;
+  menusfx_paused = 0;
   if(f_open(&menusfx_fil, (const TCHAR*)filename, FA_READ) != FR_OK) return 0x01;
   /* No fast-seek linkmap: a multi-MB clip overflows CLTBL_SIZE anyway, and BUILDING it scans
      the whole cluster chain -- a slow open. Stream sequentially without it; the only seek is
@@ -1063,6 +1086,59 @@ uint32_t menu_music_samples(void) {
 void menu_music_stop(void) {
   if(menusfx_active && menusfx_loop_forever) menu_sfx_stop();
   menusfx_loop_forever = 0;
+  menusfx_noloop = 0;
+  menusfx_eof = 0;
+  menusfx_ended = 0;
+  menusfx_paused = 0;
+}
+
+/* Play the open .pcm once instead of looping it at the header's loop point: at EOF the DAC
+   stops and menu_music_ended() turns true (the menu PCM player then starts the next track
+   of the folder).  Call right after menu_music_play.  A QOA clip ignores it. */
+void menu_music_noloop(int on) {
+  menusfx_noloop = on ? 1 : 0;
+}
+
+int menu_music_ended(void) {
+  return menusfx_ended;
+}
+
+/* Move the open .pcm to byte `pos` of its body (after the 8-byte header) and refill the
+   whole DAC buffer from there, so nothing of the old position is left to play.  Same prime
+   as menu_music_play: DAC paused, read pointer reset, 2 KB by SD DMA, then play -- unless
+   the clip is paused, which a seek keeps.  The target is frame-aligned and kept a whole
+   buffer short of EOF, so the prime never runs into the end with stale bytes behind it
+   (the pump then plays that last buffer out and stops or loops as usual).  A clip that
+   already ended starts again from there.  Returns 0 when nothing could be done: no .pcm
+   open (a QOA clip is decoded ahead into PSRAM and has no file position to move), or the
+   read failed -- which stops the clip, like a read error in the pump. */
+int menu_music_seek(uint32_t pos) {
+  uint32_t fsz, body;
+  if(menuqoa || !menusfx_open || !menusfx_loop_forever) return 0;
+  fsz = (uint32_t)f_size(&menusfx_fil);
+  body = (fsz > MSU_PCM_OFFSET_WAVEDATA) ? fsz - MSU_PCM_OFFSET_WAVEDATA : 0;
+  if(body <= MSU_DAC_BUFSIZE) pos = 0;
+  else if(pos > body - MSU_DAC_BUFSIZE) pos = body - MSU_DAC_BUFSIZE;
+  pos &= ~(uint32_t)3;
+  fpga_sfx_disable();                  /* a blip may have taken the DAC after an end */
+  dac_pause();
+  if(!(current_features & FEAT_MSU1))
+    fpga_set_features(current_features | FEAT_MSU1);
+  dac_reset(0);
+  set_dac_addr(0);
+  ff_sd_offload = 1; sd_offload_tgt = 1;
+  f_lseek(&menusfx_fil, MSU_PCM_OFFSET_WAVEDATA + pos);
+  ff_sd_offload = 1; sd_offload_tgt = 1;
+  f_read(&menusfx_fil, file_buf, MSU_DAC_BUFSIZE, &menusfx_bytes_read);
+  if(!menusfx_bytes_read) { menu_sfx_stop(); return 0; }
+  menusfx_samples = MSU_DAC_BUFSIZE / 4;
+  menusfx_fpga_prev = fpga_status();
+  menusfx_wraps = 0;
+  menusfx_eof = 0;
+  menusfx_ended = 0;
+  menusfx_active = 1;
+  if(!menusfx_paused) dac_play();
+  return 1;
 }
 
 /* Byte position of the clip's READ head, and its size, for a progress display (the menu
@@ -1095,6 +1171,7 @@ uint32_t menu_music_size(void) {
 void menu_music_pause(int paused) {
   if(!menusfx_active || !menusfx_loop_forever) return;
   if(menuqoa) { menuqoa_hold_set(MENUQOA_PAUSED, paused); return; }
+  menusfx_paused = paused ? 1 : 0;
   if(paused) dac_pause(); else dac_play();
 }
 

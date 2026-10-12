@@ -661,6 +661,13 @@ text_mt_fpgactrl  .byt "check FPGA CE# / OE# / WE#", 0
 ; borrows the SPC player's geometry so the two look like the same feature.
 text_pcm_title    .byt "PCM Player", 0
 text_pcm_prompt   .byt "A: Play/Pause   B: Close", 0
+text_pcm_prompt2  .byt "<>: -5s/+5s   L/R: Prev/Next track", 0
+text_pcm_ended    .byt "End", 0
+text_spc_prompt   .byt "A: Next track   B: Close", 0
+text_spc_prompt2  .byt "L/R: Prev/Next track", 0
+; the players' second key row with a mouse in: Y = the right button held, Z = the left one
+; held (mouselegend.a65 draws both as mouse glyphs); no seek keys, the bar takes a click
+text_media_mouse2 .byt "Y: Prev track   Z: Next track", 0
 text_pcm_promptb  .byt "B: Close", 0
 text_pcm_paused   .byt "Paused", 0
 text_pcm_erropen  .byt "Cannot read this file.", 0
@@ -759,22 +766,14 @@ text_gbc_genlock    .byt "Genlock", 0
 text_gbc_exact      .byt "Exact", 0
 
 text_spcplay    .byt "SPC Music Player", 0
-spcplay_win_x   .byt 15
-spcplay_win_y   .byt 15
-spcplay_win_w   .byt 33
-spcplay_win_h   .byt 3
-
 text_spcload    .byt "Loading SPC data to SPC700", 127, 128, 0
-text_spcstarta  .byt "**** Now playing SPC tune ****", 0
-text_spcstartb  .byt "Name:  ",0
-text_spcstartc  .byt "Song:  ",0
-text_spcstartd  .byt "Artist:",0
 text_spc_statusbar .byt "B:Back", 0
 
+; The window of both players (spcview.a65, pcmplay.a65): seven rows inside it.
 spcstart_win_x  .byt 10
 spcstart_win_y  .byt 13
 spcstart_win_w  .byt 44
-spcstart_win_h  .byt 9
+spcstart_win_h  .byt 10
 
 text_loading    .byt "Loading", 127, 128, "                        ",0
 text_saving     .byt "Saving", 127, 128, "                         ",0

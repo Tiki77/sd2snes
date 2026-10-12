@@ -153,8 +153,13 @@ ui_call_bgm_silence:
 
 ; Repaint the browser listing into the tilemap buffers.  Needed after a warm reset (which
 ; clears VRAM) BEFORE any window opens on top, or the window would overlay a blank screen
-; instead of the file list.  Same three calls spc_play_now_redraw makes.
+; instead of the file list.
 ui_call_listrepaint:
+  php
+  sep #$20 : .as
+  lda #$09
+  sta cursor_y                ; the first list row: fileselloop resets it every pass, and a
+  plp                         ; second repaint in a row would start where the last one ended
   jsr filesel_statusbar
   jsr filesel_redraw
   jsr filesel_cleanup
@@ -165,6 +170,22 @@ ui_call_listrepaint:
 ; playing would be inaudible without this.  Requires the S-SMP at IPL.
 ui_call_dsp_unmute:
   jsr sfx_dsp_unmute
+  rtl
+
+; --- for the SPC player screen (snes/spcview.a65, bank $C1): the S-SMP upload, which the
+; menu music shares and so stays here, and a window frame redrawn after a warm reset (whose
+; VRAM clear took it; the window_stack entry under it is still there, so no push).
+ui_call_spcload:
+  jsr spc700_load
+  rtl
+
+ui_call_wdraw:
+  jsr draw_window
+  rtl
+
+; push without drawing: the players save the browser behind them and grey it, like a modal
+ui_call_wpush:
+  jsr push_window
   rtl
 
 ; resolve_yx: resolve_str for a (Y=addr, A=bank) pointer (as used by strlen).

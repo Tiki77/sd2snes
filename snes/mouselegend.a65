@@ -11,12 +11,14 @@
 
 ; the one-letter keys, in key-number order
 mouse_keys:
-  .word $41, $42, $58, $59       ; A B X Y
+  .word $41, $42, $58, $59, $5a  ; A B X Y, and Z: the held left button, which no pad key
+                                 ;   matches (only the music players' mouse legend writes it;
+                                 ;   the legend click in mouse.a65 searches A..Y only)
 ; their mouse glyphs as tile words (character * 2): first cells, then second cells
-; (fontedit.py MOUSE_GLYPHS: the held right button shares the right button's first cell)
+; (fontedit.py MOUSE_GLYPHS: a held button shares its click's first cell)
 mouse_keypair:
-  .word 250*2, 252*2, 254*2, 252*2
-  .word 251*2, 253*2, 255*2, 176*2
+  .word 250*2, 252*2, 254*2, 252*2, 250*2
+  .word 251*2, 253*2, 255*2, 176*2, 31*2
 ; per key number 1-5: the browser's pad flag (offset from pad_b, data.a65 order) ...
 mouse_keyflag:
   .byt 8, 0, 9, 1, 2             ; pad_a pad_b pad_x pad_y pad_select
@@ -127,7 +129,7 @@ mkc_find:
   beq mkc_hit
   inx
   inx
-  cpx #$0008
+  cpx #$000a
   bcc mkc_find
   plx
   rts
@@ -152,7 +154,7 @@ mkc_glyph:
   tax
 mkc_pair:
   .al : .xl
-  lda @mouse_keypair+8, x
+  lda @mouse_keypair+10, x
   sta @mouse_lmin                ; (scratch)
   lda @mouse_keypair, x          ; the two cells' tile words
   plx

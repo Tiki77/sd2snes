@@ -688,6 +688,33 @@ mouse_fsig      .byt 0     ; game info: the cover the colours were chosen for
 mouse_foam      .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; game
                            ; info: OAM slots 64-72 (the arrow, then the two buttons' quarters)
 mouse_mchg      .byt 0     ; read_pad scratch: the mode changed this frame
+mouse_ply       .byt 0     ; a player screen (.pcm / .spc) reads the pad now (mouse_playermode)
+mouse_lhold     .byt 0     ; player: frames the left button has been held alone (next track)
 mouse_vars_end  .byt 0
+
+;----------The two players' track lists, seek keys and mouse (pcmplay.a65 / spcview.a65) ---
+; After mouse_vars_end on purpose: none of these is read before its screen sets it.
+mouse_pbrow     .byt 0     ; player: text row of its progress bar ($ff = no bar to click)
+mouse_pbcol     .byt 0     ; player: text column of the bar's first cell
+mouse_pseek     .byt 0     ; player: a left click landed on bar cell 0..31 ($ff = none)
+pcm_cur         .word 0    ; .pcm player: the playing track's byte offset in the dir table
+pcm_ver         .byt 0     ; PCM_VERSION the firmware answered with (2+ = seek, ST_ENDED)
+pcm_last        .byt 0     ; 1 = the folder's last track ended: stay on "End" (A = from the top)
+pcm_rep         .byt 0     ; seek keys: repeats of the held direction so far (the step grows)
+pcm_seen_mouse  .byt 0     ; mouse_lseen the last redraw's legend was drawn for
+spc_cur         .word 0    ; .spc player: the playing track's byte offset in the dir table
+spc_open        .byt 0     ; 1 = its window is up (a track change redraws, not reopens)
+spc_state       .byt 0     ; 0 loading, 1 playing, 2 the folder's last track ended
+spc_frames      .byt 0     ; frames counted into the current second
+spc_fps         .byt 0     ; 60 NTSC / 50 PAL
+spc_sec         .word 0    ; elapsed seconds
+spc_total       .word 0    ; ID666 length + fade in seconds, 0 = unknown (no bar, no end)
+spc_cells       .byt 0     ; bar cells lit = floor(spc_sec * 32 / spc_total), kept by spc_acc
+spc_acc         .word 0    ;   (a running remainder: no divide on this CPU)
+spc_tmp         .word 0    ; scratch (ID666 parsing)
+spc_id          .byt 0     ; bit0: the .spc has an ID666 tag; bit1: its length fields are text
+media_dark      .byt 0     ; a player's warm reset left the screen black: media_light fades it in
+media_keys      .byt 0     ; a player read the pad since its last (re)start: its key legend may show
+                           ;   (a warm reset forgets the mouse until that read: the legend would flip)
 
 _END            .byt 0

@@ -36,7 +36,9 @@
  */
 #define PCMPLAY_MAGIC0               ('P')
 #define PCMPLAY_MAGIC1               ('C')
-#define PCMPLAY_VERSION              (1)
+#define PCMPLAY_VERSION              (2)  /* 2: CTL_SEEK/CTL_SEEKFRAC and STATE_ENDED.  The
+                                             menu gates both on it: a version-1 dispatcher
+                                             treats an unknown control code as STOP. */
 
 #define PCMPLAY_STATE_NONE           (0)  /* nothing playing */
 #define PCMPLAY_STATE_PLAYING        (1)
@@ -45,11 +47,18 @@
                                              mid-track (see pcmplay_publish), which is why
                                              the menu's message for it says "read" */
 #define PCMPLAY_STATE_ERR_MAGIC      (4)  /* opened, but it is not an "MSU1" PCM */
+#define PCMPLAY_STATE_ENDED          (5)  /* played to EOF (the player does not loop): the
+                                             menu starts the folder's next track, or stays
+                                             here after the last one.  The file stays open,
+                                             so a seek plays it again from there. */
 
 /* Control codes carried in MCU_PARAM's low byte by SNES_CMD_PCM_CTL */
 #define PCMPLAY_CTL_STOP             (0)
 #define PCMPLAY_CTL_PAUSE            (1)
 #define PCMPLAY_CTL_RESUME           (2)
+#define PCMPLAY_CTL_SEEK             (3)  /* MCU_PARAM+1..2 = target, whole seconds (u16 LE) */
+#define PCMPLAY_CTL_SEEKFRAC         (4)  /* MCU_PARAM+1 = target as 0..255 of the track (a
+                                             click on the bar: the 65816 has no divide) */
 
 typedef struct __attribute__((__packed__)) _pcmplay_blk {
   uint8_t  magic[2];   /* +0 ($00) 'P','C' -- the menu zeroes these before CMD_PLAY_PCM as
@@ -79,6 +88,13 @@ void pcmplay_start(const char *filename);
 
 /* Stop + close + publish PCMPLAY_STATE_NONE.  Safe to call when nothing is playing. */
 void pcmplay_stop(void);
+
+/* Move the track to `sec` seconds, or to frac/256 of it, refilling the DAC buffer from
+   there (menu_music_seek).  Keeps a pause; an ENDED track starts playing again.  Ignored
+   when nothing is open or the clip is a QOA (no file position).  Publishes at once, so
+   the bar and the clock move before the menu's next frame. */
+void pcmplay_seek_sec(uint16_t sec);
+void pcmplay_seek_frac(uint8_t frac);
 
 /* Freeze/unfreeze the DAC read pointer.  NOT menu_sfx_stop(): that also disarms the FPGA
    fetcher and clears the active flag, which would lose the open file and the position. */

@@ -9,7 +9,7 @@
 ; dispatch table range [onb_strtab_lo, onb_strtab_hi) is swapped for the active
 ; language's column (indexed by onb_cur_lang); any other pointer passes through.
 ; The strings are split by language over two pools (utils/gen_onb_lang.py): the
-; tables and pool A in $C1, pool B in $C0; onb_strpool_bank gives a column's bank.
+; tables and pool B in $C0, pool A in $C1; onb_strpool_bank gives a column's bank.
 ;
 ; .as/.xl GOTCHA: every routine with `lda #imm`/`ldx #imm` declares its widths on
 ; entry (directives leak in SOURCE order).

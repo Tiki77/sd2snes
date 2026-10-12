@@ -1006,88 +1006,11 @@ msu_folder_leave:
   jmp parent_pop_dirlog
 
 select_spc:
-  dey
-  rep #$20 : .al
-  lda [dirptr_addr], y
-  and #$00ff
-  sta @MCU_PARAM+6
-  dey
-  dey
-  lda [dirptr_addr], y
-  sta @MCU_PARAM+4
-  lda #!FILESEL_CWD
-  sta @MCU_PARAM
-  sep #$20 : .as
-  lda #^FILESEL_CWD
-  sta @MCU_PARAM+2
-  lda #$00
-  sta @MCU_PARAM+3
-  jsr cover_sync_before_cmd ; idle the MCU channel first (see game_handshake):
-                            ; SPC entries also fire covers, so a request may be
-                            ; in flight when A is pressed
-  lda #CMD_LOADSPC
-  sta @MCU_CMD
-wait_spc:
-  lda @MCU_CMD
-  cmp #$00
-  bne wait_spc
-  ; fork: spc700_load needs the S-SMP at IPL. It is at IPL only in BGM states 0
-  ; (not attempted) and 2 (tried, no spc). In state 1 the bgm is playing and in
-  ; states 3/4 the DSP-unmute stub is running (music off but the cart DAC kept
-  ; audible for SFX) -- in ALL three the S-SMP is busy, and the only way back to
-  ; IPL is a SNES reset (else spc700_load hangs at "Loading SPC into SPC700"). So
-  ; for 1/3/4 warm-reset here, then RESUME at spc_play_now: the warm boot restores
-  ; the SP and set_bank does plp;rts on the [P][return] frame we push below (the
-  ; same SAVED_SP/WARM_SIGNATURE mechanism the player uses to exit in spc_key_b).
-  ; apu_ram_init runs during the warm boot, so the S-SMP is back at IPL when we
-  ; reach spc_play_now. The .spc staged in SDRAM survives the reset (it lives in
-  ; MCU-managed SDRAM, untouched by the SNES reset).
-  lda @BGM_STATE         ; at IPL already (0/2) -> play directly, no reset
-  beq spc_play_now
-  cmp #$02
-  beq spc_play_now       ; 1 (playing) / 3,4 (DSP stub) -> S-SMP busy, must reset
-  ; Build the frame set_bank's `plp; rts` will unwind on the warm boot: push the
-  ; resume address (spc_play_now_redraw-1, all menu code is bank $c0 so a near rts is
-  ; fine) then the P byte, then snapshot SP into SAVED_SP. pea pushes a 16-bit
-  ; value regardless of the M flag (same idiom as `pea !CFG_BSX_TIME`). Resume at
-  ; spc_play_now_redraw (NOT spc_play_now): the warm boot cleared VRAM, so the list
-  ; must be repainted before the player so it overlays instead of a blank screen.
-  pea !(spc_play_now_redraw-1)
-  php
-  rep #$20 : .al
-  tsc
-  sta @SAVED_SP
-  lda #$fa50
-  sta @WARM_SIGNATURE
-  eor #$ffff
-  sta @WARM_COMPLEMENT
-  sep #$20 : .as
-  sei
-  stz $2100
-  jsr backup_wram
-  lda #CMD_RESET
-  sta @MCU_CMD
--
-  bra -
-spc_play_now_redraw:
-; fork: only the warm-reset path lands here. That reset cleared VRAM but the file
-; list's WRAM state survived the warm boot, so repaint it and let ONE NMI DMA it to
-; VRAM before spcplayer saves/greys the screen -- otherwise the player window opens
-; over a blank "new screen" instead of overlaying the listing. NMI is already on
-; (setup_hdma re-enabled it during the warm boot), so the isr_done wait can't hang.
-  sep #$20 : .as
-  rep #$10 : .xl
-  jsr filesel_statusbar
-  jsr filesel_redraw
-  jsr filesel_cleanup
-  stz isr_done
-- lda isr_done           ; wait one full NMI so the repaint is DMA'd to VRAM
-  beq -
-spc_play_now:
-  jsr spcplayer
-  jsr menu_bgm_load     ; back from the player (S-SMP at IPL): restore the bgm.
-                        ; no-op when music is off. spcplayer normally exits via
-                        ; its own warm reset, whose set_bank rts lands here.
+; .spc: the SPC player ($C1, spcview.a65) does it all -- staging the file, getting the
+; S-SMP back to IPL (a warm reset when something plays on it), the upload, the screen, the
+; folder's other tracks, and the warm reset that stops it at the end.  It hands the APU back
+; with BGM_STATE = 0, so bgm_update restores the menu music (or the DSP stub) on its own.
+  jsl @spc_session
   rts
 
 ;---------------------------------------
@@ -1162,7 +1085,7 @@ bgm_upd_done:
 
 ;---------------------------------------
 ; bgm_silence_reset (fork): warm-reset the SNES to return the S-SMP to IPL -- the
-; only way to stop a running SPC. Mirrors spc_key_b: snapshot SP, set the warm
+; only way to stop a running SPC: snapshot SP, set the warm
 ; signature, back up WRAM, issue CMD_RESET. The jsr return address already on the
 ; stack (plus the P byte we push) is what set_bank's `plp; rts` unwinds after the
 ; warm boot, so execution resumes in bgm_update right after the call.

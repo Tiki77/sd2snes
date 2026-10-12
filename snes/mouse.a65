@@ -55,7 +55,7 @@
 #define MOUSE_WAIT      $0800    ; bound on the waits for VBlank / the auto-joypad read
 #define MOUSE_VGATE     205      ; from this line on, the read waits for VBlank
 #define MOUSE_STEP_UP   $fff5    ; -(MOUSE_STEP-1): accumulator above it = no up step yet
-#define MOUSE_VARS_LEN  271      ; mouse_ptr_on .. mouse_vars_end (data.a65)
+#define MOUSE_VARS_LEN  270      ; mouse_ptr_on .. mouse_vars_end, inclusive (data.a65)
 #define MOUSE_C9_PAL7   COVER_C9_PAL+$e0   ; the cover's OBJ palette 7 in bank C9
 #define MOUSE_FATTR     $31      ; game info: priority 3, OBJ palette 0, name table 2
 #define MOUSE_FCGADD    $80      ; game info: OBJ palette 0 (| the entry)
@@ -331,6 +331,9 @@ ma_pos:
 ;      right click = B
 ;    4 game info's own loop (mouse_fichamode): mode 3, plus a pointer that hides when idle,
 ;      a click on the short description = Y (the full one), on the footer = that key
+;    7 a music player (mouse_playermode: the .pcm and .spc screens): left click = A, right
+;      click = B, a left click on its progress bar is a seek to that cell (mouse_pseek), and
+;      a button held alone steps the track: right = the previous one (L), left = the next (R)
 ;    0 anything else (dialogs, popups): left click = A, right click = B, no motion
 ; ----------------------------------------------------------------------
 mouse_post:
@@ -362,6 +365,12 @@ mpo_notval:
   bra mpo_setmode
 mpo_notkbd:
   .as : .xl
+  lda @mouse_ply
+  beq mpo_notply
+  lda #$07
+  bra mpo_setmode
+mpo_notply:
+  .as : .xl
   lda @mouse_fic
   beq mpo_notfic
   lda #$04
@@ -390,6 +399,7 @@ mpo_bselset:
   sta @mouse_fic
   sta @mouse_val
   sta @mouse_kbd
+  sta @mouse_ply
   sta @mouse_bothsel
   sta @mouse_mchg
   lda @mouse_seen
@@ -578,6 +588,11 @@ mpo_notvalue:
   jmp mouse_kbd_word
 mpo_notkbdw:
   .as : .xl
+  cmp #$07
+  bne mpo_notply_w
+  jmp mouse_player_word
+mpo_notply_w:
+  .as : .xl
   cmp #$01
   bne mpo_other
   rep #$20 : .al
@@ -586,6 +601,72 @@ mpo_notkbdw:
 mpo_other:
   .as : .xl
   jsr mouse_ab_word              ; dialogs: A / B while held
+  rep #$20 : .al
+  lda @mouse_tmp
+  rts
+
+; mouse_player_word: a music player. The keys of any dialog (left click = A, right = B),
+; except that a left click on the bar's row, over one of its 32 cells, is not A but a seek:
+; the cell goes to mouse_pseek for the player to send (it knows the track and the firmware).
+; The bar's place comes from the player (mouse_pbrow / mouse_pbcol; row $ff = no bar).
+mouse_player_word:
+  .as : .xl
+  jsr mouse_ab_word
+  lda @mouse_tmp+1               ; the right button held alone (Y elsewhere): the previous
+  bit #$40                       ; track, i.e. L
+  beq mpw_noprev
+  and #$bf
+  sta @mouse_tmp+1
+  lda @mouse_tmp
+  ora #$20
+  sta @mouse_tmp
+mpw_noprev:
+  .as : .xl
+  lda @mouse_sess                ; the left button held alone as long: the next track (R),
+  cmp #$01                       ; and the session has acted (its release is no click)
+  bne mpw_lfree
+  lda @mouse_beff
+  cmp #$01
+  bne mpw_lfree
+  lda @mouse_lhold
+  inc
+  sta @mouse_lhold
+  cmp #MOUSE_RHOLD
+  bcc mpw_lheld
+  lda #$81
+  sta @mouse_sess
+  lda @mouse_tmp
+  ora #$10
+  sta @mouse_tmp
+mpw_lfree:
+  .as : .xl
+  lda #$00
+  sta @mouse_lhold
+mpw_lheld:
+  .as : .xl
+  lda @mouse_click
+  cmp #$01
+  bne mpw_out
+  lda @mouse_pbrow
+  cmp #$ff
+  beq mpw_out
+  jsr mouse_trow_calc
+  lda @mouse_trow
+  cmp @mouse_pbrow
+  bne mpw_out
+  lda @mouse_x
+  lsr
+  lsr
+  sec
+  sbc @mouse_pbcol
+  bcc mpw_out
+  cmp #32
+  bcs mpw_out
+  sta @mouse_pseek
+  lda #$00                       ; the click seeks: it is not A
+  sta @mouse_tmp
+mpw_out:
+  .as : .xl
   rep #$20 : .al
   lda @mouse_tmp
   rts
@@ -899,6 +980,15 @@ mouse_listmode_pat:
   sep #$20 : .as
   lda #$02
   bra mlm_kind
+; mouse_playermode: the .pcm / .spc player's loop, right before its read_pad (mode 7).
+mouse_playermode:
+  php
+  sep #$20 : .as
+  lda #$01
+  sta @mouse_ply
+  plp
+  rtl
+
 mouse_listmode_cm:
   php
   sep #$20 : .as

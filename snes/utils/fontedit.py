@@ -759,12 +759,18 @@ _ML = _mouse_cells(_mouse_art("#", "o"))
 _MR = _mouse_cells(_mouse_art("o", "#"))
 _MB = _mouse_cells(_mouse_art("#", "#"))
 _MH = _mouse_cells(_mouse_art("o", "#", "####"))
+_MLH = _mouse_cells(_mouse_art("#", "o", "####"))
 # code -> (the char a screen reader decodes it as, the tile's pixels)
 MOUSE_GLYPHS = {
     250: ("\u24c1", _ML[0]), 251: ("", _ML[1]),      # left click (A)
     252: ("\u24c7", _MR[0]), 253: ("", _MR[1]),      # right click (B); held: 252 + 176
     254: ("\u24b7", _MB[0]), 255: ("", _MB[1]),      # both (X)
     176: ("\u24bd", _MH[1]),                         # right held (Y), after 252
+    # left held (the music players: next track), after 250. The font has no free printable
+    # slot left, but a legend glyph is written as a tile, never as a string byte, so it can
+    # live at 31: below 32 no string ever reaches hiprint (0/1 end it, 2..22 are sysinfo's
+    # placeholders, resolved before printing) and the tile was empty.
+    31: ("\u24bd", _MLH[1]),
 }
 
 

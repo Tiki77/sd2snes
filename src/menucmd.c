@@ -908,12 +908,18 @@ uint8_t menucmd_dispatch(uint8_t cmd, uint8_t *menu_reload) {
       pcmplay_start((const char*)file_lfn);
       return 0;
     case SNES_CMD_PCM_CTL:
-      /* Transport for the player above; MCU_PARAM low byte = PCM_CTL_*.  Pause freezes
-         the DAC read pointer only: the file stays open at its position, which is what
+      /* Transport for the player above; MCU_PARAM low byte = PCM_CTL_*, the seeks carry
+         their target in the bytes after it.  Pause freezes the DAC read pointer only: the file stays open at its position, which is what
          makes resuming instant (see pcmplay_pause). */
       switch(snescmd_readbyte(SNESCMD_MCU_PARAM) ) {
         case PCMPLAY_CTL_PAUSE:  pcmplay_pause(1); break;
         case PCMPLAY_CTL_RESUME: pcmplay_pause(0); break;
+        case PCMPLAY_CTL_SEEK:
+          pcmplay_seek_sec(snescmd_readshort(SNESCMD_MCU_PARAM + 1));
+          break;
+        case PCMPLAY_CTL_SEEKFRAC:
+          pcmplay_seek_frac(snescmd_readbyte(SNESCMD_MCU_PARAM + 1));
+          break;
         default:                 pcmplay_stop();   break;
       }
       return 0;
