@@ -884,6 +884,18 @@ static void load_setup_masks(load_ctx_t *c) {
   while(!romprops.has_combo && romprops.romsize_bytes && c->filesize > (romprops.romsize_bytes + romprops.offset)) {
     romprops.romsize_bytes <<= 1;
   }
+  /* ...and the other direction: the header's ROM size byte is only a claim, and a
+     cart's real chips decide the mapping.  A mask wider than the file points the
+     SNES at PSRAM nothing was loaded into, and in LoROM a mask over 4 MB also moves
+     banks $00-$7F to the upper half (address.v), so a 3 MB game whose header says
+     8 MB boots into empty memory.  Shrink to the smallest power of two that holds
+     the file.  Base-core mappers only: chip carts and special maps size themselves. */
+  if(!romprops.has_combo && !romprops.fpga_conf && romprops.mapper_id <= 2) {
+    while(romprops.romsize_bytes > 0x8000
+          && c->filesize - romprops.offset <= (romprops.romsize_bytes >> 1)) {
+      romprops.romsize_bytes >>= 1;
+    }
+  }
 
   if (romprops.has_sa1 && romprops.header.carttype == 0x36 && romprops.header.ramsize) {
     // move iram into saveram for special carts with no bwram
