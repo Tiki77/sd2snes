@@ -180,6 +180,7 @@ static void gameinfo_from(sel_src_t s) {
      "X: Guides" footer and open the viewer before booting. Cached on the path: the
      screen restages on every Up/Down and a full probe is a directory pass. */
   manual_stage_meta_cached(file_lfn);
+  gameinfo_fmv_touch();
 }
 
 /* RAW so the patch tag is stored in autoboot.cfg (round-trips on NUL);

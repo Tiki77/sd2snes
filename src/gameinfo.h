@@ -139,6 +139,8 @@ void gameinfo_fmv_stop(void);
 /* Menu-loop watchdog: stop a lingering FMV if CMD_FMV_NEXT has gone quiet (screen closed
  * without a trailing command, e.g. returning to the Favorites/Recents list). No-op if idle. */
 void gameinfo_fmv_idle_check(void);
+/* GAME_INFO served: restart the watchdog's 300 ms from here (see gameinfo.c). */
+void gameinfo_fmv_touch(void);
 
 /* "Full description" (Y) pump: re-open the last-loaded .yml, find the description line for the
    MENU language ("description_<code>:", else the canonical English "description:") with a

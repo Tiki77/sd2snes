@@ -600,6 +600,14 @@ void gameinfo_fmv_stop(void) {
  * goes quiet the screen closed WITHOUT a trailing command (e.g. back to the Favorites/Recents
  * list, which issues none) -> stop the FMV so the audio doesn't linger. Call from the menu
  * loop; bounded, no-op when nothing is playing. */
+/* The GAME_INFO command is done: the idle watchdog counts from here, not from gi_fmv_begin.
+   What follows the clip's start in that command (opening the soundtrack, the guides scan of
+   the game's info folder) takes over 300 ms on a big card, so the watchdog stopped every clip
+   the moment the command ended and the first CMD_FMV_NEXT reopened the .fmv and the music. */
+void gameinfo_fmv_touch(void) {
+  gi_fmv_last_tick = getticks();
+}
+
 void gameinfo_fmv_idle_check(void) {
   /* Somebody else holds the DAC (the menu PCM player) and gets no CMD_FMV_NEXT at all --
      without this bail-out the watchdog below would stop their track 300 ms in. */

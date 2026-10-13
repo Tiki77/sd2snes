@@ -594,7 +594,7 @@ static uint8_t menusfx_paused = 0;         /* menu_music_pause: a seek must not 
 #define MENUQOA_ADDR     SRAM_ROM_ADDR
 #define MENUQOA_PAD      MSU_DAC_BUFSIZE   /* the clip's first 2 KB again after the run */
 #define MENUQOA_MAX      (SRAM_MENU_ADDR - SRAM_ROM_ADDR - MENUQOA_PAD) /* ~71 s; a longer clip is cut */
-#define MENUQOA_LEAD     0x8000UL   /* decoded before the fetcher starts (~186 ms) */
+#define MENUQOA_LEAD     0x8000UL   /* decoded before the fetcher starts (~186 ms, ~64 ms of work) */
 #define MENUQOA_GUARD    0x1000UL   /* the fetcher this close to the decoder -> hold the DAC */
 #define MENUQOA_RESUME   0x8000UL   /* ... until the decoder is this far ahead again */
 #define MENUQOA_STEP     80         /* sample frames per decode step: 320 B of stack */
@@ -603,9 +603,10 @@ static uint8_t menusfx_paused = 0;         /* menu_music_pause: a seek must not 
 #define MENUQOA_TICK_HI  (MENUQOA_TICK_B * 65 / 64)         /*     the DAC clock is not exact */
 #define MENUQOA_STALL    1          /* menuqoa_hold: the decoder fell behind the fetcher */
 #define MENUQOA_PAUSED   2          /* menuqoa_hold: menu_music_pause */
+#define MENUQOA_START    4          /* menuqoa_hold: opened, the lead-in not decoded yet */
 static qoa_dec_t menuqoa_dec;
 static uint8_t   menuqoa = 0;       /* the playing music clip is a QOA decoded into PSRAM */
-static uint8_t   menuqoa_hold = 0;  /* MENUQOA_STALL | MENUQOA_PAUSED: DAC held, clock frozen */
+static uint8_t   menuqoa_hold = 0;  /* MENUQOA_STALL | _PAUSED | _START: DAC held, clock frozen */
 static uint8_t   menuqoa_sealed;    /* the run is complete and the pad after it written */
 static uint32_t  menuqoa_wr;        /* bytes of the run decoded so far */
 static uint32_t  menuqoa_copy;      /* where the copy being decoded starts */
@@ -833,7 +834,8 @@ static void menuqoa_kick(uint32_t pos) {
   menuqoa_halves = 0;
   menusfx_fpga_prev = fpga_status();
   menuqoa_t0 = getticks();
-  if(!menuqoa_hold) dac_play();
+  if(menuqoa_hold) menuqoa_held_at = menuqoa_t0;   /* paused before the clip even started */
+  else dac_play();
   printf("qoa: kick @%lu %lu/%lu\n", (unsigned long)pos, (unsigned long)menuqoa_wr,
          (unsigned long)menuqoa_len);
 }
@@ -890,12 +892,21 @@ static int menuqoa_play(void) {
   menuqoa_wr = menuqoa_copy = menuqoa_len = menuqoa_end = 0;
   menuqoa_hold = 0;
   menuqoa_sealed = 0;
-  menuqoa_decode(MENUQOA_LEAD);
+  menuqoa_decode(MENUQOA_STEP * 4);
   if(!menuqoa_wr) return 0x02;           /* not even the first slice decoded */
   if(!(current_features & FEAT_MSU1))
     fpga_set_features(current_features | FEAT_MSU1);
   menuqoa = 1;
-  menuqoa_kick(0);
+  /* The lead-in is decoded and the fetcher started from the idle menu loop (menu_music_work),
+     not here: the caller is still busy.  The info screen goes on to scan the game's info folder
+     for guides, ~300 ms on a big card with nothing decoding, and a clip already playing ran out
+     of its lead there -- past the decoded bytes the fetcher played the previous clip's
+     leftovers, then stalled -- while decoding the lead here made every Up/Down that much slower. */
+  menuqoa_hold = MENUQOA_START;
+  /* the FMV frame clock starts with the clip, as on the .pcm path (the pump leaves it alone
+     while the DAC is held): the counter kept the previous clip's position, and the new video
+     jumped to that frame and froze until the music caught up */
+  menusfx_samples = MSU_DAC_BUFSIZE / 4;
   return 0xA0;
 }
 
@@ -930,6 +941,13 @@ static void menuqoa_pump(void) {
 void menu_music_work(void) {
   if(!menuqoa || !menusfx_active) return;
   if(!menuqoa_sealed) menuqoa_decode(MENUQOA_STEP * 4);
+  if(menuqoa_hold & MENUQOA_START) {
+    if(menuqoa_sealed || menuqoa_wr >= MENUQOA_LEAD) {
+      menuqoa_hold &= ~MENUQOA_START;
+      menuqoa_kick(0);
+    }
+    return;
+  }
   if((menuqoa_hold & MENUQOA_STALL)
      && (menuqoa_sealed || menuqoa_wr >= menuqoa_fetch_max() + MENUQOA_RESUME))
     menuqoa_hold_set(MENUQOA_STALL, 0);
