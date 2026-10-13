@@ -84,6 +84,7 @@ SRC += cfg.c cheat.c yaml.c savestate.c sgb.c gbc.c sms.c atari.c nes.c nes_chr.
 # Shared helpers: menu command handlers, file->PSRAM streaming, string/path
 # utilities and the YAML sidecar writer.
 SRC += menucmd.c psram_io.c strutil.c yamlw.c trainer.c cheatcode.c cheatedit.c scratch.c cjkglyph.c qoa.c
+SRC += dirindex.c
 # RAM connection test driven from the menu ("Memory test").  Every config: the Mk.II is
 # exactly where users need the triage, and it is the board that has no serial console to
 # run the standalone diagnostic through.

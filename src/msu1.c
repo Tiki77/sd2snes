@@ -593,7 +593,7 @@ static uint8_t menusfx_paused = 0;         /* menu_music_pause: a seek must not 
    ~4 ms (measured on a Mk.III).  Re-kicking at every loop made that a click per loop. */
 #define MENUQOA_ADDR     SRAM_ROM_ADDR
 #define MENUQOA_PAD      MSU_DAC_BUFSIZE   /* the clip's first 2 KB again after the run */
-#define MENUQOA_MAX      (SRAM_MENU_ADDR - SRAM_ROM_ADDR - MENUQOA_PAD) /* ~71 s; a longer clip is cut */
+#define MENUQOA_MAX      (SRAM_DIRINDEX_ADDR - SRAM_ROM_ADDR - MENUQOA_PAD) /* ~70 s; a longer clip is cut */
 #define MENUQOA_LEAD     0x8000UL   /* decoded before the fetcher starts (~186 ms, ~64 ms of work) */
 #define MENUQOA_GUARD    0x1000UL   /* the fetcher this close to the decoder -> hold the DAC */
 #define MENUQOA_RESUME   0x8000UL   /* ... until the decoder is this far ahead again */

@@ -85,6 +85,11 @@
 #define SUFAMI_SLOTA_SCRATCH_SIZE    (0x2000L)
 
 #define SRAM_MENU_ADDR               (0xC00000L)
+/* Menu mode only, MCU only: the PSRAM index of one directory (dirindex.c), at the top of the
+   ROM area.  The QOA clip soundtrack decodes into the ROM area below it (MENUQOA_MAX); a game
+   load or the memory test overwrite it, and both drop the index first. */
+#define SRAM_DIRINDEX_SIZE           (0x21000L)
+#define SRAM_DIRINDEX_ADDR           (SRAM_MENU_ADDR - SRAM_DIRINDEX_SIZE)
 /* Browser directory buffer. Moved $C2 -> $DB when the menu image grew to 3 banks
    ($C0-$C2): the pointer table lives here, the string table one bank up (scan_dir
    keeps the base+0x10000 relation), growing until SRAM_DIR_STRINGS_END. Banks

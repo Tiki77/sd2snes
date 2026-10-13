@@ -39,6 +39,7 @@
 #include "memtest.h"
 #include "msu1.h"
 #include "timer.h"
+#include "dirindex.h"
 
 /* Scratch word used to load the FPGA's internal data register WITHOUT writing the test
    location -- that is what makes the byte-select check below meaningful.  Any address
@@ -492,6 +493,7 @@ void memtest_run(void) {
 
   memset(&ctx, 0, sizeof(ctx));
   memset(&cc, 0, sizeof(cc));
+  dirindex_drop();                    /* the test writes all of PSRAM */
 
   printf("memtest: configuring %s\n", (const char *)FPGA_MEMTEST);
   fpga_pgm((uint8_t *)FPGA_MEMTEST);

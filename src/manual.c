@@ -22,6 +22,7 @@
 #include "fileops.h"    /* file_lfn: the current game's path (in-game rebuild source, see below) */
 #include "manual.h"
 #include "psram_io.h"
+#include "dirindex.h"
 #include "scratch.h"    /* man_buf = the shared LEAF scratch (see scratch.h) */
 
 
@@ -321,7 +322,9 @@ void manual_stage_meta(uint8_t *rom_path) {
       slen  = (int)strlen(leaf);
       fno.lfname = lfn;
       fno.lfsize = 256;
-      if(f_opendir(&dir, (const TCHAR *)base) == FR_OK) {
+      /* An indexed directory (the info screen indexes it) skips the pass: each probe below is
+         then a lookup in PSRAM, a miss included, and the pass would only cost its scan. */
+      if(!dirindex_covers(base) && f_opendir(&dir, (const TCHAR *)base) == FR_OK) {
         man_probe_scanned = 1;                       /* the hit table is now authoritative */
         while(f_readdir(&dir, &fno) == FR_OK) {
           const char *nm = *fno.lfname ? fno.lfname : fno.fname;

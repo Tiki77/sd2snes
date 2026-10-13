@@ -20,6 +20,13 @@
 #include "diskio.h"		/* Declarations of disk I/O functions */
 #include "config.h"
 #include "uart.h"
+#include "dirindex.h"
+
+/* sd2snes: bumped by everything that may change the volume, so an index of a directory
+   (dirindex.c) knows it is stale.  The operations that change it bump it on entry (a change can
+   sit in the dirty window before any sector is written), and every sector write does too. */
+DWORD ff_wgen;
+#define disk_write(d, b, s, c) (ff_wgen++, disk_write(d, b, s, c))
 
 
 /*--------------------------------------------------------------------------
@@ -403,6 +410,12 @@ typedef struct {
 #error Wrong _VOLUMES setting
 #endif
 static FATFS *FatFs[_VOLUMES];	/* Pointer to the file system objects (logical drives) */
+
+/* sd2snes: mount ID of volume 0, 0 = not mounted (a remount after a card change makes a new one) */
+WORD ff_vol_id (void)
+{
+	return (FatFs[0] && FatFs[0]->fs_type) ? FatFs[0]->id : 0;
+}
 static WORD Fsid;				/* File system mount ID */
 
 #if _FS_RPATH && _VOLUMES >= 2
@@ -2173,6 +2186,7 @@ FRESULT find_volume (	/* FR_OK(0): successful, !=0: any error occurred */
 	UINT i;
 
 
+	if (wmode) ff_wgen++;	/* sd2snes: a write access, see ff_wgen */
 	/* Get logical drive number from the path name */
 	*rfs = 0;
 	vol = get_ldnumber(path);
@@ -2372,6 +2386,7 @@ FRESULT f_mount (
 	const TCHAR *rp = path;
 
 
+	ff_wgen++;	/* sd2snes: a new mount */
 	vol = get_ldnumber(&rp);
 	if (vol < 0) return FR_INVALID_DRIVE;
 	cfs = FatFs[vol];					/* Pointer to fs object */
@@ -2424,6 +2439,31 @@ FRESULT f_open (
 
 	if (!fp) return FR_INVALID_OBJECT;
 	fp->fs = 0;			/* Clear file object */
+
+	/* sd2snes: a read-only open in an indexed directory needs no scan (dirindex.c) */
+	if ((mode & (FA_READ | FA_WRITE | FA_CREATE_ALWAYS | FA_OPEN_ALWAYS | FA_CREATE_NEW)) == FA_READ) {
+		DWORD cl, sz;
+		int hit = dirindex_find((const char*)path, &cl, &sz);
+		if (hit == 0) return FR_NO_FILE;
+		if (hit > 0) {
+			fp->flag = FA_READ;
+			fp->err = 0;
+			fp->sclust = cl;
+			fp->fsize = sz;
+			fp->fptr = 0;
+			fp->dsect = 0;
+#if !_FS_READONLY
+			fp->dir_sect = 0;
+			fp->dir_ptr = 0;
+#endif
+#if _USE_FASTSEEK
+			fp->cltbl = 0;
+#endif
+			fp->fs = FatFs[0];
+			fp->id = FatFs[0]->id;
+			return FR_OK;
+		}
+	}
 
 	/* Get logical drive number */
 #if !_FS_READONLY
@@ -2702,6 +2742,7 @@ FRESULT f_write (
 
 
 	*bw = 0;	/* Clear write byte counter */
+	ff_wgen++;	/* sd2snes: the size and the cluster chain may change */
 
 	res = validate(fp);						/* Check validity */
 	if (res != FR_OK) LEAVE_FF(fp->fs, res);
@@ -2821,6 +2862,7 @@ FRESULT f_sync (
 	res = validate(fp);					/* Check validity of the object */
 	if (res == FR_OK) {
 		if (fp->flag & FA__WRITTEN) {	/* Has the file been written? */
+			ff_wgen++;	/* sd2snes: the directory entry is updated */
 			/* Write-back dirty buffer */
 #if !_FS_TINY
 			if (fp->flag & FA__DIRTY) {
@@ -3536,6 +3578,7 @@ FRESULT f_truncate (
 	DWORD ncl;
 
 
+	ff_wgen++;	/* sd2snes */
 	res = validate(fp);						/* Check validity of the object */
 	if (res == FR_OK) {
 		if (fp->err) {						/* Check error */

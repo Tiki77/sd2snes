@@ -220,6 +220,8 @@ FRESULT f_truncate (FIL* fp);										/* Truncate file */
 FRESULT f_sync (FIL* fp);											/* Flush cached data of a writing file */
 FRESULT f_opendir (DIR* dp, const TCHAR* path);						/* Open a directory */
 FRESULT f_opendir_at (DIR* dp, const DIR* parent, DWORD clust);		/* Open a sub directory of parent by the fclust f_readdir gave (sd2snes) */
+extern DWORD ff_wgen;											/* Bumped by every change to the volume (sd2snes, dirindex.c) */
+WORD ff_vol_id (void);											/* Mount ID of volume 0, 0 = not mounted (sd2snes) */
 FRESULT f_closedir (DIR* dp);										/* Close an open directory */
 FRESULT f_readdir (DIR* dp, FILINFO* fno);							/* Read a directory item */
 FRESULT f_findfirst (DIR* dp, FILINFO* fno, const TCHAR* path, const TCHAR* pattern);	/* Find first file */

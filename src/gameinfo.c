@@ -14,6 +14,7 @@
 #include "gameinfo.h"
 #include "psram_io.h"
 #include "util.h"
+#include "dirindex.h"
 #include "scratch.h"  /* gameinfo_load FRAME + three LEAF helpers (see scratch.h) */
 #include "cjkglyph.h" /* a Japanese/Chinese title or description: the glyphs it needs */
 
@@ -654,6 +655,13 @@ void gameinfo_load(uint8_t *rom_path) {
    * <stem> starts -- keep it instead of recomputing the prefix width later. */
   int stem_off = path_asset(f->base, sizeof(f->base), GAMEINFO_DIR, (const char *)rom_path, "");
   if(stem_off < 0) stem_off = 0;
+  /* Every sidecar below is opened from this one directory, which on a real card can hold
+     thousands of files: index it once, and each open below (and the guides probe) costs no scan */
+  if(stem_off > 1) {
+    f->base[stem_off - 1] = 0;
+    dirindex_prepare(f->base);
+    f->base[stem_off - 1] = '/';
+  }
 
   /* /sd2snes/info/<stem>.yml -- now OPTIONAL: a missing .yml is no longer a skip,
    * it just leaves every field empty (filled by the fallbacks below). */
