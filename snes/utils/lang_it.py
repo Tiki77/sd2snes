@@ -410,9 +410,9 @@ TRANSLATIONS = {
     #     "U501: " chip prefix and followed by the LINE NUMBER, so each must end
     #     exactly where that number goes.
     'mtext_mm_memtest': 'Test memoria',
-    'mdesc_mm_memtest': 'Controlla i collegamenti FPGA-RAM e poi ogni cella (30 s). Riavvia la console.',
+    'mdesc_mm_memtest': 'Controlla i collegamenti FPGA-RAM e poi ogni cella (60 s). Riavvia la console.',
     'text_mtl_prompt': 'A: Avvia test  B: Chiudi',
-    'text_mtl_prompt2': 'Riavvia la console. Dura circa 30s.',
+    'text_mtl_prompt2': 'Riavvia la console. Dura circa 60s.',
     'text_mtl_run': 'Test della memoria, attendere{127}{128}',
     'text_mtl_none': 'Nessun test ancora eseguito.',
     'text_mtl_pass': 'Tutte le linee RAM OK.',

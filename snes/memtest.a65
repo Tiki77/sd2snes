@@ -60,7 +60,7 @@
                                    from sysinfo_win_x so this screen never has to read the
                                    window_* bytes pop_window is counting rows with. */
 /* Frames the "testing, please wait" banner stays up before the screen fades out. The
-   console is then dark for the ~30s the test takes, so this is
+   console is then dark for the ~60s the test takes, so this is
    the only chance the user gets to read WHY it went dark -- long enough for that, short
    enough not to feel like the button did nothing. */
 #define MT_BANNER_FRAMES 90

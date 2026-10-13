@@ -15,7 +15,7 @@
  * official diagnostic has the same one.  Its test_mem() sweeps all 16 MB but has NO
  * CALLER, and the SNES-side memtest: in snes/tests/tests.a65 is commented out, so the only
  * cells it ever verifies are the first 1 MiB of 16, incidentally, inside test_sddma().
- * The cell sweep closes that: one write pass and one verify pass over both arrays, ~20
+ * The cell sweep closes that: one write pass and one verify pass over both arrays, ~50
  * seconds on top of the walk, run after it on every test.
  *
  * WHY IT NEEDS THE fpga_test CORE: the runtime cores leave RAM1 (U511, the 4 Mbit SRAM)
@@ -299,7 +299,7 @@ static void mt_ram1(mt_ctx_t *ctx) {
 #define MT_PATTERN(a)   ((uint8_t)((a) + ((a) >> 8) + ((a) >> 16)))
 
 /* Ticks between LED flips (10 ms each), and how often the sweep bothers to look.  The
-   screen is black and the SNES is in reset for half a minute, so with no LED the console
+   screen is black and the SNES is in reset for about a minute, so with no LED the console
    is indistinguishable from a hung one.  Checking the clock every 64 KB costs 256 reads
    per pass instead of one per byte, and 64 KB is ~40 ms of sweeping, finer than the blink
    rate either way. */
