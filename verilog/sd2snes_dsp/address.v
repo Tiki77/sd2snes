@@ -35,6 +35,7 @@ module address(
   input [23:0] SAVERAM_MASK,
   input [23:0] ROM_MASK,
   input [7:0] CC_DR,        // event cart (CC92/PF94) game-select latch
+  input dsp_bank4f,         // dsp_feat[15]: DSP-1 also at bank $4F (Hind Strike board)
   output cc_sel,            // event cart select/status register window
   input  map_unlock,
   input  map_Ex_rd_unlock,
@@ -75,6 +76,9 @@ parameter [3:0]
 integer i;
 reg [7:0] MAPPER_DEC; always @(posedge CLK) for (i = 0; i < 8; i = i + 1) MAPPER_DEC[i] <= (MAPPER == i);
 reg [23:0] SNES_ADDR; always @(posedge CLK) SNES_ADDR <= SNES_ADDR_early;
+// Hind Strike: bank-$4F compare done on the early address and registered together with
+// SNES_ADDR, so dspx_enable only gains a 2-input term (timing, mk3 96 MHz).
+reg dsp_bank4f_hit; always @(posedge CLK) dsp_bank4f_hit <= dsp_bank4f & (SNES_ADDR_early[23:16] == 8'h4F);
 
 wire [23:0] SRAM_SNES_ADDR;
 wire [23:0] SAVERAM_ADDR = {4'hE,1'b0,SAVERAM_BASE,11'h0};
@@ -233,6 +237,9 @@ assign map_enable =                           (!SNES_ADDR[22] && ((SNES_ADDR[15:
 // DSP1 LoROM: DR=30-3f:8000-bfff; SR=30-3f:c000-ffff
 //          or DR=60-6f:0000-3fff; SR=60-6f:4000-7fff
 // DSP1 HiROM: DR=00-0f:6000-6fff; SR=00-0f:7000-7fff
+// Hind Strike board (dsp_feat[15], LoROM only): DR=4f:8000-bfff; SR=4f:c000-ffff,
+//   in addition to the normal LoROM windows.  Only bank $4F: that is all the game
+//   uses, and LoROM mirrors ROM in the rest of $40-$7D.
 // CC'92 event board: DR=20-3f/a0-bf:8000-bfff; SR=20-3f/a0-bf:c000-ffff
 // PF'94 event board: DR=00-0f/80-8f:6000-6fff; SR=00-0f/80-8f:7000-7fff
 assign dspx_enable =
@@ -244,7 +251,8 @@ assign dspx_enable =
   : featurebits[FEAT_DSPX]
   ?((MAPPER_DEC[3'b001])
     ?( ( SNES_ADDR[22] & SNES_ADDR[21] & ~SNES_ADDR[20] & ~SNES_ADDR[15])
-      |(~SNES_ADDR[22] & SNES_ADDR[21] &  SNES_ADDR[20] &  SNES_ADDR[15]))
+      |(~SNES_ADDR[22] & SNES_ADDR[21] &  SNES_ADDR[20] &  SNES_ADDR[15])
+      |( dsp_bank4f_hit & SNES_ADDR[15]))
     :(MAPPER_DEC[3'b000])
       ?(~SNES_ADDR[22] & ~SNES_ADDR[21] & ~SNES_ADDR[20] & ~SNES_ADDR[15]
         & &SNES_ADDR[14:13])

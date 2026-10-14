@@ -40,6 +40,10 @@
 extern cfg_t CFG;
 snes_romprops_t romprops;
 
+/* fpga_dsp chip-feature word (CMD 0xEF): [3:0] uPD77C25 wait states, [12:8] CC'92
+   round timer, [15] DSP-1 also decoded at bank $4F (Hind Strike board). */
+#define DSPFEAT_BANK4F (1 << 15)
+
 uint32_t hdr_addr[6] = {0xffb0, 0x101b0, 0x7fb0, 0x81b0, 0x40ffb0, 0x4101b0};
 
 /* When smc_src_active is set, smc_id()/smc_headerscore() read the ROM header
@@ -669,6 +673,15 @@ void smc_id(snes_romprops_t* props, uint32_t file_offset) {
       props->fpga_dspfeat = 0;
     } else {
       props->fpga_dspfeat = 4; /* 4 extra waitstates */
+	   /* Hind Strike: its board wires the DSP-1 at bank $4F (DR $4F:8000-$BFFF,
+         SR $4F:C000-$FFFF) instead of $30-$3F.  dsp_feat[15] makes fpga_dsp
+         decode that window too (address.v).  Matched on the full 21-byte title
+         plus map/type, which every known dump shares; the cracks (map $20,
+         type $03, accesses moved to $3F) do not match and need no help. */
+      if(!memcmp(header->name, "HINDSTRIKE           ", 21)
+         && header->map == 0x30 && header->carttype == 0x05) {
+        props->fpga_dspfeat |= DSPFEAT_BANK4F;
+      }
     }
   }
 

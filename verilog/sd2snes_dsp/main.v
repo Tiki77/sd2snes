@@ -693,6 +693,7 @@ address snes_addr(
   .SAVERAM_MASK(SAVERAM_MASK),
   .ROM_MASK(ROM_MASK),
   .CC_DR(CC_DR),
+  .dsp_bank4f(dsp_feat[15]),
   .cc_sel(cc_sel),
   .map_unlock(map_unlock),
   .map_Ex_rd_unlock(map_Ex_rd_unlock_r),
