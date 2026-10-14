@@ -666,14 +666,28 @@ mcu_cmd snes_mcu_cmd(
 // jumps to the score screen).  CC_SR and the timer deliberately survive a
 // console reset: the menu's boot path tests bit 1 to land on the score screen
 // after a mid-round reset.
+// On the mk2 the event carts run on the sd2snes_dspx variant (see address.v): the plain
+// dsp core has neither the latch nor the timer.
+`ifdef MK2
+ `ifndef DSP_COMP
+  `ifndef DSP_LEAN
+   `define DSP_LEAN
+  `endif
+ `endif
+`endif
+wire cc_sel;
+`ifdef DSP_LEAN
+wire [7:0] CC_DR = 8'h00;
+wire [7:0] CC_SR = 8'h00;
+`else
 reg [7:0] CC_DR = 8'h00;
 reg [7:0] CC_SR = 8'h00;
-wire cc_sel;
 reg cc_tm_on = 1'b0;
 reg [4:0] cc_tm_min = 5'd0;
 reg [5:0] cc_tm_sec = 6'd0;
 reg [26:0] cc_tm_div = 27'd0;
 localparam [26:0] CC_ONE_SECOND = 27'd95999999; // CLK2 = 96 MHz on both boards
+`endif
 
 address snes_addr(
   .CLK(CLK2),
@@ -806,6 +820,7 @@ always @(posedge CLK2) begin
   end
 end
 
+`ifndef DSP_LEAN
 // event cart game-select latch (see the block comment at the declarations)
 wire cc_wr_hit = cc_sel & SNES_ADDR[21];
 always @(posedge CLK2) begin
@@ -843,6 +858,7 @@ always @(posedge CLK2) begin
     end
   end
 end
+`endif
 
 assign SNES_DATA = (r213f_enable & ~SNES_PARD) ? (r213f_forceread ? 8'bZ : r213fr)
                    :(r2100_enable & ~SNES_PAWR & r2100_forcewrite) ? r2100r
@@ -914,6 +930,16 @@ wire DMA_WE_HIT = |(STATE & ST_DMA_WR_ADDR);
 wire DMA_WR_HIT = |(STATE & (ST_DMA_WR_ADDR | ST_DMA_WR_END));
 wire DMA_RD_HIT = |(STATE & (ST_DMA_RD_ADDR | ST_DMA_RD_END));
 wire DMA_HIT = DMA_WR_HIT | DMA_RD_HIT;
+// Byte lane of an MCU / DMA read. In those states ROM_ADDR0 can only be the request's own
+// address bit, so on the Mk.II it is taken straight from there: through ROM_ADDR0 the
+// SNES address decode sat in front of MCU_DINr/DMA_DINr (the Spartan-3 did not meet timing).
+`ifdef MK2
+wire MCU_RD_A0 = SD_DMA_TO_ROM ? MCU_ADDR[0] : ROM_ADDRr[0];
+wire DMA_RD_A0 = SD_DMA_TO_ROM ? MCU_ADDR[0] : DMA_ROM_ADDRr[0];
+`else
+wire MCU_RD_A0 = ROM_ADDR0;
+wire DMA_RD_A0 = ROM_ADDR0;
+`endif
 
 
 `ifdef MK2
@@ -1090,7 +1116,7 @@ always @(posedge CLK2) begin
       STATE <= ST_MCU_RD_ADDR;
       ST_MEM_DELAYr <= ST_MEM_DELAYr - 1;
       if(ST_MEM_DELAYr == 0) STATE <= ST_MCU_RD_END;
-      MCU_DINr <= (ROM_ADDR0 ? ROM_DATA[7:0] : ROM_DATA[15:8]);
+      MCU_DINr <= (MCU_RD_A0 ? ROM_DATA[7:0] : ROM_DATA[15:8]);
     end
     ST_MCU_WR_ADDR: begin
       STATE <= ST_MCU_WR_ADDR;
@@ -1107,7 +1133,7 @@ always @(posedge CLK2) begin
       ST_MEM_DELAYr <= ST_MEM_DELAYr - 1;
       if(ST_MEM_DELAYr == 0) STATE <= ST_DMA_RD_END;
       // FIXME: seems like the lower byte is the upper byte (BIG ENDIAN)?  Maybe a bug in the DMA addressing logic.
-      DMA_DINr <= (ROM_ADDR0 ? ROM_DATA : {ROM_DATA[7:0],ROM_DATA[15:8]});
+      DMA_DINr <= (DMA_RD_A0 ? ROM_DATA : {ROM_DATA[7:0],ROM_DATA[15:8]});
     end
     ST_DMA_WR_ADDR: begin
       STATE <= ST_DMA_WR_ADDR;

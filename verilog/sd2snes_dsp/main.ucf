@@ -1,3 +1,10 @@
+# Spartan-3 timing computes no clock uncertainty by itself (trce INFO Timing:3389/3390,
+# "Clock Uncertainty: 0.000ns"), but CLK2 is the CLKFX of a DCM whose measured period
+# jitter is 0.75 ns peak to peak (DCM header).  SYSTEM_JITTER becomes a per-path
+# uncertainty of jitter/sqrt(2) = 0.339 ns, the value the sa1, spc7110, gsu3 and bootleg
+# use, so Timing Score 0 here means that much real margin.  Do not raise it: past what the
+# design can meet, PAR gives up early and the physical result gets worse.
+SYSTEM_JITTER = 0.48 ns;
 NET "CLKIN" TNM_NET = "CLKIN";
 TIMESPEC TS_CLKIN = PERIOD "CLKIN" 24.01 MHz HIGH 50 %;
 

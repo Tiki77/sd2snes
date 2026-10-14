@@ -229,17 +229,49 @@ reg [10:0] jp_na;
 reg [15:0] ld_id;
 reg [3:0] ld_dst;
 
+`ifdef MK2
+// Mk.II: registered product (the multiplier's own output register).  K/L are written
+// in STORE and M/N latch the product in FETCH, at least two CLKs later (NEXT, IDLE1),
+// so a one-cycle-late product is the same value.  Savestate restore writes K/L with
+// the core frozen, many cycles before it runs again.
+reg [31:0] mul_result;
+always @(posedge CLK) mul_result <= regs_k * regs_l;
+`else
 wire [31:0] mul_result = regs_k * regs_l;
+`endif
 reg [15:0] regs_m;
 reg [15:0] regs_n;
 
 reg [15:0] alu_p;
 reg [15:0] alu_q;
 reg [15:0] alu_r;
+// The carry flags compare alu_r (written in STORE) with alu_q (written in ALU1), but only
+// read the result in the next FETCH, two or more CLKs after STORE (NEXT, IDLE1). On the
+// Mk.II the compares are registered so their 16-bit carry chains do not sit in front of
+// flags_c (the Spartan-3 did not meet timing). Free-running: they also follow a savestate
+// restore of alu_r/alu_q, which happens while the DSP is frozen.
+`ifdef MK2
+reg alu_lt_r, alu_gt_r;
+always @(posedge CLK) begin
+  alu_lt_r <= (alu_r < alu_q);
+  alu_gt_r <= (alu_r > alu_q);
+end
+wire alu_lt = alu_lt_r;
+wire alu_gt = alu_gt_r;
+`else
+wire alu_lt = (alu_r < alu_q);
+wire alu_gt = (alu_r > alu_q);
+`endif
 
 reg [1:0] alu_store;
 
 reg [10:0] stack [15:0];
+`ifdef MK2
+// Mk.II: CALL push decided one CLK early (ALU2, where op/jp_brch/cond_true are already
+// stable) so the 176 stack FF enables hang off one register + the sp decode instead of
+// the whole branch-condition decode.  The write itself still lands in STORE.
+reg push_now; initial push_now = 0;
+`endif
 
 reg [15:0] idb;
 
@@ -306,6 +338,24 @@ reg [7:0] ss_reg_do;
 wire [15:0] ss_rab0 = regs_ab[0];
 wire [15:0] ss_rab1 = regs_ab[1];
 wire [10:0] ss_stk  = stack[ss_stk_idx];
+// Restore writes into the DSP's own registers. On the Mk.II they land one CLK after the
+// SNES write: the DSP is frozen, so the delay changes nothing, and the SNES address decode
+// no longer sits in front of every register's input (the Spartan-3 did not meet timing).
+`ifdef MK2
+reg       ss_wr; initial ss_wr = 1'b0;
+reg [7:0] ss_wa;
+reg [7:0] ss_wd;
+always @(posedge CLK) begin
+  ss_wr <= ss_regwin & reg_we_rising;
+  ss_wa <= DP_ADDR[7:0];
+  ss_wd <= DI;
+end
+`else
+wire       ss_wr = ss_regwin & reg_we_rising;
+wire [7:0] ss_wa = DP_ADDR[7:0];
+wire [7:0] ss_wd = DI;
+`endif
+wire [3:0] ss_wstk_idx = (ss_wa - 8'h34) >> 1;
 always @(*) begin
   if (DP_ADDR[7:0] >= 8'h34 && DP_ADDR[7:0] <= 8'h53)
     ss_reg_do = DP_ADDR[0] ? {5'b0, ss_stk[10:8]}
@@ -417,8 +467,8 @@ always @(posedge CLK) begin
       regs_sr[SR_RQM] <= 1'b1;
     end
   end else if(RST & ss_frozen) begin
-    if(ss_regwin & reg_we_rising & (DP_ADDR[7:0] == 8'h0d))
-      regs_sr[SR_RQM] <= DI[7]; // restore bit 15 (offset $0d high byte)
+    if(ss_wr & (ss_wa == 8'h0d))
+      regs_sr[SR_RQM] <= ss_wd[7]; // restore bit 15 (offset $0d high byte)
   end else begin
     regs_sr[SR_RQM] <= 1'b0;
   end
@@ -448,8 +498,8 @@ always @(posedge CLK) begin
       endcase
     end
   end else if(RST & ss_frozen) begin
-    if(ss_regwin & reg_we_rising & (DP_ADDR[7:0] == 8'h0d))
-      regs_sr[SR_DRS] <= DI[4]; // restore bit 12 (offset $0d high byte)
+    if(ss_wr & (ss_wa == 8'h0d))
+      regs_sr[SR_DRS] <= ss_wd[4]; // restore bit 12 (offset $0d high byte)
   end else begin
     regs_sr[SR_DRS] <= 1'b0;
   end
@@ -472,9 +522,9 @@ always @(posedge CLK) begin
       else if (op == I_LD) regs_dr <= ld_id;
     end
   end else if(RST & ss_frozen) begin
-    if(ss_regwin & reg_we_rising) begin
-      if(DP_ADDR[7:0] == 8'h0a) regs_dr[7:0]  <= DI; // restore low byte
-      if(DP_ADDR[7:0] == 8'h0b) regs_dr[15:8] <= DI; // restore high byte
+    if(ss_wr) begin
+      if(ss_wa == 8'h0a) regs_dr[7:0]  <= ss_wd; // restore low byte
+      if(ss_wa == 8'h0b) regs_dr[15:8] <= ss_wd; // restore high byte
     end
   end else begin
     regs_dr <= 16'h0000;
@@ -488,6 +538,10 @@ assign DO = ss_ctrl ? {7'b0, ss_halted}
 
 always @(posedge CLK) begin
   if(RST & ~ss_frozen) begin
+`ifdef MK2
+    push_now <= 1'b0;
+    if(push_now) stack[regs_sp] <= pc + 1;
+`endif
     case(insn_state)
       STATE_FETCH: begin
         insn_state <= STATE_LOAD;
@@ -504,14 +558,14 @@ always @(posedge CLK) begin
             end
             4'b0100, 4'b0101, 4'b0110, 4'b0111, 4'b1000, 4'b1001: begin
               if(op_alu[0]) begin
-                flags_c[op_asl] <= (alu_r < alu_q);
+                flags_c[op_asl] <= alu_lt;
                 flags_ov0[op_asl] <= (alu_q[15] ^ alu_r[15]) & ~(alu_q[15] ^ alu_p[15]);
                 if((alu_q[15] ^ alu_r[15]) & ~(alu_q[15] ^ alu_p[15])) begin
                   flags_s1[op_asl] <= flags_ov1[op_asl] ^ ~alu_r[15];
                   flags_ov1[op_asl] <= ~flags_ov1[op_asl];
                 end
               end else begin
-                flags_c[op_asl] <= (alu_r > alu_q);
+                flags_c[op_asl] <= alu_gt;
                 flags_ov0[op_asl] <= (alu_q[15] ^ alu_r[15]) & (alu_q[15] ^ alu_p[15]);
                 if((alu_q[15] ^ alu_r[15]) & (alu_q[15] ^ alu_p[15])) begin
                   flags_s1[op_asl] <= flags_ov1[op_asl] ^ ~alu_r[15];
@@ -634,6 +688,9 @@ always @(posedge CLK) begin
       end
       STATE_ALU2: begin
         insn_state <= STATE_STORE;
+`ifdef MK2
+        push_now <= (op == I_JP) & cond_true & (jp_brch[8:6] == 3'b101);
+`endif
       end
       STATE_STORE: begin
         insn_state <= STATE_NEXT;
@@ -743,7 +800,9 @@ always @(posedge CLK) begin
             if(cond_true) begin
               pc <= jp_na;
               if(jp_brch[8:6] == 3'b101) begin
+`ifndef MK2
                 stack[regs_sp] <= pc + 1;
+`endif
                 regs_sp <= regs_sp + 1;
               end
             end else pc <= pc + 1;
@@ -781,64 +840,64 @@ always @(posedge CLK) begin
     // savestate RESTORE (Phase 2): load FSM-owned state from the scan window.
     // regs_dr and regs_sr bits 15/12 are restored in their own blocks below;
     // everything else is here. Mirrors the read mux offset map exactly.
-    if(ss_regwin & reg_we_rising) begin
-      if(DP_ADDR[7:0] >= 8'h34 && DP_ADDR[7:0] <= 8'h53) begin
-        if(DP_ADDR[0]) stack[ss_stk_idx][10:8] <= DI[2:0];
-        else           stack[ss_stk_idx][7:0]  <= DI;
-      end else case(DP_ADDR[7:0])
-        8'h00: pc[7:0]          <= DI;
-        8'h01: pc[10:8]         <= DI[2:0];
-        8'h02: regs_ab[0][7:0]  <= DI;
-        8'h03: regs_ab[0][15:8] <= DI;
-        8'h04: regs_ab[1][7:0]  <= DI;
-        8'h05: regs_ab[1][15:8] <= DI;
-        8'h06: regs_tr[7:0]     <= DI;
-        8'h07: regs_tr[15:8]    <= DI;
-        8'h08: regs_trb[7:0]    <= DI;
-        8'h09: regs_trb[15:8]   <= DI;
+    if(ss_wr) begin
+      if(ss_wa >= 8'h34 && ss_wa <= 8'h53) begin
+        if(ss_wa[0]) stack[ss_wstk_idx][10:8] <= ss_wd[2:0];
+        else         stack[ss_wstk_idx][7:0]  <= ss_wd;
+      end else case(ss_wa)
+        8'h00: pc[7:0]          <= ss_wd;
+        8'h01: pc[10:8]         <= ss_wd[2:0];
+        8'h02: regs_ab[0][7:0]  <= ss_wd;
+        8'h03: regs_ab[0][15:8] <= ss_wd;
+        8'h04: regs_ab[1][7:0]  <= ss_wd;
+        8'h05: regs_ab[1][15:8] <= ss_wd;
+        8'h06: regs_tr[7:0]     <= ss_wd;
+        8'h07: regs_tr[15:8]    <= ss_wd;
+        8'h08: regs_trb[7:0]    <= ss_wd;
+        8'h09: regs_trb[15:8]   <= ss_wd;
         // $0a/$0b regs_dr restored in its own block
-        8'h0c: begin regs_sr[7] <= DI[7]; regs_sr[1] <= DI[1]; regs_sr[0] <= DI[0]; end
-        8'h0d: begin regs_sr[14] <= DI[6]; regs_sr[13] <= DI[5]; regs_sr[11] <= DI[3];
-                     regs_sr[SR_DRC] <= DI[2]; regs_sr[9] <= DI[1]; regs_sr[8] <= DI[0]; end
-        8'h0e: regs_rp[7:0]     <= DI;
-        8'h0f: regs_rp[10:8]    <= DI[2:0];
-        8'h10: regs_k[7:0]      <= DI;
-        8'h11: regs_k[15:8]     <= DI;
-        8'h12: regs_l[7:0]      <= DI;
-        8'h13: regs_l[15:8]     <= DI;
-        8'h14: regs_m[7:0]      <= DI;
-        8'h15: regs_m[15:8]     <= DI;
-        8'h16: regs_n[7:0]      <= DI;
-        8'h17: regs_n[15:8]     <= DI;
-        8'h18: begin regs_dph <= DI[7:4]; regs_dpl <= DI[3:0]; end
-        8'h19: regs_dpb <= DI[1:0];
-        8'h1a: regs_sp  <= DI[3:0];
-        8'h1b: insn_state <= DI;
-        8'h1c: begin flags_s1[0] <= DI[5]; flags_s0[0] <= DI[4]; flags_c[0] <= DI[3];
-                     flags_z[0] <= DI[2]; flags_ov1[0] <= DI[1]; flags_ov0[0] <= DI[0]; end
-        8'h1d: begin flags_s1[1] <= DI[5]; flags_s0[1] <= DI[4]; flags_c[1] <= DI[3];
-                     flags_z[1] <= DI[2]; flags_ov1[1] <= DI[1]; flags_ov0[1] <= DI[0]; end
-        8'h1e: idb[7:0]    <= DI;
-        8'h1f: idb[15:8]   <= DI;
-        8'h20: alu_p[7:0]  <= DI;
-        8'h21: alu_p[15:8] <= DI;
-        8'h22: alu_q[7:0]  <= DI;
-        8'h23: alu_q[15:8] <= DI;
-        8'h24: alu_r[7:0]  <= DI;
-        8'h25: alu_r[15:8] <= DI;
-        8'h26: ram_dina_r[7:0]  <= DI;
-        8'h27: ram_dina_r[15:8] <= DI;
-        8'h28: ld_id[7:0]  <= DI;
-        8'h29: ld_id[15:8] <= DI;
-        8'h2a: begin op <= DI[7:6]; op_pselect <= DI[5:4]; op_alu <= DI[3:0]; end
-        8'h2b: begin op_asl <= DI[7]; op_dpl <= DI[6:5]; op_dphm <= DI[4:1]; op_rpdcr <= DI[0]; end
-        8'h2c: begin op_src <= DI[7:4]; op_dst <= DI[3:0]; end
-        8'h2d: begin ld_dst <= DI[7:4]; alu_store <= DI[2:1]; cond_true <= DI[0]; end
-        8'h2e: jp_brch[7:0] <= DI;
-        8'h2f: jp_brch[8]   <= DI[0];
-        8'h30: jp_na[7:0]   <= DI;
-        8'h31: jp_na[10:8]  <= DI[2:0];
-        8'h32: cpu_wait     <= DI[3:0];
+        8'h0c: begin regs_sr[7] <= ss_wd[7]; regs_sr[1] <= ss_wd[1]; regs_sr[0] <= ss_wd[0]; end
+        8'h0d: begin regs_sr[14] <= ss_wd[6]; regs_sr[13] <= ss_wd[5]; regs_sr[11] <= ss_wd[3];
+                     regs_sr[SR_DRC] <= ss_wd[2]; regs_sr[9] <= ss_wd[1]; regs_sr[8] <= ss_wd[0]; end
+        8'h0e: regs_rp[7:0]     <= ss_wd;
+        8'h0f: regs_rp[10:8]    <= ss_wd[2:0];
+        8'h10: regs_k[7:0]      <= ss_wd;
+        8'h11: regs_k[15:8]     <= ss_wd;
+        8'h12: regs_l[7:0]      <= ss_wd;
+        8'h13: regs_l[15:8]     <= ss_wd;
+        8'h14: regs_m[7:0]      <= ss_wd;
+        8'h15: regs_m[15:8]     <= ss_wd;
+        8'h16: regs_n[7:0]      <= ss_wd;
+        8'h17: regs_n[15:8]     <= ss_wd;
+        8'h18: begin regs_dph <= ss_wd[7:4]; regs_dpl <= ss_wd[3:0]; end
+        8'h19: regs_dpb <= ss_wd[1:0];
+        8'h1a: regs_sp  <= ss_wd[3:0];
+        8'h1b: insn_state <= ss_wd;
+        8'h1c: begin flags_s1[0] <= ss_wd[5]; flags_s0[0] <= ss_wd[4]; flags_c[0] <= ss_wd[3];
+                     flags_z[0] <= ss_wd[2]; flags_ov1[0] <= ss_wd[1]; flags_ov0[0] <= ss_wd[0]; end
+        8'h1d: begin flags_s1[1] <= ss_wd[5]; flags_s0[1] <= ss_wd[4]; flags_c[1] <= ss_wd[3];
+                     flags_z[1] <= ss_wd[2]; flags_ov1[1] <= ss_wd[1]; flags_ov0[1] <= ss_wd[0]; end
+        8'h1e: idb[7:0]    <= ss_wd;
+        8'h1f: idb[15:8]   <= ss_wd;
+        8'h20: alu_p[7:0]  <= ss_wd;
+        8'h21: alu_p[15:8] <= ss_wd;
+        8'h22: alu_q[7:0]  <= ss_wd;
+        8'h23: alu_q[15:8] <= ss_wd;
+        8'h24: alu_r[7:0]  <= ss_wd;
+        8'h25: alu_r[15:8] <= ss_wd;
+        8'h26: ram_dina_r[7:0]  <= ss_wd;
+        8'h27: ram_dina_r[15:8] <= ss_wd;
+        8'h28: ld_id[7:0]  <= ss_wd;
+        8'h29: ld_id[15:8] <= ss_wd;
+        8'h2a: begin op <= ss_wd[7:6]; op_pselect <= ss_wd[5:4]; op_alu <= ss_wd[3:0]; end
+        8'h2b: begin op_asl <= ss_wd[7]; op_dpl <= ss_wd[6:5]; op_dphm <= ss_wd[4:1]; op_rpdcr <= ss_wd[0]; end
+        8'h2c: begin op_src <= ss_wd[7:4]; op_dst <= ss_wd[3:0]; end
+        8'h2d: begin ld_dst <= ss_wd[7:4]; alu_store <= ss_wd[2:1]; cond_true <= ss_wd[0]; end
+        8'h2e: jp_brch[7:0] <= ss_wd;
+        8'h2f: jp_brch[8]   <= ss_wd[0];
+        8'h30: jp_na[7:0]   <= ss_wd;
+        8'h31: jp_na[10:8]  <= ss_wd[2:0];
+        8'h32: cpu_wait     <= ss_wd[3:0];
         default: ; // $33 magic (read-only)
       endcase
     end
@@ -847,6 +906,9 @@ always @(posedge CLK) begin
     pc <= 11'b0;
     regs_sp <= 4'b0000;
     cond_true <= 0;
+`ifdef MK2
+    push_now <= 1'b0;
+`endif
     regs_sr[14] <= 0;
     regs_sr[13] <= 0;
     regs_sr[11] <= 0;

@@ -141,6 +141,22 @@ reg [23:0] shadow_src, shadow_dst, shadow_len;
 reg        shadow_word, shadow_dir;
 reg [4:0]  shadow_op;
 wire op_kick = reg_we_rising & enable & (reg_addr == 4'd9) & reg_data_in[0];
+`ifdef MK2
+// Mk.II: the kick (and the dma_r[9] byte it carries) is taken one CLK later, so the
+// unlock/address decode behind reg_we_rising does not feed the ~80 FF enables of the
+// shadow/start registers in the same cycle.  dma_r[0..9] are already stable by then.
+reg       kick_r;      initial kick_r = 0;
+reg [7:0] kick_data_r;
+always @(posedge clkin) begin
+  kick_r      <= op_kick;
+  kick_data_r <= reg_data_in;
+end
+wire       kick      = kick_r;
+wire [7:0] kick_data = kick_data_r;
+`else
+wire       kick      = op_kick;
+wire [7:0] kick_data = reg_data_in;
+`endif
 
 assign BUS_RRQ = BUS_RDY && (state == ST_READ);
 assign BUS_WRQ = BUS_RDY && (state == ST_WRITE);
@@ -173,7 +189,7 @@ always @(posedge clkin) begin
     // 1-trigger queue: a trigger arriving while the copier is BUSY is latched as
     // `pending` (+ the op snapshotted); a 2nd one while already pending overruns.
     // (When ST_IDLE, the fresh trigger is handled by the TRIG-edge path below.)
-    if (op_kick && (state != ST_IDLE)) begin
+    if (kick && (state != ST_IDLE)) begin
       if (pending) overrun_r <= 1'b1;
       else begin
         pending     <= 1'b1;
@@ -181,8 +197,8 @@ always @(posedge clkin) begin
         shadow_dst  <= DST_ADDR;
         shadow_len  <= LEN;
         shadow_word <= WORD_MODE;
-        shadow_op   <= reg_data_in[7:3];  // dma_r[9] being written this cycle
-        shadow_dir  <= reg_data_in[1];
+        shadow_op   <= kick_data[7:3];  // dma_r[9] being written this cycle
+        shadow_dir  <= kick_data[1];
       end
     end
 
@@ -202,7 +218,7 @@ always @(posedge clkin) begin
           if (shadow_op == OP_COPY) state <= ST_READ;
           else                      state <= ST_WRITE;
         end
-        else if (op_kick) begin
+        else if (kick) begin
           // single-op start, detected by the dma_r[9] WRITE (op_kick) rather than a
           // TRIG bit-edge -- robust to the bit already being 1 (the ST_DONE clear
           // can be skipped by a colliding reg-write in no-poll mode).  opcode/loop/
@@ -211,13 +227,13 @@ always @(posedge clkin) begin
           src_addr_r  <= SRC_ADDR;
           dst_addr_r  <= DST_ADDR;
           length_r    <= LEN;
-          mod_r       <= WORD_MODE ? (reg_data_in[1] ? -2 : 2) : (reg_data_in[1] ? -1 : 1);
-          opcode_r    <= reg_data_in[7:3];
-          loop_r      <= reg_data_in[2];
-          dir_r       <= reg_data_in[1];
+          mod_r       <= WORD_MODE ? (kick_data[1] ? -2 : 2) : (kick_data[1] ? -1 : 1);
+          opcode_r    <= kick_data[7:3];
+          loop_r      <= kick_data[2];
+          dir_r       <= kick_data[1];
           word_mode_r <= WORD_MODE;
 
-          if (reg_data_in[7:3] == OP_COPY) state <= ST_READ;
+          if (kick_data[7:3] == OP_COPY) state <= ST_READ;
           else                             state <= ST_WRITE;
         end
       end

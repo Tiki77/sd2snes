@@ -413,8 +413,10 @@ always @(posedge clk) begin
       end
     end else if(pgm_we) begin
       if(pgm_idx < 6) begin
+`ifndef MK2
         cheat_addr[pgm_idx] <= pgm_in[31:8];
         cheat_data[pgm_idx] <= pgm_in[7:0];
+`endif
       end else if(pgm_idx == 6) begin // set rom patch enable
         cheat_enable_mask <= pgm_in[5:0];
       end else if(pgm_idx == 7) begin // set/reset global enable / hooks
@@ -428,6 +430,19 @@ always @(posedge clk) begin
     end
   end
 end
+
+`ifdef MK2
+// The six cheat slots take MCU writes in a block of their own: in the one above, the
+// SNES snescmd write decode (SNES_ADDR) sat in front of the clock enable of all 192 slot
+// flip-flops and the Spartan-3 did not meet timing. The only difference is that a slot
+// write landing on the same CLK as a snescmd write or a reset strobe is no longer dropped.
+always @(posedge clk) begin
+  if(pgm_we & (pgm_idx < 6)) begin
+    cheat_addr[pgm_idx] <= pgm_in[31:8];
+    cheat_data[pgm_idx] <= pgm_in[7:0];
+  end
+end
+`endif
 
 // map controller input to cmd output
 // check button combinations

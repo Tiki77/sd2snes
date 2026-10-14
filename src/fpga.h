@@ -78,6 +78,12 @@ extern uint8_t fpga_boot_led;
    romprops.fpga_conf, so every "is this the base core" test still sees the base core. */
 #define FPGA_BASEX ((const uint8_t*)"/sd2snes/fpga_basex." FPGA_CONF_EXT)
 #define FPGA_DSP ((const uint8_t*)"/sd2snes/fpga_dsp." FPGA_CONF_EXT)
+/* mk2-only variant of the dsp core (verilog/sd2snes_dspx: the same source with DSP_COMP).
+   The Spartan-3 dsp core leaves the event cart logic (Campus Challenge '92 / PowerFest '94
+   map, select latch and round timer) out so that it meets timing; this one keeps it.
+   Chosen by load_chip_core() -- romprops.fpga_conf stays FPGA_DSP, so every "is this the
+   dsp core" test still sees the dsp core. */
+#define FPGA_DSPX ((const uint8_t*)"/sd2snes/fpga_dspx." FPGA_CONF_EXT)
 /* Dedicated ST011 core (verilog/sd2snes_st0011): the uPD96050's 16384-word
    program is fetched from the Bus 2 SRAM through a block-RAM cache, which has no
    room in fpga_dsp next to the DSP1-4 on-chip program ROM. ST010 stays on

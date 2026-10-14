@@ -1406,6 +1406,18 @@ static const uint8_t *load_base_core(const load_ctx_t *c) {
   return FPGA_BASE;
 }
 
+/* The chip core file this cartridge runs on: romprops.fpga_conf, except on the mk2 for
+   the event carts (Campus Challenge '92 / PowerFest '94), whose map, select latch and
+   round timer live in fpga_dspx so that the plain dsp core meets timing (see
+   sd2snes_dsp/address.v). */
+static const uint8_t *load_chip_core(void) {
+#ifdef CONFIG_MK2
+  if(romprops.fpga_conf == FPGA_DSP
+     && (romprops.fpga_features & (FEAT_CC92 | FEAT_PF94))) return FPGA_DSPX;
+#endif
+  return romprops.fpga_conf;
+}
+
 /* NES, Master System, Atari 2600 and the Game Boy Color core: experimental, and without
    savestates or the in-game menu.  On the Mk.II the first three are refused earlier and a
    .gbc runs on the Super Game Boy, so this is only ever true on the Mk.III. */
@@ -1461,9 +1473,9 @@ static uint32_t load_check_prereqs(load_ctx_t *c) {
      fpga_conf is NULL for plain LoROM/HiROM (those fall back to fpga_base, not
      gated here); when set it is always a real /sd2snes/fpga_*.bit path. Without
      it, fpga_pgm() fails silently and the game boots with no/wrong core. */
-  if(romprops.fpga_conf && !file_exists((const char*)romprops.fpga_conf)) {
+  if(romprops.fpga_conf && !file_exists((const char*)load_chip_core())) {
     return load_abort_missing(flags, MENU_ERR_SUPPLFILE,
-                              path_leaf((const char*)romprops.fpga_conf));
+                              path_leaf((const char*)load_chip_core()));
   }
   /* Xeno Crisis: the RP2040 flash dump (the user's) and xc_soc.bin (ours), checked for
      size/build too -- a wrong file found after the ACK could only boot a dead game. */
@@ -1559,7 +1571,7 @@ static void load_reconfigure_fpga(const load_ctx_t *c) {
   const uint8_t base_swap = 0;
 #endif
   if(romprops.fpga_conf || (flags & LOADROM_WITH_FPGA) || base_swap) {
-    const uint8_t *fpga_conf = romprops.fpga_conf ? romprops.fpga_conf : base_core;
+    const uint8_t *fpga_conf = romprops.fpga_conf ? load_chip_core() : base_core;
     printf("reconfigure FPGA with %s...\n", fpga_conf);
     nes_dbg_log("PRE_PGM");            /* nesdbg: no-op fora de um load .nes */
     fpga_pgm((uint8_t*)fpga_conf);

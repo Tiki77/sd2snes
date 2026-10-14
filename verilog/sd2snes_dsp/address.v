@@ -80,6 +80,26 @@ reg [23:0] SNES_ADDR; always @(posedge CLK) SNES_ADDR <= SNES_ADDR_early;
 // SNES_ADDR, so dspx_enable only gains a 2-input term (timing, mk3 96 MHz).
 reg dsp_bank4f_hit; always @(posedge CLK) dsp_bank4f_hit <= dsp_bank4f & (SNES_ADDR_early[23:16] == 8'h4F);
 
+// Event carts (Campus Challenge '92 / PowerFest '94): their menu/game-chip map, select
+// window and DSP window sit in the address mux every access takes, and with them in the
+// Spartan-3 fit cannot meet the CLK2 period. So the mk2 dsp core is built without them
+// and the mk2 variant sd2snes_dspx -- this same source with DSP_COMP defined -- carries
+// them; the firmware loads that one for the event carts. The mk3 core has them.
+`ifdef MK2
+ `ifndef DSP_COMP
+  `ifndef DSP_LEAN
+   `define DSP_LEAN
+  `endif
+ `endif
+`endif
+`ifdef DSP_LEAN
+wire EV_CC92 = 1'b0;
+wire EV_PF94 = 1'b0;
+`else
+wire EV_CC92 = featurebits[FEAT_CC92];
+wire EV_PF94 = featurebits[FEAT_PF94];
+`endif
+
 wire [23:0] SRAM_SNES_ADDR;
 wire [23:0] SAVERAM_ADDR = {4'hE,1'b0,SAVERAM_BASE,11'h0};
 
@@ -108,7 +128,7 @@ assign IS_SAVERAM_pre = (~map_unlock & SAVERAM_MASK[0])
  *  Replaces the LoROM rule below, whose bank $70 window would collide with
  *  the menu mirror there.  CC'92 keeps the standard LoROM rule (its menu
  *  writes $700420). */
-                      :featurebits[FEAT_PF94]
+                      :EV_PF94
                       ? ((SNES_ADDR_early[22:20] == 3'b011)
                         & (SNES_ADDR_early[15:13] == 3'b011))
                       :((MAPPER_DEC[3'b000]
@@ -179,11 +199,11 @@ wire [23:0] pf94_rom_addr =
 
 assign SRAM_SNES_ADDR = IS_PATCH
                         ? SNES_ADDR
-                        : (featurebits[FEAT_CC92] | featurebits[FEAT_PF94])
+                        : (EV_CC92 | EV_PF94)
                         ?(IS_SAVERAM
                           ? SAVERAM_ADDR + ({SNES_ADDR[20:16], SNES_ADDR[14:0]}
                                           & SAVERAM_MASK)
-                          : featurebits[FEAT_CC92] ? cc92_rom_addr
+                          : EV_CC92 ? cc92_rom_addr
                                                    : pf94_rom_addr)
                         : ((MAPPER_DEC[3'b000])
                           ?(IS_SAVERAM
@@ -243,9 +263,9 @@ assign map_enable =                           (!SNES_ADDR[22] && ((SNES_ADDR[15:
 // CC'92 event board: DR=20-3f/a0-bf:8000-bfff; SR=20-3f/a0-bf:c000-ffff
 // PF'94 event board: DR=00-0f/80-8f:6000-6fff; SR=00-0f/80-8f:7000-7fff
 assign dspx_enable =
-  featurebits[FEAT_CC92]
+  EV_CC92
   ? ((SNES_ADDR[22:21] == 2'b01) & SNES_ADDR[15])
-  : featurebits[FEAT_PF94]
+  : EV_PF94
   ? (((SNES_ADDR[23:20] == 4'h0) | (SNES_ADDR[23:20] == 4'h8))
     & (SNES_ADDR[15:13] == 3'b011))
   : featurebits[FEAT_DSPX]
@@ -270,8 +290,8 @@ assign dspx_dp_enable = (SNES_ADDR[15:11] == 5'b00000)
                       & ( (featurebits[FEAT_ST0010] & (SNES_ADDR[22:19] == 4'b1101))
                         | (featurebits[FEAT_DSPX] & (map_unlock | snescmd_unlock) & (SNES_ADDR[23:16] == 8'hE8)) );
 
-assign dspx_a0 = featurebits[FEAT_CC92] ? SNES_ADDR[14]
-                 : featurebits[FEAT_PF94] ? SNES_ADDR[12]
+assign dspx_a0 = EV_CC92 ? SNES_ADDR[14]
+                 : EV_PF94 ? SNES_ADDR[12]
                  : featurebits[FEAT_DSPX]
                  ?((MAPPER_DEC[3'b001]) ? SNES_ADDR[14]
                    :(MAPPER_DEC[3'b000]) ? SNES_ADDR[12]
@@ -292,9 +312,9 @@ wire cc_unlocked = map_unlock | snescmd_unlock
                  | map_Ex_rd_unlock | map_Ex_wr_unlock
                  | map_Fx_rd_unlock | map_Fx_wr_unlock;
 assign cc_sel = ~cc_unlocked
-              & (featurebits[FEAT_CC92]
+              & (EV_CC92
                 ? ((SNES_ADDR[23:20] == 4'hC) | (SNES_ADDR[23:20] == 4'hE))
-                : featurebits[FEAT_PF94]
+                : EV_PF94
                 ? (((SNES_ADDR[23:20] == 4'h1) | (SNES_ADDR[23:20] == 4'h2)
                    |(SNES_ADDR[23:20] == 4'h9) | (SNES_ADDR[23:20] == 4'hA))
                   & (SNES_ADDR[15:13] == 3'b011))
