@@ -9,7 +9,13 @@
  * the feature's screen is up: every menu command that is not one of the modules' own
  * (module_gate) unloads it first, which is what hands ptrcache back before anything sorts.
  * Its state lives in the scratch FRAME (scratch.h: a module is one more FRAME owner, like
- * gameinfo_load and a game load, and never runs inside them).  It reaches the firmware only
+ * gameinfo_load and a game load, and never runs inside them).
+ *
+ * A SESSION module (module_session) is the other kind: opened by load_rom for the game
+ * being loaded, alive for the whole game, served from both game loops by module_idle, and
+ * dropped by the next load_rom (the menu's included).  It fits because a running game
+ * never sorts a directory nor uses the FRAME.  Its stop() must not touch the FPGA: the
+ * core may already be another one.  It reaches the firmware only
  * through the module_api_t table below, and runs the same image on every board: anything
  * board-specific (SPI registers, RAM layout) is behind the table.
  *
@@ -25,13 +31,14 @@
 #include "ff.h"
 
 #define MODULE_MAGIC   0x444f4d53UL   /* "SMOD" */
-#define MODULE_ABI     2
+#define MODULE_ABI     3
 
 /* the modules, and the file each one is */
 #define MODULE_ID_NSF      1          /* nsfplay.bin: the NSF player (SNES_CMD_MOD_OPEN) */
 #define MODULE_ID_MEMTEST  2          /* memtest.bin: the RAM test (SNES_CMD_MEMTEST) */
 #define MODULE_ID_PCM      3          /* pcmplay.bin: the .pcm player (SNES_CMD_PLAY_PCM) */
-#define MODULE_COUNT       3
+#define MODULE_ID_RTC7110  4          /* rtc7110.bin: the SPC7110 RTC battery (session) */
+#define MODULE_COUNT       4
 
 /* What start() returns when the module could not be loaded at all */
 #define MODULE_MISSING     (-1)
@@ -86,6 +93,16 @@ typedef struct {
   void     (*sfx_forget)(void);
   /* AHB SRAM nobody else uses (the NSF player's cache): *size bytes at the returned address */
   uint8_t *(*spare)(uint32_t *size);
+  /* files on the card by game (fileops.c) and writing one */
+  int      (*path_asset)(char *buf, int buflen, const char *root, const char *src, const char *ext);
+  FRESULT  (*path_asset_mkdir)(char *path);
+  FRESULT  (*f_write)(FIL *fp, const void *buf, UINT len, UINT *bw);
+  /* the clocks: the console's own (packed BCD, get_bcdtime) and the core's (set_fpga_time),
+     and the SPC7110 core's battery handover (FPGA_SPC7110_RTC_LEN bytes each way) */
+  uint64_t (*bcdtime)(void);
+  void     (*fpga_time)(uint64_t time);
+  void     (*s7rtc_get)(uint8_t *state);
+  void     (*s7rtc_set)(const uint8_t *state);
   /* the board */
   uint32_t cpu_hz;
   const uint8_t *ram0_base;           /* the first cell of each PSRAM chip... */
@@ -129,8 +146,10 @@ typedef struct {
 
 /* Firmware side (module.c) */
 int  module_open(uint8_t id, const char *path);   /* start()'s answer, or MODULE_MISSING */
+int  module_session(uint8_t id, const char *path);/* the same, for a module that lives with the game */
+void module_drop(void);                           /* stop and forget whatever is open */
 void module_ctl(uint32_t param);
 void module_gate(uint8_t cmd);                    /* before every menu command */
-void module_idle(void);                           /* once per menu-loop pass */
+void module_idle(void);                           /* once per menu- or game-loop pass */
 
 #endif

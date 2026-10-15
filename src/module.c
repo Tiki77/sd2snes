@@ -13,6 +13,7 @@
 #include "timer.h"
 #include "led.h"
 #include "memtest.h"
+#include "rtc.h"
 #include "module.h"
 
 /* sort.c: the READDIR sort cache, idle while a module's screen is open (module_gate) */
@@ -61,6 +62,8 @@ static const module_api_t mod_api = {
   menu_music_tell, menu_music_size, menu_music_gen_played,
   memtest_core, fpga_select_mem, memtest_pass, writeled, module_ticks, menu_sfx_forget,
   module_spare,
+  path_asset, path_asset_mkdir, f_write,
+  get_bcdtime, set_fpga_time, get_spc7110_rtc, set_spc7110_rtc,
   CONFIG_CPU_FREQUENCY, ram0_bases, RAM0_NUM_CHIPS, RAM0_SECOND_ADDR, MEMTEST_ITERATIONS
 };
 
@@ -71,10 +74,10 @@ static uint8_t mod_id;              /* the module in ptrcache, 0 = none (or gone
 #ifdef MODULE_HOST_LINKED
 /* Host builds of the firmware (the Ciclone) cannot run an ARM image: there the modules are
    linked in and nothing is loaded. */
-extern const module_fns_t nsfmod_fns, mtmod_fns, pcmmod_fns;
+extern const module_fns_t nsfmod_fns, mtmod_fns, pcmmod_fns, rtcmod_fns;
 static int module_load(uint8_t id)
 {
-  static const module_fns_t *const fns[MODULE_COUNT] = { &nsfmod_fns, &mtmod_fns, &pcmmod_fns };
+  static const module_fns_t *const fns[MODULE_COUNT] = { &nsfmod_fns, &mtmod_fns, &pcmmod_fns, &rtcmod_fns };
   if(!id || id > MODULE_COUNT) return 0;
   mod = *fns[id - 1];
   return 1;
@@ -83,7 +86,8 @@ static int module_load(uint8_t id)
 static int module_load(uint8_t id)
 {
   static const char *const file[MODULE_COUNT] = {
-    "/sd2snes/nsfplay.bin", "/sd2snes/memtest.bin", "/sd2snes/pcmplay.bin"
+    "/sd2snes/nsfplay.bin", "/sd2snes/memtest.bin", "/sd2snes/pcmplay.bin",
+    "/sd2snes/rtc7110.bin"
   };
   uint8_t *img = (uint8_t *)ptrcache;
   const module_hdr_t *h = (const module_hdr_t *)img;
@@ -112,25 +116,40 @@ static int module_load(uint8_t id)
 }
 #endif
 
-int module_open(uint8_t id, const char *path)
+/* status: publish SRAM_MODULE_STATUS for the menu (a menu module only; a session module
+   opens inside a game load, with no menu to read it) */
+static int module_start(uint8_t id, const char *path, uint8_t status)
 {
-  if(mod_live) {
-    mod.stop(scratch_frame);
-    mod_live = 0;
-  }
+  module_drop();
   /* the same module again (the next track, the next file): its image is still in place,
      nothing has used ptrcache since -- every foreign command goes through module_gate */
   if(id != mod_id) {
     mod_id = 0;
     if(!module_load(id)) {
-      sram_writebyte(MODULE_ST_MISSING, SRAM_MODULE_STATUS);
+      if(status) sram_writebyte(MODULE_ST_MISSING, SRAM_MODULE_STATUS);
       return MODULE_MISSING;
     }
     mod_id = id;
   }
-  sram_writebyte(MODULE_ST_OK, SRAM_MODULE_STATUS);
+  if(status) sram_writebyte(MODULE_ST_OK, SRAM_MODULE_STATUS);
   mod_live = 1;
   return mod.start(scratch_frame, &mod_api, path);
+}
+
+int module_open(uint8_t id, const char *path)
+{
+  return module_start(id, path, 1);
+}
+
+int module_session(uint8_t id, const char *path)
+{
+  return module_start(id, path, 0);
+}
+
+void module_drop(void)
+{
+  if(mod_live) mod.stop(scratch_frame);
+  mod_live = 0;
 }
 
 void module_ctl(uint32_t param)
@@ -142,8 +161,7 @@ void module_gate(uint8_t cmd)
 {
   if(cmd == SNES_CMD_MOD_OPEN || cmd == SNES_CMD_MOD_CTL
      || cmd == SNES_CMD_PLAY_PCM || cmd == SNES_CMD_PCM_CTL) return;
-  if(mod_live) mod.stop(scratch_frame);
-  mod_live = 0;
+  module_drop();
   mod_id = 0;                       /* ptrcache and the FRAME are someone else's from here */
 }
 

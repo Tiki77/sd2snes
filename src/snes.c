@@ -44,11 +44,10 @@
 #include "cfg.h"
 #include "usbinterface.h"
 #include "sgb.h"
-#include "spc7110rtc.h"
 #include "version.h"
 #include "hwinfo.h"
 #include "msu1.h"   /* menu_sfx_* : menu sound effects via the MSU-1 DAC */
-#include "module.h" /* module_idle: the open card module (the PCM / NSF player) */
+#include "module.h" /* module_idle: the open card module (PCM / NSF player, SPC7110 RTC) */
 #include "gameinfo.h" /* gameinfo_fmv_idle_check : stop a lingering FMV when its screen closes */
 #include "cheat.h"
 #include "cheatedit.h"
@@ -344,9 +343,9 @@ uint8_t snes_main_loop() {
      whole point of the second slot -- would otherwise never reach the card. */
   sufami_slotb_autosave();
 
-  /* keep the SPC7110 RTC-4513 backup in step; writes the card only on a change.
-     Every config: the Mk.II core carries the virtual battery as well now. */
-  spc7110_rtc_save(file_lfn);
+  /* the game's session module, if it has one: the SPC7110 RTC-4513 backup (rtc7110.bin),
+     which writes the card only on a change */
+  module_idle();
 
   if(romprops.sramsize_bytes && CFG.enable_autosave) {
     uint32_t crc_bytes = min(romprops.sramsize_bytes - saveram_offset, SRAM_REGION_SIZE);

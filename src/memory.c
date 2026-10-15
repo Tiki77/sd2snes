@@ -57,7 +57,7 @@ memory.c: RAM operations
 #include "savestate.h"
 #include "sgb.h"
 #include "gbc.h"
-#include "spc7110rtc.h"
+#include "module.h"
 #include "nes.h"
 #include "sms.h"
 #include "atari.h"
@@ -624,6 +624,10 @@ static uint8_t load_patch_needs_recore(const load_ctx_t *c, uint8_t saved_ips_id
    independent battery chips, one per minicart slot, each with its own file.  rammask
    sizes the MAPPED window, wider than the SAVEABLE size for a .st -- see
    SUFAMI_SLOTA_SCRATCH_SIZE in memmap.h. */
+/* Whether the SPC7110 core in use carries the virtual battery and the card module
+   that keeps it (rtc7110.bin) is there: set by load_setup_masks, read by load_saveram. */
+static uint8_t spc7110_rtc_have_core;
+
 static void load_saveram(const load_ctx_t *c) {
   uint8_t  *filename = c->filename;
   uint32_t  rammask  = c->rammask;
@@ -673,7 +677,7 @@ static void load_saveram(const load_ctx_t *c) {
        the initial CRC, so it reaches the card only with a real save.  load_setup_masks
        probes the core and runs before this. */
     if(romprops.has_spc7110_rtc && romprops.sramsize_bytes >= 16
-       && !spc7110_rtc_battery_present()) {
+       && !spc7110_rtc_have_core) {
       static const uint8_t spc7110_sig[16] = { 'S','P','C','7','1','1','0',' ',
                                                'C','H','E','C','K',' ','O','K' };
       uint8_t sigcur[16];
@@ -1052,7 +1056,16 @@ static void load_setup_masks(load_ctx_t *c) {
        battery too.  An older core answers $e6 out of a stale latch, so the handover is
        probed for its marker first and falls back to the console clock when it is
        missing -- core and firmware still have to come from the same release. */
-    spc7110_rtc_load(c->filename);
+    {
+      int r = module_session(MODULE_ID_RTC7110, (const char *)c->filename);
+      /* no rtc7110.bin on the card: the console's clock, as with a core from before
+         the battery (the module does the same itself when the core lacks it) */
+      if(r == MODULE_MISSING) set_fpga_time(get_bcdtime());
+      spc7110_rtc_have_core = (r == 1);
+      printf("SPC7110 RTC: %s\n", r == MODULE_MISSING ? "no rtc7110.bin, console clock"
+                                 : r ? "battery restored"
+                                     : "core without the battery, console clock");
+    }
   }
   c->rammask  = rammask;
 }
@@ -1609,6 +1622,10 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
   tick_t ticksstart = getticks();
 
   dirindex_drop();                    /* the ROM area holds the directory index in menu mode */
+  /* A card module still open belongs to what ran before this load: a session module (the
+     SPC7110 RTC) must stop before the core changes under it, and a menu module's screen
+     is gone. */
+  module_drop();
 
   /* NB: menu SFX teardown (menu_sfx_shutdown) is deferred all the way down to just
      before the FPGA reconfig, past the prerequisite check AND past the 0x55 that

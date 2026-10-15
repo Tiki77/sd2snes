@@ -92,9 +92,8 @@ SRC += memtest.c
 # Card modules (module.h): menu features whose code is a file on the card, loaded only while
 # their screen is open.  The images (modules/) are built below with every firmware.
 SRC += module.c
-# SPC7110 RTC-4513 battery backup.  Linked into every config: both flavours of the
-# SPC7110 core carry the virtual battery.
-SRC += spc7110rtc.c
+# The SPC7110 RTC-4513 battery backup is a card module (modules/rtc7110/, rtc7110.bin):
+# load_rom opens it for SPC7110 games only.
 
 # Sufami Turbo Slot B autosave.  Linked into every config.
 SRC += sufami.c
@@ -410,7 +409,7 @@ clean_list :
 	$(Q)$(REMOVE) $(OBJDIR)/${CONFIG_FW_FILE}
 	$(Q)$(REMOVE) $(OBJDIR)/fw.hdr
 	$(Q)$(REMOVE) -r $(OBJDIR)/xc_soc_build $(OBJDIR)/xc_soc.bin $(OBJDIR)/xc_fw.bin $(OBJDIR)/xc_bootrom.bin \
-	  $(OBJDIR)/modules_build $(OBJDIR)/nsfplay.bin $(OBJDIR)/memtest.bin $(OBJDIR)/pcmplay.bin
+	  $(OBJDIR)/modules_build $(OBJDIR)/nsfplay.bin $(OBJDIR)/memtest.bin $(OBJDIR)/pcmplay.bin $(OBJDIR)/rtc7110.bin
 	$(Q)$(REMOVE) $(OBJDIR)/.DS_Store
 	$(Q)$(REMOVE) $(LST)
 	$(Q)$(REMOVE) $(CSRC:.c=.s)

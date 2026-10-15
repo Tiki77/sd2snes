@@ -15,13 +15,15 @@ CFLAGS := -mcpu=cortex-m3 -mthumb -mfloat-abi=soft -Os -fpic -fvisibility=hidden
           -ffreestanding -fno-builtin -fno-tree-loop-distribute-patterns \
           -ffunction-sections -fdata-sections -Wall -Wextra -Werror -I..
 
-MODULES := nsfplay memtest pcmplay
+MODULES := nsfplay memtest pcmplay rtc7110
 nsfplay_SRC := nsfplay/nsfmod.c ../nsf.c ../nsfapu.c
 nsfplay_INC := -Insfplay
 memtest_SRC := memtest/mtmod.c
 memtest_INC :=
 pcmplay_SRC := pcmplay/pcmmod.c
 pcmplay_INC :=
+rtc7110_SRC := rtc7110/rtcmod.c ../spc7110rtc.c
+rtc7110_INC :=
 
 all: $(MODULES:%=$(OUT)/%.bin)
 

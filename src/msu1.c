@@ -17,7 +17,7 @@
 #include "usbinterface.h"
 #include "savestate.h"
 #include "cfg.h"
-#include "spc7110rtc.h"
+#include "module.h"
 #include "psram_io.h"
 #include "sufami.h"
 #include "qoa.h"
@@ -92,13 +92,12 @@ static int is_msu_free_to_save(void) {
  */
 static void msu_savecheck(int immediate) {
   uint32_t currentcrc;
-  /* Keep the SPC7110 RTC-4513 backup in step here too.  msu1_loop is the second
-     game loop and the switch(cmd) of the normal one never runs for an MSU-1
-     title, so anything that only lives there is silently dead in these games.
-     Deliberately ABOVE the autosave gate: the RTC backup is not SRAM autosave
-     and must not be switched off with it.  Costs one branch when the cartridge
-     is not an SPC7110, and writes the card only on a real change. */
-  spc7110_rtc_save(file_lfn);
+  /* Serve the game's session module here too (the SPC7110 RTC-4513 backup).  msu1_loop
+     is the second game loop and the switch(cmd) of the normal one never runs for an
+     MSU-1 title, so anything that only lives there is silently dead in these games.
+     Deliberately ABOVE the autosave gate: the RTC backup is not SRAM autosave and must
+     not be switched off with it.  One branch when no module is open. */
+  module_idle();
   /* Same reasoning for the Sufami Turbo Slot B battery: this is the second game loop,
      and a subsystem wired into only one of the two is dead in the other.  Above the
      autosave gate because it carries its own CFG.enable_autosave check. */

@@ -12,6 +12,11 @@
  * same way the Super Game Boy keeps the MBC3 clock in a .gtc file.
  *
  * Sidecar: /sd2snes/saves/<BB>/<romstem>.rtc, versioned, 24 bytes.
+ *
+ * The load and save halves are the card module rtc7110.bin (modules/rtc7110/rtcmod.c), a
+ * session module: load_rom opens it once the core is configured, both game loops serve
+ * it, and without the file the clock is simply programmed from the console's.  What
+ * stays here is the calendar arithmetic it uses.
  */
 #ifndef SPC7110RTC_H
 #define SPC7110RTC_H
@@ -64,20 +69,5 @@ void spc7110_rtc_add(const spc7110_instant_t *a, const spc7110_instant_t *d,
 /* days between two instants, i.e. how many midnights were crossed */
 int32_t spc7110_rtc_midnights(const spc7110_instant_t *from,
                               const spc7110_instant_t *to);
-
-#ifndef SPC7110_RTC_HOSTTEST
-/* Called from load_rom once the core is configured and before the SNES runs.
-   Always programs the clock: with the backed up state when there is one, with
-   the console's own time when there is not. */
-void spc7110_rtc_load(uint8_t *filename);
-/* Called from the game loop.  Reads the core's state over SPI and writes the
-   sidecar only when it actually changed, so a free running clock costs no
-   card writes at all. */
-void spc7110_rtc_save(uint8_t *filename);
-/* Whether the core the last spc7110_rtc_load() talked to answered $e6 with the
-   marker, i.e. whether there is a virtual battery on the other end.  0 means an
-   fpga_spc7110 from before the battery, on either board. */
-int spc7110_rtc_battery_present(void);
-#endif
 
 #endif
