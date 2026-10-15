@@ -3426,6 +3426,14 @@ filesel_request_filelist:
 ; cover_sync_before_cmd does ahead of game_handshake.  Harmless for the
 ; non-chained callers (select_dir / filesel_init): the MCU is already idle so it
 ; returns immediately.
+; wait_mcu_ready alone is not enough after a CMD_LOAD_COVER: its spin gives up after
+; ~0.3 s, and the cover of a FOLDER walks up to 256 of its entries (load_cover_dir),
+; which on a folder of several hundred files takes longer.  A READDIR written while the
+; MCU is still on it is wiped when the firmware re-enters its menu loop (MCU_CMD = 0
+; there), and the $55 it sets reads as READDIR's completion: the browser showed the
+; previous folder's table under the new path, with a stale entry count.  Drain the
+; cover first, as every other command of the browser does.
+  jsr cover_sync_before_cmd
   jsr wait_mcu_ready
   lda #!FILESEL_CWD
   sta @MCU_PARAM

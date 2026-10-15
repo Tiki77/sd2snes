@@ -374,7 +374,11 @@ int main(void) {
 //}
   //sram_hexdump(SRAM_MENU_ADDR, 0x400);
     while(!cmd) {
-      /* tell the menu we're ready to accept commands */
+      /* tell the menu we're ready to accept commands. Clear MCU_CMD FIRST: the menu
+         writes its next command the moment it sees the ready (wait_mcu_ready, chained
+         commands), and a clear that lands after the ready wipes that command while
+         the ready reads as its completion. */
+      snes_set_mcu_cmd(0);
       snescmd_writebyte(MCU_CMD_RDY, SNESCMD_SNES_CMD);
       cmd=menu_main_loop();
       /* acknowledge command */

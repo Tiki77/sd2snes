@@ -609,7 +609,7 @@ uint8_t game_cmd_serve(uint8_t cmd) {
  */
 uint8_t menu_main_loop() {
   uint8_t cmd = 0;
-  snes_set_mcu_cmd(0);
+  /* MCU_CMD is cleared by the caller, BEFORE it raises MCU_CMD_RDY (main.c) */
   while(!cmd) {
     if(!get_snes_reset()) {
       while(!sram_reliable())printf("hurr\n");
