@@ -373,6 +373,7 @@
 #define MT_ST_NOCORE                2   /* refused: /sd2snes/fpga_test.<ext> is not on the card. Answered with this CPU still running, so it is shown in place */
 #define MT_ST_RUNNING               3   /* CAPABILITY SENTINEL the MENU parks before CMD_MEMTEST. The firmware always overwrites it (with DONE it never gets to write, since it halts us; with NOCORE it writes before the $55), so a RUNNING surviving the ACK means this firmware has no memtest handler -- an old dispatcher ACKs unknown commands */
 #define MT_ST_COREFAIL              5   /* fpga_test was on the card but did not configure (truncated/corrupt, or gone between the f_stat and the load). By then the SNES is already halted, so unlike NOCORE this one can only be reported AFTER the reload -- mt_result_check opens on it too. Rendered with the same line as NOCORE: either way the user needs a good fpga_test file */
+#define MT_ST_NOMODULE              6   /* the test is the card module /sd2snes/memtest.bin and it is missing or bad; answered in place like NOCORE. Lockstep with MEMTEST_STATE_NOMODULE in src/memtest.h */
 #define MT_ST_SEEN                  4   /* MENU-ONLY: a DONE result that has already been auto-shown after the reload. Renders exactly like DONE (so reopening the screen from the menu still shows the last result) but mt_result_check ignores it, which is what keeps the browser from reopening the screen on every repaint. The FIRMWARE never writes this value */
 #define MT_FLAGS                    4   /* u8, bits below */
 #define MT_F_FAIL                   $01 /* bit0: at least one fault was found */
@@ -800,6 +801,8 @@
 #define CMD_MEMTEST                 $3d /* "Memory test": walk the RAM wiring, publish findings in MEMTEST_BLK. Reconfigures the FPGA to fpga_test and halts this CPU for the ~10s it runs, then reloads the menu -- so the RESULT is reported by the reloaded browser (mt_result_check), exactly like the patched-ROM export. Answers MT_STATE_NOCORE + $55 WITHOUT halting anything when fpga_test is missing, so that refusal is a modal over the live screen. Lockstep with src/snes.h. */
 #define CMD_PLAY_PCM                $3e /* menu PCM player: play the selected .pcm (an MSU-1 track) on the cartridge DAC. MCU_PARAM carries cwd+direntry exactly like a ROM launch. Non-booting and non-reloading: the menu stays up and the player screen reads PCMPLAY_BLK, which the firmware republishes on its own. Lockstep with src/snes.h. */
 #define CMD_PCM_CTL                 $3f /* menu PCM player transport: MCU_PARAM low byte = PCM_CTL_* below. Non-booting. Lockstep with src/snes.h. */
+#define MODULE_STATUS               $FF4E80 /* what the last card-module open did: 0 ok, MODULE_ST_MISSING = no usable module file. Lockstep with SRAM_MODULE_STATUS in src/memmap.h */
+#define MODULE_ST_MISSING           1
 #define PCM_CTL_STOP                0
 #define PCM_CTL_PAUSE               1   /* freezes the DAC only -- the file stays open at its position */
 #define PCM_CTL_RESUME              2

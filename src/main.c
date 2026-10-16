@@ -33,6 +33,7 @@
 #include "manual.h"
 #include "nes.h"
 #include "menucmd.h"
+#include "module.h"
 #include "wdiag.h"
 
 //usb
@@ -382,6 +383,7 @@ int main(void) {
       status_save_from_menu();
       uart_putc('-');
       menucmd_fmv_gate(cmd);
+      module_gate(cmd);    /* a card module borrows the sort cache: any other command unloads it */
       switch(cmd) {
         case SNES_CMD_LOADROM:
         case SNES_CMD_LOADLAST:

@@ -7,7 +7,7 @@
 /* --- Menu PCM player: play a .pcm (MSU-1 audio track) straight from the browser ---
  *
  * Selecting a .pcm with A opens a player screen (snes/pcmplay.a65) with a progress bar
- * and play/pause.  This module is a thin shell around machinery that already exists:
+ * and play/pause.  The player is the card module pcmplay.bin (src/modules/pcmplay/), a thin shell around machinery that already exists:
  * menu_music_play/stop + menu_sfx_pump in src/msu1.c drive the cartridge DAC and were
  * built for the game-info FMV soundtrack.  Nothing about the audio path is new here.
  *
@@ -81,31 +81,5 @@ _Static_assert(offsetof(pcmplay_blk_t, total_sec) ==  6, "pcmplay_blk_t.total_se
 _Static_assert(offsetof(pcmplay_blk_t, progress)  ==  8, "pcmplay_blk_t.progress must stay at PCM_PROGRESS (+8)");
 _Static_assert(offsetof(pcmplay_blk_t, flags)     ==  9, "pcmplay_blk_t.flags must stay at PCM_FLAGS (+9)");
 _Static_assert(sizeof(pcmplay_blk_t)              == 32, "pcmplay_blk_t must stay 32 bytes (PCM_SIZE in snes/memmap.i65)");
-
-/* Open and start a .pcm.  Fail-safe: a missing/!"MSU1" file publishes an error state and
-   plays nothing -- it never hangs and never leaves the DAC half-armed. */
-void pcmplay_start(const char *filename);
-
-/* Stop + close + publish PCMPLAY_STATE_NONE.  Safe to call when nothing is playing. */
-void pcmplay_stop(void);
-
-/* Move the track to `sec` seconds, or to frac/256 of it, refilling the DAC buffer from
-   there (menu_music_seek).  Keeps a pause; an ENDED track starts playing again.  Ignored
-   when nothing is open or the clip is a QOA (no file position).  Publishes at once, so
-   the bar and the clock move before the menu's next frame. */
-void pcmplay_seek_sec(uint16_t sec);
-void pcmplay_seek_frac(uint8_t frac);
-
-/* Freeze/unfreeze the DAC read pointer.  NOT menu_sfx_stop(): that also disarms the FPGA
-   fetcher and clears the active flag, which would lose the open file and the position. */
-void pcmplay_pause(int paused);
-
-/* Recompute pos/progress and write the block.  Called once per menu_main_loop pass;
-   bounded, touches no SD (the position comes from the already-open file handle). */
-void pcmplay_publish(void);
-
-/* Park PCMPLAY_STATE_NONE in the block at cold boot, next to memtest_clear(): PSRAM keeps
-   whatever the last power-on left there, and garbage would look like a live track. */
-void pcmplay_clear(void);
 
 #endif

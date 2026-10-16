@@ -492,6 +492,8 @@ mt_draw:
   beq mt_dr_nocore
   cmp #MT_ST_COREFAIL         ; same message: the user needs a good fpga_test either way
   beq mt_dr_nocore
+  cmp #MT_ST_NOMODULE
+  beq mt_dr_nomod
   cmp #MT_ST_RUNNING
   beq mt_dr_oldfw             ; the sentinel survived an ACK: no handler on the other side
   cmp #MT_ST_DONE
@@ -515,6 +517,10 @@ mt_dr_none:
 mt_dr_nocore:
   lda #^text_mtl_nocore
   ldx #!text_mtl_nocore
+  bra mt_dr_status
+mt_dr_nomod:
+  lda #^text_mtl_nomod
+  ldx #!text_mtl_nomod
   bra mt_dr_status
 mt_dr_oldfw:
   lda #^text_si_updatefw      ; already localized, so this branch costs no new string

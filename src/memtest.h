@@ -50,6 +50,7 @@
 #define MEMTEST_STATE_NOCORE         (2)  /* refused: /sd2snes/fpga_test.<ext> is not on the card. Answered WITHOUT halting the SNES, so the menu reports it in place (no reload) */
 #define MEMTEST_STATE_RUNNING        (3)  /* sentinel the MENU writes before the command; the firmware always overwrites it, so one surviving the ACK means this firmware has no memtest handler */
 #define MEMTEST_STATE_SEEN           (4)  /* MENU-ONLY: a DONE result already auto-shown after the reload. The firmware must never write it -- listed here so the value stays reserved (lockstep with MT_ST_SEEN in snes/memmap.i65) */
+#define MEMTEST_STATE_NOMODULE       (6)  /* the test is the card module memtest.bin and it is missing, damaged or of another version. Answered in place like NOCORE (nothing was halted) */
 #define MEMTEST_STATE_COREFAIL       (5)  /* fpga_test was on the card but did not configure (truncated/corrupt, or it vanished between the f_stat and the load). Reported like a result, i.e. after the reload: by then the SNES is already halted, so there is no in-place path left. Shown with the same message as NOCORE -- the user's next step is the same file either way */
 
 #define MEMTEST_FLAG_FAIL            (0x01)  /* at least one fault was found */
@@ -120,23 +121,44 @@ _Static_assert(offsetof(memtest_blk_t, cell_info) == 63, "memtest_blk_t.cell_inf
 _Static_assert(sizeof(memtest_finding_t) == 4, "memtest_finding_t must stay 4 bytes (MT_FIND_SIZE in snes/memmap.i65)");
 _Static_assert(sizeof(memtest_blk_t) == 64, "memtest_blk_t must stay 64 bytes (MT_SIZE in snes/memmap.i65) -- it fills the reservation, PCMPLAY starts right after");
 
-/* Is /sd2snes/fpga_test.<ext> on the card?  Asked BEFORE the SNES is halted so a missing
-   core is refused in place, over the live screen, instead of costing a blind menu reload. */
-int memtest_available(void);
+/* The test itself is the card module memtest.bin (src/modules/memtest/); the firmware keeps
+   only what is board-specific or has to be fast: */
 
-/* Run the whole thing: reconfigure the FPGA to fpga_test, walk both RAMs, sweep every cell
-   (unless the walk already failed), publish the block.  The CALLER must have halted the
-   SNES (assert_reset) first and must cold-boot the menu afterwards -- this leaves the FPGA
-   on the test core and the PSRAM scribbled over.  main()'s outer loop restores fpga_base on its own. */
-void memtest_run(void);
+/* Bad-cell sweep state, shared with the module (module_api_t.mt_pass). */
+typedef struct memtest_cell {
+  uint32_t bad;     /* bad bytes seen, saturating at MEMTEST_CELL_BAD_MAX */
+  uint32_t addr;    /* address of the first one */
+  uint8_t  got;     /* what was actually read there */
+  uint8_t  info;    /* MEMTEST_CELL_* */
+  uint8_t  led;     /* current LED state, so the flip does not have to read it back */
+  uint32_t led_at;  /* tick of the last flip */
+} memtest_cell_t;
 
-/* Park MEMTEST_STATE_NONE in the block.  Called once at cold boot, next to the export
-   result: PSRAM keeps whatever the last power-on left in it, and garbage here would pop
-   a result screen out of nowhere. */
-void memtest_clear(void);
+/* The diagnostic firmware's pattern (test_mem, src/tests/tests.c).  Every byte differs
+   from its neighbours AND from the same offset one 64 KB page up, so an address line that
+   aliases reads back as mismatched DATA rather than as a plausible value.  Kept
+   byte-identical to that one on purpose: it is what makes a result from here comparable
+   with a result from the official diagnostic image. */
+#define MT_PATTERN(a)   ((uint8_t)((a) + ((a) >> 8) + ((a) >> 16)))
+/* Ticks between LED flips (10 ms each), and how often a sweep looks at the clock.  The
+   screen is black and the SNES is in reset for about a minute, so with no LED the console
+   is indistinguishable from a hung one. */
+#define MT_LED_TICKS    (25)
+#define MT_LED_MASK     (0xFFFFUL)
 
-/* Answer a refusal (no fpga_test on the card) into the block without touching anything
-   else, so the menu can report it without a reload. */
-void memtest_publish_nocore(void);
+/* Put fpga_test up for the module: 0 = not on the card (nothing touched: the menu reports
+   it in place), 1 = configured, -1 = it was there but did not configure.  On 1 and -1 the
+   SNES has been halted (assert_reset) and the PSRAM is the test's: the caller cold-boots
+   the menu afterwards. */
+int memtest_core(void);
+
+/* One pass of the pattern over len bytes of the selected array from address 0: written
+   (verify = 0) or read back and counted into cc (verify = 1).  SPI bursts with a bounded
+   ready wait: 16 M unbounded waits would wedge the MCU if the core stopped answering. */
+void memtest_pass(memtest_cell_t *cc, uint32_t len, uint8_t verify);
+
+/* Park a state in the block (MEMTEST_STATE_NONE at cold boot: PSRAM keeps whatever the
+   last power-on left; MEMTEST_STATE_NOCORE when the module itself is missing). */
+void memtest_state(uint8_t state);
 
 #endif

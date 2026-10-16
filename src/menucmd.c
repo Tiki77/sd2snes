@@ -25,6 +25,7 @@
 #include "memtest.h"
 #include "msu1.h"     /* menu_music_locked: the DAC claim menucmd_fmv_gate honours */
 #include "pcmplay.h"
+#include "module.h"
 #include "menucmd.h"
 #include "util.h"
 #include "timer.h"    /* getticks: seed for the random menu-music draw */
@@ -870,18 +871,19 @@ uint8_t menucmd_dispatch(uint8_t cmd, uint8_t *menu_reload) {
              HALT THE SNES FIRST -- it is executing the menu out of PSRAM, and the moment
              the test core comes up that code is gone.  Same reasoning as the patched-ROM
              export, minus its trampoline: there is nowhere off-cartridge to park the CPU.
-         The result then has to survive to the next boot, which it does: memtest_run
-         publishes into $FF07xx and nothing on the reload path writes there. */
+         The result then has to survive to the next boot, which it does: the module
+         publishes into $FF07xx and nothing on the reload path writes there.
+         The test is the card module memtest.bin (memtest_core halts the SNES for it);
+         without the module there is nothing to run, and the menu hears it as case (1). */
       /* MCU_PARAM+7 is NOT read.  Earlier menus put a mode byte there (0 = wiring walk
          only, $5a = walk + cell sweep); every run is the full one now, and the menu keeps
          writing $5a only so that a firmware from before the change runs the same test. */
-      if(!memtest_available()) {
-        memtest_publish_nocore();
+      int mt = module_open(MODULE_ID_MEMTEST, 0);
+      if(mt <= 0) {
+        if(mt == MODULE_MISSING) memtest_state(MEMTEST_STATE_NOMODULE);
         snescmd_writebyte(0x55, SNESCMD_SNES_CMD);
         return 0;
       }
-      assert_reset();
-      memtest_run();
       /* NOTE: returns cmd, not 0 -- menu_reload only takes effect once the menu loop
          exits.  The reload is not optional: the FPGA is on the test core, the low PSRAM
          is scribbled over, and the SNES is in reset.  main()'s outer loop puts fpga_base
@@ -906,23 +908,12 @@ uint8_t menucmd_dispatch(uint8_t cmd, uint8_t *menu_reload) {
          its own once per menu-loop pass.  Fail-safe: a missing / non-"MSU1" file only
          publishes an error state, so a bad file costs a message, not a hang. */
       get_selected_name(file_lfn);
-      pcmplay_start((const char*)file_lfn);
+      module_open(MODULE_ID_PCM, (const char*)file_lfn);   /* the player is the card module pcmplay.bin */
       return 0;
     case SNES_CMD_PCM_CTL:
-      /* Transport for the player above; MCU_PARAM low byte = PCM_CTL_*, the seeks carry
-         their target in the bytes after it.  Pause freezes the DAC read pointer only: the file stays open at its position, which is what
-         makes resuming instant (see pcmplay_pause). */
-      switch(snescmd_readbyte(SNESCMD_MCU_PARAM) ) {
-        case PCMPLAY_CTL_PAUSE:  pcmplay_pause(1); break;
-        case PCMPLAY_CTL_RESUME: pcmplay_pause(0); break;
-        case PCMPLAY_CTL_SEEK:
-          pcmplay_seek_sec(snescmd_readshort(SNESCMD_MCU_PARAM + 1));
-          break;
-        case PCMPLAY_CTL_SEEKFRAC:
-          pcmplay_seek_frac(snescmd_readbyte(SNESCMD_MCU_PARAM + 1));
-          break;
-        default:                 pcmplay_stop();   break;
-      }
+      /* Transport for the player above (the module): MCU_PARAM low byte = PCM_CTL_*, the
+         seeks carry their target in the bytes after it. */
+      module_ctl(snescmd_readlong(SNESCMD_MCU_PARAM));
       return 0;
     case SNES_CMD_LOAD_MENU_SPC: {
       /* stage background menu music. Use the user-chosen .spc (CFG.bgm_name, a
@@ -1204,8 +1195,7 @@ NO_INLINE void menucmd_export_boot_nav(uint8_t firstboot) {
   /* Same for the PCM player's block: leftover PSRAM here would have the browser think a
      track is playing on a freshly powered-on console. */
   if(firstboot) {
-    memtest_clear();
-    pcmplay_clear();
+    memtest_state(MEMTEST_STATE_NONE);
   }
   /* OK *and* PARTIAL: a partial export still WROTE the .sfc -- only some sidecar
      failed to copy -- and export_result_check (snes/patch.a65) navigates the

@@ -384,8 +384,17 @@ pcm_start:
 pcm_st_nosup:
   ; No handler (or a wedged MCU): nothing was opened and nothing is playing.  The screen
   ; still opens -- it is the only surface there is to say so on, and a modal would cost
-  ; another $C0 trampoline for show_modal_msg.
+  ; another $C0 trampoline for show_modal_msg.  The player is a card module
+  ; (pcmplay.bin), so "no block" can also be a current firmware without that file:
+  ; MODULE_STATUS tells the two apart (2 = the module is missing, 1 = old firmware).
+  lda @MODULE_STATUS
+  cmp #MODULE_ST_MISSING
+  beq pcm_st_nomod
   lda #$01
+  bra pcm_st_ns_set
+pcm_st_nomod:
+  lda #$02
+pcm_st_ns_set:
   sta pcm_nosup
   plp
   .as : .xl
@@ -1124,8 +1133,16 @@ pcm_dr_nosup:
   sep #$20 : .as
   jsr pcm_row_blank           ; row 1
   jsr pcm_row_blank           ; row 2
+  lda pcm_nosup
+  cmp #$02
+  beq pcm_dr_nomod
   lda #^text_pcm_nosup
   ldx #!text_pcm_nosup
+  bra pcm_dr_nsmsg
+pcm_dr_nomod:
+  lda #^text_pcm_nomod
+  ldx #!text_pcm_nomod
+pcm_dr_nsmsg:
   jsr pcm_row_str             ; row 3
   jsr pcm_row_blank           ; row 4
   lda #^text_pcm_promptb      ; only B does anything here

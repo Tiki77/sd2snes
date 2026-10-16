@@ -89,9 +89,9 @@ SRC += dirindex.c
 # exactly where users need the triage, and it is the board that has no serial console to
 # run the standalone diagnostic through.
 SRC += memtest.c
-# Menu PCM player: play a .pcm (MSU-1 track) from the browser.  Thin shell over the
-# menu_music_* engine msu1.c already carries for the game-info FMV soundtrack.
-SRC += pcmplay.c
+# Card modules (module.h): menu features whose code is a file on the card, loaded only while
+# their screen is open.  The images (modules/) are built below with every firmware.
+SRC += module.c
 # SPC7110 RTC-4513 battery backup.  Linked into every config: both flavours of the
 # SPC7110 core carry the virtual battery.
 SRC += spc7110rtc.c
@@ -262,7 +262,7 @@ ALL_ASFLAGS = -I. -x assembler-with-cpp $(ASFLAGS) $(CDEFS)
 # Default target.
 all: build
 
-build: elf bin hex xc_soc
+build: elf bin hex xc_soc modules
 	$(E) "  SIZE   $(TARGET).elf"
 	$(Q)$(ELFSIZE)|grep -v debug
 	cp $(TARGET).bin $(OBJDIR)/$(CONFIG_FW_FILE)
@@ -273,6 +273,11 @@ build: elf bin hex xc_soc
 xc_soc:
 	$(Q)$(MAKE) -s -C xc_soc OUT=../$(OBJDIR)
 .PHONY: xc_soc
+
+# Card module images (modules/Makefile): one image per module, for every board.
+modules:
+	$(Q)$(MAKE) -s -C modules OUT=../$(OBJDIR)
+.PHONY: modules
 
 elf: $(TARGET).elf
 bin: $(TARGET).bin
@@ -404,7 +409,8 @@ clean_list :
 	$(Q)$(REMOVE) $(OBJDIR)/version.h
 	$(Q)$(REMOVE) $(OBJDIR)/${CONFIG_FW_FILE}
 	$(Q)$(REMOVE) $(OBJDIR)/fw.hdr
-	$(Q)$(REMOVE) -r $(OBJDIR)/xc_soc_build $(OBJDIR)/xc_soc.bin $(OBJDIR)/xc_fw.bin $(OBJDIR)/xc_bootrom.bin
+	$(Q)$(REMOVE) -r $(OBJDIR)/xc_soc_build $(OBJDIR)/xc_soc.bin $(OBJDIR)/xc_fw.bin $(OBJDIR)/xc_bootrom.bin \
+	  $(OBJDIR)/modules_build $(OBJDIR)/memtest.bin $(OBJDIR)/pcmplay.bin
 	$(Q)$(REMOVE) $(OBJDIR)/.DS_Store
 	$(Q)$(REMOVE) $(LST)
 	$(Q)$(REMOVE) $(CSRC:.c=.s)
