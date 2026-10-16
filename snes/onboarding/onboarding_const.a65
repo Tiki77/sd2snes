@@ -151,6 +151,7 @@ onb_demo_map
   .byt 76, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 42 2.18: the RP2040 cartridge
   .byt 78, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 43 2.18: the SNES Mouse in the menu
   .byt 36, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 44 2.18: the music players (the .pcm player picture)
+  .byt 13, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 45 2.18: the NES music player (the music icon: the card before it already shows the .pcm player, and $CB has no room for a picture of its own)
 
 ; menu window title brackets (the menu's window_tl / window_tr glyphs)
 onb_text_wtl      .byt 28, 0
@@ -293,21 +294,23 @@ onb_feat_table:
   .byt ONB_PAL_GREEN, ONB_OPT_INFO : .word 0
   .word 0, 2, onb_f44_name, onb_f44_text, 0, 0   ; 44 2.18: the music players (.pcm / .spc)
   .byt ONB_PAL_GREEN, ONB_OPT_INFO : .word 0
-  .word 0, 1, onb_f45_name, onb_f45_text, 0, 0   ; 45 and more: the PPU is cleared before every game
+  .word 0, 2, onb_f45_name, onb_f45_text, 0, 0   ; 45 2.18: the NES music (.nsf) player
   .byt ONB_PAL_GREEN, ONB_OPT_INFO : .word 0
-  .word 0, 1, onb_f46_name, onb_f46_text, 0, 0   ; 46 and more: bus timing compat
+  .word 0, 1, onb_f46_name, onb_f46_text, 0, 0   ; 46 and more: the PPU is cleared before every game
   .byt ONB_PAL_GREEN, ONB_OPT_INFO : .word 0
-  .word 0, 1, onb_f47_name, onb_f47_text, 0, 0   ; 47 and more: hardware model
+  .word 0, 1, onb_f47_name, onb_f47_text, 0, 0   ; 47 and more: bus timing compat
   .byt ONB_PAL_GREEN, ONB_OPT_INFO : .word 0
-  .word 0, 1, onb_f48_name, onb_f48_text, 0, 0   ; 48 and more: BS-X
+  .word 0, 1, onb_f48_name, onb_f48_text, 0, 0   ; 48 and more: hardware model
   .byt ONB_PAL_GREEN, ONB_OPT_INFO : .word 0
-  .word 0, 1, onb_f49_name, onb_f49_text, 0, 0   ; 49 and more: delete
+  .word 0, 1, onb_f49_name, onb_f49_text, 0, 0   ; 49 and more: BS-X
   .byt ONB_PAL_GREEN, ONB_OPT_INFO : .word 0
-  .word 0, 1, onb_f50_name, onb_f50_text, 0, 0   ; 50 and more: missing BIOS
+  .word 0, 1, onb_f50_name, onb_f50_text, 0, 0   ; 50 and more: delete
   .byt ONB_PAL_GREEN, ONB_OPT_INFO : .word 0
-  .word 0, 1, onb_f51_name, onb_f51_text, 0, 0   ; 51 and more: clock and date
+  .word 0, 1, onb_f51_name, onb_f51_text, 0, 0   ; 51 and more: missing BIOS
   .byt ONB_PAL_GREEN, ONB_OPT_INFO : .word 0
-  .word 0, 1, onb_f52_name, onb_f52_text, 0, 0   ; 52 and more: option descriptions
+  .word 0, 1, onb_f52_name, onb_f52_text, 0, 0   ; 52 and more: clock and date
+  .byt ONB_PAL_GREEN, ONB_OPT_INFO : .word 0
+  .word 0, 1, onb_f53_name, onb_f53_text, 0, 0   ; 53 and more: option descriptions
   .byt ONB_PAL_GREEN, ONB_OPT_INFO : .word 0
 
 ; the bar colour: the menu's hdma_bar_color_src ("normal", then "highlight"), the

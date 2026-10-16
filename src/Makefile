@@ -410,7 +410,7 @@ clean_list :
 	$(Q)$(REMOVE) $(OBJDIR)/${CONFIG_FW_FILE}
 	$(Q)$(REMOVE) $(OBJDIR)/fw.hdr
 	$(Q)$(REMOVE) -r $(OBJDIR)/xc_soc_build $(OBJDIR)/xc_soc.bin $(OBJDIR)/xc_fw.bin $(OBJDIR)/xc_bootrom.bin \
-	  $(OBJDIR)/modules_build $(OBJDIR)/memtest.bin $(OBJDIR)/pcmplay.bin
+	  $(OBJDIR)/modules_build $(OBJDIR)/nsfplay.bin $(OBJDIR)/memtest.bin $(OBJDIR)/pcmplay.bin
 	$(Q)$(REMOVE) $(OBJDIR)/.DS_Store
 	$(Q)$(REMOVE) $(LST)
 	$(Q)$(REMOVE) $(CSRC:.c=.s)

@@ -396,6 +396,15 @@ void fpga_sfx_play(uint32_t base, uint32_t len) {
   FPGA_DESELECT();
 }
 
+uint8_t fpga_sfx_status(void) {
+  uint8_t st;
+  FPGA_SELECT();
+  FPGA_TX_BYTE(FPGA_CMD_SFX_STATUS);     /* 0xf7 */
+  st = FPGA_RX_BYTE();
+  FPGA_DESELECT();
+  return st;
+}
+
 /* Abort the SFX fetcher and hand the dac_buf write port back to the MCU SD-DMA path
    (in-game MSU-1 / FMV music).  Called at game load. */
 void fpga_sfx_disable(void) {

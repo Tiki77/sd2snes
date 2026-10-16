@@ -722,4 +722,8 @@ media_keys      .byt 0     ; a player read the pad since its last (re)start: its
 di_name_off     .word 0    ; cells from cursor_x to the name: 3 with the icons, 0 without
 di_name_w       .byt 0     ; the name's width in cells: 51 with the icons, 54 without
 
+;----------NSF player (nsfplay.a65) -- it borrows the PCM player's pcm_cur/pcm_seen/pcm_seen_pos/
+; pcm_seen_mouse/pcm_nosup/pcm_paused/pcm_tmp: the two screens are never open together ---------
+nsf_seen_song   .byt 0     ; NSF_SONG the last redraw rendered
+
 _END            .byt 0

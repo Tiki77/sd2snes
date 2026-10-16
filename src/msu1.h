@@ -71,6 +71,11 @@ uint32_t menu_music_size(void);           /* clip size in bytes, header included
 void menu_music_noloop(int on);           /* play the .pcm once: stop at EOF, no loop point */
 int  menu_music_ended(void);              /* nonzero once a noloop clip played out */
 int  menu_music_seek(uint32_t pos);       /* .pcm: refill the DAC from body byte pos; 0 = failed */
+/* An endless PCM source (the NSF player module): fills pcm with frames stereo s16 frames, returns
+   how many it wrote (always all of them for the NSF player).  ctx is handed back as given. */
+typedef unsigned (*menu_music_gen_fn)(void *ctx, int16_t *pcm, unsigned frames);
+int  menu_music_play_gen(menu_music_gen_fn gen, void *ctx, uint32_t ring); /* ring: PSRAM bytes from SRAM_ROM_ADDR */
+uint32_t menu_music_gen_played(void);     /* bytes the DAC played since menu_music_play_gen */
 
 uint8_t msu_readbyte(uint16_t addr);
 uint16_t msu_readshort(uint16_t addr);

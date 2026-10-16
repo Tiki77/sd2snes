@@ -103,6 +103,9 @@ SECTIONS
     __ahbram_start__ = .;
     *(.ahbram)
     *(.ahbram.*)
+    /* last: a card module is loaded here (ptrcache) and the unused end of the AHB SRAM
+       right after it is its spare, one block with it (module.c) */
+    *(.ahbmod)
     __ahbram_end__ = .;
   } > ahbram
 

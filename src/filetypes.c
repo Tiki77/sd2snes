@@ -179,11 +179,16 @@ printf("start\n");
           if(e && !strcasecmp(e + 1, "msu")) type = TYPE_DATA;
         }
       }
-      if(is_requested_filetype(type, filetypes) || type == TYPE_FILE || type == TYPE_DATA) {
+      /* .nsf rides on the .pcm request: the menu's type list already runs past MCU_PARAM
+         (filesel_request_filelist), and a menu that plays .pcm is a menu that knows the
+         player screens.  An older one shows the .nsf inert (unknown type, A blips). */
+      if(is_requested_filetype(type, filetypes) || type == TYPE_FILE || type == TYPE_DATA
+         || (type == TYPE_NSF && is_requested_filetype(TYPE_PCM, filetypes))) {
         switch(type) {
           case TYPE_ROM:
           case TYPE_SPC:
           case TYPE_PCM:    /* .pcm (MSU-1 track) -- listed like a .spc, played by the menu PCM player */
+          case TYPE_NSF:    /* .nsf (NES music) -- listed like a .spc, played by the menu NSF player */
           case TYPE_SKIN:   /* theme files (.thm/.skin) are listed like ROMs */
           case TYPE_NES:    /* .nes (core NES, mk3-only) -- listado como ROM */
           case TYPE_FILE:   /* system file inside /sd2snes -- shown with its size, inert */
@@ -390,6 +395,9 @@ SNES_FTYPE filetype_by_ext(const char *name) {
      straight from the browser (src/pcmplay.c). */
   if(!strcasecmp(ext+1, "PCM")) {
     return TYPE_PCM;
+  }
+  if(!strcasecmp(ext+1, "NSF")) {
+    return TYPE_NSF;   /* the menu NSF player (src/nsfhost.c) */
   }
   if(!strcasecmp(ext+1, "CHT")) {
     return TYPE_CHT;

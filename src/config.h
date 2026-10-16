@@ -7,6 +7,9 @@
 #define CONFIG_FWVER (*((uint32_t*)CONFIG_FW_START+4))
 
 #define IN_AHBRAM   __attribute__ ((section(".ahbram")))
+/* the last thing in the AHB-side RAM: the free end right after it is one block with it
+   (the card module's image and its spare, module.c) */
+#define IN_AHBMOD   __attribute__ ((section(".ahbmod")))
 
 #define SDCARD_DETECT   (!(BITBAND(SD_DTREG->GPIO_I, SD_DTBIT)))
 

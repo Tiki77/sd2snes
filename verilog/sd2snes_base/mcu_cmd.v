@@ -626,7 +626,13 @@ always @(posedge clk) begin
     else if (cmd_data[7:0] == 8'hd5)   // MCU copier busy poll: bit0 = copier running
       MCU_DATA_IN_BUF <= {6'b0, DMA_BUSYr};
     else if (cmd_data[7:0] == 8'hf7)   // SFX fetcher status: bit1 = active, bit0 = done
+`ifdef BOOTLEG
       MCU_DATA_IN_BUF <= {6'b0, sfx_activer, sfx_doner};
+`elsif BASE_EXT
+      MCU_DATA_IN_BUF <= {6'b0, sfx_activer, sfx_doner};
+`else
+      MCU_DATA_IN_BUF <= {5'b0, 1'b1, sfx_activer, sfx_doner};   // bit2: plays mono bodies (sfxdma.v)
+`endif
     else if (cmd_data[7:0] == 8'hF9)
       case (spi_byte_cnt)
         32'h2: begin

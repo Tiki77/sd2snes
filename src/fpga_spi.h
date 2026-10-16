@@ -176,7 +176,9 @@
 #define FPGA_CMD_MSUGETVOLUME    (0xf4)
 #define FPGA_CMD_MSUREAD         (0xf5)
 #define FPGA_CMD_MSUGETSCADDR    (0xf6)
-#define FPGA_CMD_SFX_STATUS      (0xf7) /* read: bit1 = fetcher active, bit0 = done (sfxdma.v) */
+#define FPGA_CMD_SFX_STATUS      (0xf7) /* read: bit2 = plays mono bodies, bit1 = fetcher active, bit0 = done (sfxdma.v) */
+#define FPGA_SFX_ST_MONO         (0x04)
+#define FPGA_SFX_MONO            (0x800000UL) /* fpga_sfx_play len bit 23: the body is mono s16 (needs FPGA_SFX_ST_MONO) */
 #define FPGA_CMD_SFX_PLAY        (0xfb) /* 6 param bytes base[23:0]+len[23:0]; last byte kicks playback (base core, menu) */
 #define FPGA_CMD_SFX_DISABLE     (0xfc) /* abort the SFX fetcher + release the DAC port (game load) */
 /* 0xfb is a PER-CORE opcode: the base core decodes it as SFX_PLAY (menu only); the DSP and
@@ -205,6 +207,7 @@ void dac_play(void);
 void dac_pause(void);
 void dac_reset(uint16_t);
 void fpga_sfx_play(uint32_t base, uint32_t len); /* arm + start the FPGA SFX fetcher (sfxdma.v) */
+uint8_t fpga_sfx_status(void);                   /* FPGA_CMD_SFX_STATUS (base core) */
 void fpga_sfx_disable(void);                     /* abort it + release the DAC write port */
 void msu_reset(uint16_t);
 void set_msu_addr(uint16_t);

@@ -68,6 +68,8 @@ di_on:
   beq di_spc
   cmp #TYPE_PCM
   beq di_pcm
+  cmp #TYPE_NSF         ; .nsf: the same music icon as a .pcm
+  beq di_pcm
   cmp #TYPE_SKIN
   beq di_theme
   cmp #TYPE_FILE

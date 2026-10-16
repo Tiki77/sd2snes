@@ -27,7 +27,17 @@
 // Byte order: the PCM body was DMA'd into PSRAM byte-for-byte by the MCU (same as
 // the old SD->dac_buf offload), and main.v hands us the byte at ROM_ADDR using the
 // SAME select convention as a SNES/MCU read, so we just stream bytes in order.
+//
+// Mono (base core only, not the BOOTLEG / BASE_EXT variants, which never run the
+// menu): bit 23 of sfx_len says the body is mono s16, 2 bytes a frame.  Each frame
+// is written to dac_buf twice (L then R), so the MCU stores and the fetcher reads
+// half the bytes; sfx_len[22:0] is the body length in PSRAM bytes either way.
 //////////////////////////////////////////////////////////////////////////////////
+`ifndef BOOTLEG
+`ifndef BASE_EXT
+`define SFX_MONO
+`endif
+`endif
 module sfxdma(
   input clkin,
   input reset,
@@ -98,6 +108,12 @@ reg        dac_prev;      initial dac_prev = 0;
 reg        active_r;      initial active_r = 0;
 reg        done_r;        initial done_r = 0;
 reg [24:0] wd;            initial wd = 0;
+`ifdef SFX_MONO
+reg        mono_r;        initial mono_r = 0;     // body is mono: each frame goes out twice
+reg [1:0]  ph;            initial ph = 0;         // byte of the dac_buf frame being written
+reg [7:0]  lo_r;          initial lo_r = 0;       // the frame's two bytes, for the R copy
+reg [7:0]  hi_r;          initial hi_r = 0;
+`endif
 
 reg        dac_we_r;      initial dac_we_r = WE_OFF;
 reg [10:0] dac_addr_r;    initial dac_addr_r = 0;
@@ -136,7 +152,13 @@ always @(posedge clkin) begin
   end else if (kick) begin
     // (re)start playback -- newest wins.  Prime the WHOLE 2 KB from PSRAM.
     base_r         <= sfx_base;
+`ifdef SFX_MONO
+    len_r          <= {1'b0, sfx_len[22:0]};
+    mono_r         <= sfx_len[23];
+    ph             <= 2'd0;
+`else
     len_r          <= sfx_len;
+`endif
     src_off        <= 24'h0;
     wr_addr        <= 12'h0;
     fill_left      <= DACBUF_BYTES;
@@ -171,6 +193,12 @@ always @(posedge clkin) begin
                 state    <= ST_IDLE;
               end else state <= ST_RUN;
             end else state <= ST_RUN;
+`ifdef SFX_MONO
+          end else if (mono_r & ph[1]) begin
+            // mono: the R half of the frame repeats the L bytes, no PSRAM read
+            byte_r <= ph[0] ? hi_r : lo_r;
+            state  <= ST_PUT;
+`endif
           end else if (src_off >= len_r) begin
             // silence byte: no PSRAM read needed
             byte_r <= 8'h00;
@@ -203,6 +231,11 @@ always @(posedge clkin) begin
           dac_addr_r <= wr_addr[10:0];
           dac_data_r <= byte_r;
           dac_we_r   <= WE_ON;                // one-cycle dac_buf write
+`ifdef SFX_MONO
+          if (ph == 2'd0) lo_r <= byte_r;
+          if (ph == 2'd1) hi_r <= byte_r;
+          ph <= mono_r ? ph + 2'd1 : 2'd0;
+`endif
           wr_addr    <= wr_addr + 1'b1;
           fill_left  <= fill_left - 1'b1;
           state      <= ST_READ;

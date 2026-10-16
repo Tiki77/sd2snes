@@ -96,6 +96,11 @@ SECTIONS
     __ahbram_start__ = .;
     *(.ahbram)
     *(.ahbram.*)
+    /* last: a card module is loaded here (ptrcache), and its spare follows it as one block
+       (module.c); this part has no unused tail to lend, so the spare is reserved here */
+    *(.ahbmod)
+    . = ALIGN(4);
+    . += 3072;
     __ahbram_end__ = .;
   } > ram
 

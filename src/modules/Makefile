@@ -15,7 +15,9 @@ CFLAGS := -mcpu=cortex-m3 -mthumb -mfloat-abi=soft -Os -fpic -fvisibility=hidden
           -ffreestanding -fno-builtin -fno-tree-loop-distribute-patterns \
           -ffunction-sections -fdata-sections -Wall -Wextra -Werror -I..
 
-MODULES := memtest pcmplay
+MODULES := nsfplay memtest pcmplay
+nsfplay_SRC := nsfplay/nsfmod.c ../nsf.c ../nsfapu.c
+nsfplay_INC := -Insfplay
 memtest_SRC := memtest/mtmod.c
 memtest_INC :=
 pcmplay_SRC := pcmplay/pcmmod.c

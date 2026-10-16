@@ -677,6 +677,15 @@ text_pcm_erropen  .byt "Cannot read this file.", 0
 text_pcm_errmagic .byt "Not an MSU-1 PCM file.", 0
 text_pcm_nosup    .byt "*** Please update the firmware ***", 0
 text_pcm_nomod    .byt "Copy pcmplay.bin to /sd2snes", 0
+; --- NSF player screen (snes/nsfplay.a65): same window and rows as the PCM player, which
+; lends it the prompt/pause/error/firmware lines above.  40 columns ("text_nsf_").
+text_nsf_title    .byt "NSF Player", 0
+text_nsf_prompt2  .byt "<>: Prev/Next song   L/R: Other file", 0
+text_nsf_song     .byt "Song", 0
+text_nsf_errnsf   .byt "Not an NSF file this player can run.", 0
+text_nsf_errcore  .byt "Copy nsfplay.bin to /sd2snes", 0
+text_nsf_errtune  .byt "This tune stopped (CPU crash).", 0
+text_nsf_nochip   .byt "Expansion sound chip not played.", 0
 ; Geometry: the PCM player borrows spcstart_win_* verbatim.  Deliberate on both counts --
 ; the two players should look like the same feature, and four more bytes of window geometry
 ; is not what the last hundred-odd bytes of $C0 should be spent on.

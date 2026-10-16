@@ -94,7 +94,25 @@ select_pcm:
                               ; line-composition vars are all below $2000, i.e. inside the
                               ; $00:0000-$1FFF mirror of bank $7E, so they read the same
                               ; memory either way.
+  ; The browser's .pcm arm also takes .nsf (one compare in $C0): the NSF player
+  ; (nsfplay.a65) is this screen with a 2A03 behind it.
+  rep #$20 : .al
+  jsr media_sel_offset
+  tay
+  iny
+  iny
+  iny                         ; +3: the entry's type
+  sep #$20 : .as
+  lda [dirstart_addr], y
+  cmp #TYPE_NSF
+  bne select_pcm_pcm
+  jsr nsf_screen
+  bra select_pcm_done
+select_pcm_pcm:
+  .as : .xl
   jsr pcm_screen
+select_pcm_done:
+  .as : .xl
   pld
   plb
   plp

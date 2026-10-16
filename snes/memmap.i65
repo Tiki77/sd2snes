@@ -437,6 +437,36 @@
 #define PCM_PROGRESS                8   /* u8 0..255: position fraction, pre-divided for the bar */
 #define PCM_FLAGS                   9   /* u8, reserved: published 0 (src/pcmplay.h) */
 #define PCM_SIZE                    32
+
+/* Menu NSF player status block (src/nsfplay/nsfmod.h nsfplay_blk_t, 128 B).  Same contract as
+ * PCMPLAY_BLK: the firmware is the sole writer and republishes it once per menu-loop pass;
+ * the menu zeroes the magic before CMD_MOD_OPEN as its capability sentinel.  Lockstep with
+ * SRAM_NSFPLAY_ADDR in src/memmap.h. */
+#define NSFPLAY_BLK                 $FF4E00
+#define NSF_MAGIC0                  0   /* 'N' ($4e) */
+#define NSF_MAGIC1                  1   /* 'F' ($46) */
+#define NSF_VERSION                 2   /* u8, 1 */
+#define NSF_STATE                   3   /* u8 NSF_ST_* */
+#define NSF_ST_NONE                 0
+#define NSF_ST_PLAYING              1
+#define NSF_ST_PAUSED               2
+#define NSF_ST_ERR_OPEN             3   /* the file would not open or read */
+#define NSF_ST_ERR_NSF              4   /* not an NSF the player can run */
+#define NSF_ST_ERR_CORE             5   /* /sd2snes/nsfplay.bin missing, damaged or of another version */
+#define NSF_ST_ERR_TUNE             6   /* the tune crashed the emulated CPU */
+#define NSF_SONG                    4   /* u8, playing song, 1-based */
+#define NSF_SONGS                   5   /* u8, songs in the file */
+#define NSF_POS                     6   /* u16 LE, seconds into the song */
+#define NSF_FLAGS                   8   /* u8: $01 PAL, $02 expansion audio (not played) */
+#define NSF_LOAD                    9   /* u8: CPU % the emulator needs for real time (diagnostic, read over USB) */
+#define NSF_TITLE                   16  /* 32 B, NUL-terminated ASCII */
+#define NSF_ARTIST                  48  /* 32 B */
+#define NSF_COPYRIGHT               80  /* 32 B */
+#define NSF_SIZE                    128
+#define NSF_CTL_STOP                0
+#define NSF_CTL_PAUSE               1
+#define NSF_CTL_RESUME              2
+#define NSF_CTL_SONG                3   /* MCU_PARAM+1 = song, 1-based */
 #define MANUAL_S1META               $FF0770 /* scale-1 (1x) page meta, 16B after MANUAL_META: +0 flags (bit0 = staged and ready), +1 nrows, +2..3 pix_h u16 LE, +4 staged page, +5 staged guide, +6..7 page count u16 LE. Lockstep with SRAM_MANUAL_S1META_ADDR in src/memmap.h. */
 #define MAN_S1_F_READY              $01
 #define MAN_S1META_NROWS            $FF0771
@@ -801,7 +831,10 @@
 #define CMD_MEMTEST                 $3d /* "Memory test": walk the RAM wiring, publish findings in MEMTEST_BLK. Reconfigures the FPGA to fpga_test and halts this CPU for the ~10s it runs, then reloads the menu -- so the RESULT is reported by the reloaded browser (mt_result_check), exactly like the patched-ROM export. Answers MT_STATE_NOCORE + $55 WITHOUT halting anything when fpga_test is missing, so that refusal is a modal over the live screen. Lockstep with src/snes.h. */
 #define CMD_PLAY_PCM                $3e /* menu PCM player: play the selected .pcm (an MSU-1 track) on the cartridge DAC. MCU_PARAM carries cwd+direntry exactly like a ROM launch. Non-booting and non-reloading: the menu stays up and the player screen reads PCMPLAY_BLK, which the firmware republishes on its own. Lockstep with src/snes.h. */
 #define CMD_PCM_CTL                 $3f /* menu PCM player transport: MCU_PARAM low byte = PCM_CTL_* below. Non-booting. Lockstep with src/snes.h. */
-#define MODULE_STATUS               $FF4E80 /* what the last card-module open did: 0 ok, MODULE_ST_MISSING = no usable module file. Lockstep with SRAM_MODULE_STATUS in src/memmap.h */
+#define CMD_MOD_OPEN                $4d /* open a card module (src/module.h) on the selected file: MCU_PARAM = cwd+direntry like CMD_PLAY_PCM, MCU_PARAM+7 = MODULE_ID_*. Lockstep with src/snes.h. */
+#define CMD_MOD_CTL                 $4e /* the open module's control: MCU_PARAM+0..1 as is (the NSF player: NSF_CTL_*, MCU_PARAM+1 = the song for NSF_CTL_SONG). Lockstep with src/snes.h. */
+#define MODULE_ID_NSF               1   /* src/module.h */
+#define MODULE_STATUS               $FF4E80 /* what the last CMD_MOD_OPEN did: 0 ok, MODULE_ST_MISSING = no usable module file. Lockstep with SRAM_MODULE_STATUS in src/memmap.h */
 #define MODULE_ST_MISSING           1
 #define PCM_CTL_STOP                0
 #define PCM_CTL_PAUSE               1   /* freezes the DAC only -- the file stays open at its position */
@@ -1047,6 +1080,7 @@
 #define TYPE_PCM                    $08 /* .pcm (MSU-1 audio track, menu PCM player); lockstep com filetypes.h */
 #define TYPE_FILE                   $09 /* arquivo de SISTEMA dentro de /sd2snes (scan_dir): firmware.im3, m3nu.bin, fpga_*.bi3, menu.spc. Mostrado com tamanho mas NAO acionavel e SEM excluir -- nao ha case para ele em select_item nem em open_context_menu, entao A da o blip de erro e o Y nao abre nada. E isso que impede um Y perdido de levar os arquivos de boot do cartao. Lockstep com filetypes.h */
 #define TYPE_DATA                   $0A /* arquivo de DADOS do usuario (is_card_data_ext): saves (.srm/.slot/.mpk/.rtc), savestates (.state), sidecars (.yml/.cov/.gcv/.gss/.fmv/.man), .cfg das listas e .msu. Listado como o TYPE_FILE mas o menu de contexto (Y) oferece Excluir, reusando ctx_is_delonly. Lockstep com filetypes.h */
+#define TYPE_NSF                    $0B /* .nsf (NES music): played by the menu NSF player (snes/nsfplay.a65). Lockstep com filetypes.h */
 #define TYPE_SUBDIR                 $40
 #define TYPE_PARENT                 $80
 

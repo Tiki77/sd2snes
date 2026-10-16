@@ -16,7 +16,11 @@
 
 uint32_t stat_getstring = 0;
 static char sort_str1[SORT_STRLEN+1], sort_str2[SORT_STRLEN+1];
-uint32_t ptrcache[QSORT_MAXELEM] IN_AHBRAM;
+#ifndef IN_AHBMOD
+#define IN_AHBMOD IN_AHBRAM   /* host builds */
+#endif
+/* also where a card module's image is loaded (module.c), hence the place of its own */
+uint32_t ptrcache[QSORT_MAXELEM] IN_AHBMOD;
 
 /* get element from pointer table in external RAM*/
 uint32_t sort_get_elem(uint32_t base, unsigned int index) {

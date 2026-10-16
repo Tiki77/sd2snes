@@ -55,6 +55,7 @@ typedef enum {
   TYPE_DATA    =  10,   /* a card-data file the user owns (see is_card_data_ext): saves, savestates,
                            sidecars, .msu. Listed like TYPE_FILE but the Y context menu offers
                            Delete. Lockstep com TYPE_DATA em snes/memmap.i65 */
+  TYPE_NSF     =  11,   /* .nsf (NES music) -- played by the menu NSF player (nsfhost.c); lockstep com TYPE_NSF em snes/memmap.i65 */
   TYPE_SUBDIR  =  64,
   TYPE_PARENT  = 128
 } SNES_FTYPE;

@@ -48,7 +48,7 @@
 #include "version.h"
 #include "hwinfo.h"
 #include "msu1.h"   /* menu_sfx_* : menu sound effects via the MSU-1 DAC */
-#include "module.h" /* module_idle: the open card module (the PCM player) */
+#include "module.h" /* module_idle: the open card module (the PCM / NSF player) */
 #include "gameinfo.h" /* gameinfo_fmv_idle_check : stop a lingering FMV when its screen closes */
 #include "cheat.h"
 #include "cheatedit.h"
@@ -653,7 +653,7 @@ uint8_t menu_main_loop() {
       cmd = 0;
     }
     gameinfo_fmv_idle_check();   /* stop a lingering FMV if its info screen closed quietly */
-    module_idle();               /* the open card module's status block: the PCM player (no-op when none) */
+    module_idle();               /* the open card module's status block: the PCM / NSF player (no-op when none) */
     /* While an effect is playing the FPGA drains a DAC half-buffer every ~6 ms
        (44.1 kHz) - far faster than this 20 ms poll - so busy-service the DAC to
        the same ~20 ms budget instead of sleeping (verbatim pattern from the

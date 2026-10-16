@@ -915,6 +915,18 @@ uint8_t menucmd_dispatch(uint8_t cmd, uint8_t *menu_reload) {
          seeks carry their target in the bytes after it. */
       module_ctl(snescmd_readlong(SNESCMD_MCU_PARAM));
       return 0;
+    case SNES_CMD_MOD_OPEN: {
+      /* A card module (module.h) on the selected file, e.g. the NSF player on a .nsf.
+         MCU_PARAM like PLAY_PCM, +7 = the module.  Any other command unloads it first
+         (module_gate in main.c). */
+      uint8_t id = snescmd_readbyte(SNESCMD_MCU_PARAM + 7);
+      get_selected_name(file_lfn);
+      module_open(id, (const char*)file_lfn);
+      return 0;
+    }
+    case SNES_CMD_MOD_CTL:
+      module_ctl(snescmd_readlong(SNESCMD_MCU_PARAM));
+      return 0;
     case SNES_CMD_LOAD_MENU_SPC: {
       /* stage background menu music. Use the user-chosen .spc (CFG.bgm_name, a
          full SD path set via SNES_CMD_SET_MENU_SPC) when present, otherwise fall

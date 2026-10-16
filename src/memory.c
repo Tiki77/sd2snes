@@ -2392,8 +2392,11 @@ uint8_t sram_reliable() {
   uint32_t val;
   uint8_t result = 0;
   /* Xeno Crisis: the soft CPU has priority on the PSRAM, so 256 reads take ~12 ms here and
-     steal slots from its code fetches every main-loop pass.  A few still catch a dead PSRAM. */
-  uint16_t n = romprops.has_xc ? 4 : SRAM_RELIABILITY_SCORE;
+     steal slots from its code fetches every main-loop pass.  Menu audio (an effect, the info
+     screen's clip, the PCM / NSF player): 256 reads are ~3 ms of every 20 ms menu-loop pass in
+     which nothing feeds the DAC, 16% of the MCU, and an NSF that needs most of the MCU stalls.
+     A few still catch a dead PSRAM. */
+  uint16_t n = (romprops.has_xc || menu_sfx_active()) ? 4 : SRAM_RELIABILITY_SCORE;
   for(uint16_t i = 0; i < n; i++) {
     val=sram_readlong(SRAM_SCRATCHPAD);
     if(val==0x12345678) {

@@ -1,0 +1,632 @@
+; NSF player screen -- plays a .nsf (NES music) picked in the browser.
+;
+; THE PCM PLAYER'S SCREEN, WITH AN NSF INSIDE.  The tune plays on the cartridge DAC like a
+; .pcm: the firmware runs a 2A03 emulator (the card module nsfplay.bin, loaded into idle MCU
+; RAM) and feeds the DAC on its own, so starting, pausing, changing song and stopping are
+; ordinary commands and the menu keeps running.  Everything but the tune's own logic is
+; borrowed from pcmplay.a65: the audio-path preparation (pcm_prepare_audio /
+; pcm_restore_audio), the window geometry, the line engine (pcm_flush, pcm_row_*), the clock,
+; the folder walk (media_find) and the cursor put back at the end (media_place_cursor).  The
+; two screens are never open together, so the pcm_* state vars are shared too.
+;
+; Layout: 0 title, 1 artist, 2 copyright (all three from the NSF header, through
+; NSFPLAY_BLK), 3 "Song n/m  m:ss  Paused" (or an error), 4 blank or the expansion-chip
+; note, 5-6 keys.  A: pause, Left/Right: previous/next song (wrapping), L/R: the folder's
+; previous/next .nsf, B: close.  An NSF has no length: a song plays until changed.
+;
+; THE PLAYER ONLY LIVES WHILE THIS SCREEN DOES.  The firmware lends the emulator the
+; directory-sort cache, and any command other than CMD_MOD_OPEN / CMD_MOD_CTL unloads it
+; (module_gate) -- so nothing here may send another command while a tune plays, and the
+; browser's READDIR on the way back is what frees the memory for good.
+;
+; ENTRY POINT: nsf_screen, from select_pcm (pcmplay.a65) when the entry is a TYPE_NSF --
+; the browser's A arm for .pcm takes .nsf too, so $C0 pays one compare.
+.link page $c1
+#include "memmap.i65"
+// memmap.i65 re-asserts '.link page $c0' on include; re-declare $c1 AFTER it.
+.link page $c1
+
+
+; ======================================================================
+;  nsf_screen -- the whole session.  Entry/exit .as/.xl, DB=$00, DP=0.
+; ======================================================================
+nsf_screen:
+  php
+  sep #$20 : .as
+  rep #$10 : .xl
+  lda longptr+2               ; borrowed by the line engine, like the PCM player does
+  pha
+  rep #$20 : .al
+  lda longptr
+  pha
+  sep #$20 : .as
+  stz media_dark              ; (WRAM is $55 at boot: a gate has to be cleared before use)
+  stz media_keys
+  jsl @ui_call_coversync      ; the cover-request hazard pcmplay.a65 describes
+  jsr pcm_init_cur            ; pcm_cur = the browser's selection
+  jsr pcm_prepare_audio       ; DSP out of reset, the menu music stopped (may warm-reset)
+  jsr nsf_start
+  lda bar_xl                  ; the browser's selection bar, parked off-screen meanwhile
+  pha
+  lda bar_yl
+  pha
+  lda bar_wl
+  pha
+  lda #$ff
+  sta bar_xl
+  sta bar_yl
+  sta bar_wl
+  sta mouse_pbrow             ; no bar to click: an NSF cannot seek
+  sta mouse_pseek
+  jsr media_dim
+  lda #^text_nsf_title
+  sta window_tbank
+  ldx #!text_nsf_title
+  stx window_taddr
+  lda @spcstart_win_x
+  sta window_x
+  stz print_x+1
+  lda @spcstart_win_y
+  sta window_y
+  stz print_y+1
+  lda @spcstart_win_w
+  sta window_w
+  lda @spcstart_win_h
+  sta window_h                ; also what pop_window counts rows with
+  jsl @ui_call_wopen
+  stz print_pal
+  jsr nsf_redraw
+  jsr nsf_draw
+  jsr media_light             ; after a warm reset: fade in over the finished screen
+
+nsf_loop:
+  .as : .xl
+  lda isr_done
+  beq nsf_loop
+  stz isr_done
+  jsr nsf_draw                ; self-gating: recomposes only when something changed
+  jsl @mouse_playermode
+  jsl @ui_call_pad
+  lda media_keys
+  bne nsf_k_legend
+  inc media_keys              ; the first read: the legend comes up, with the right buttons
+  jsr nsf_redraw
+nsf_k_legend:
+  .as : .xl
+  lda pad_b
+  bne nsf_scr_out
+  lda pcm_nosup
+  bne nsf_loop                ; no handler in this firmware: only B does anything
+  lda pad_a
+  beq nsf_k_nota
+  jsr nsf_toggle
+  bra nsf_loop
+nsf_k_nota:
+  .as : .xl
+  lda pad_left
+  beq nsf_k_notleft
+  lda #$ff
+  jsr nsf_song_step
+  bra nsf_loop
+nsf_k_notleft:
+  .as : .xl
+  lda pad_right
+  beq nsf_k_notright
+  lda #$01
+  jsr nsf_song_step
+  bra nsf_loop
+nsf_k_notright:
+  .as : .xl
+  lda pad_l
+  beq nsf_k_notl
+  lda #$01
+  jsr nsf_file_step
+  bra nsf_loop
+nsf_k_notl:
+  .as : .xl
+  lda pad_r
+  beq nsf_loop
+  lda #$00
+  jsr nsf_file_step
+  bra nsf_loop
+
+nsf_scr_out:
+  .as : .xl
+  jsr nsf_stop
+  jsl @ui_call_wclose
+  jsr media_undim
+  pla
+  sta bar_wl
+  pla
+  sta bar_yl
+  pla
+  sta bar_xl
+  lda #$ff
+  sta mouse_pbrow
+  jsr pcm_restore_audio
+  rep #$20 : .al
+  lda pcm_cur
+  jsr media_place_cursor      ; the browser comes back on the file that was playing
+  sep #$20 : .as
+  rep #$20 : .al
+  pla
+  sta longptr
+  sep #$20 : .as
+  pla
+  sta longptr+2
+  plp
+  .as : .xl
+  rts
+
+
+; nsf_redraw: forget what is on screen, so the next nsf_draw recomposes every row.
+nsf_redraw:
+  .as : .xl
+  lda #$ff
+  sta pcm_seen
+  sta pcm_seen_pos
+  sta @nsf_seen_song
+  rts
+
+
+; ----------------------------------------------------------------------
+;  nsf_start -- CMD_MOD_OPEN (the NSF module) for pcm_cur.  The window opens either way; a firmware with no
+;  handler (or a timeout) sets pcm_nosup, which is what the screen reports.
+;  MCU_PARAM is built like a ROM launch (pcm_start has the why of the order).
+;  Entry/exit .as/.xl, DB=$00, DP=0.
+; ----------------------------------------------------------------------
+nsf_start:
+  .as : .xl
+  ldy pcm_cur
+  iny
+  iny
+  rep #$20 : .al
+  lda [dirstart_addr], y      ; +2: bank byte (high half is the type, masked off)
+  and #$00ff
+  sta @MCU_PARAM+6
+  dey
+  dey
+  lda [dirstart_addr], y      ; +0: address
+  sta @MCU_PARAM+4
+  lda #!FILESEL_CWD
+  sta @MCU_PARAM
+  sep #$20 : .as
+  lda #^FILESEL_CWD
+  sta @MCU_PARAM+2
+  lda #$00
+  sta @MCU_PARAM+3
+  sta @NSFPLAY_BLK+NSF_MAGIC0 ; capability sentinel: the module writes it back
+  lda #MODULE_ID_NSF
+  sta @MCU_PARAM+7
+  lda #CMD_MOD_OPEN
+  sta @MCU_CMD
+  jsr pcm_wait_mcu
+  bcs nsf_st_nosup
+  jsr nsf_magic_ok
+  bcc nsf_st_ok
+  ; No block: either this firmware has no modules, or it has them and the module file is
+  ; missing or damaged -- which the firmware says in MODULE_STATUS.  For the latter the
+  ; screen gets the module's own error state, written here (bank $FF is writable).
+  lda @MODULE_STATUS
+  cmp #MODULE_ST_MISSING
+  bne nsf_st_nosup
+  lda #$4e                    ; 'N'
+  sta @NSFPLAY_BLK+NSF_MAGIC0
+  lda #$46                    ; 'F'
+  sta @NSFPLAY_BLK+NSF_MAGIC1
+  lda #$01
+  sta @NSFPLAY_BLK+NSF_VERSION
+  lda #NSF_ST_ERR_CORE
+  sta @NSFPLAY_BLK+NSF_STATE
+nsf_st_ok:
+  .as : .xl
+  stz pcm_paused
+  stz pcm_nosup
+  rts
+nsf_st_nosup:
+  .as : .xl
+  lda #$01
+  sta pcm_nosup
+  rts
+
+
+; nsf_magic_ok: carry CLEAR when NSFPLAY_BLK is really ours (persistent PSRAM an older
+; firmware never writes).
+nsf_magic_ok:
+  .as : .xl
+  lda @NSFPLAY_BLK+NSF_MAGIC0
+  cmp #$4e                    ; 'N'
+  bne nsf_mo_no
+  lda @NSFPLAY_BLK+NSF_MAGIC1
+  cmp #$46                    ; 'F'
+  bne nsf_mo_no
+  lda @NSFPLAY_BLK+NSF_VERSION
+  beq nsf_mo_no
+  clc
+  rts
+nsf_mo_no:
+  .as : .xl
+  sec
+  rts
+
+
+; nsf_playing: carry CLEAR when a song is playing or paused (the keys that act on it).
+nsf_playing:
+  .as : .xl
+  jsr nsf_magic_ok
+  bcs nsf_pl_out
+  lda @NSFPLAY_BLK+NSF_STATE
+  cmp #NSF_ST_PLAYING
+  beq nsf_pl_yes
+  cmp #NSF_ST_PAUSED
+  beq nsf_pl_yes
+  cmp #NSF_ST_ERR_TUNE        ; a crashed song can still be swapped for another one
+  beq nsf_pl_yes
+  sec
+nsf_pl_out:
+  .as : .xl
+  rts
+nsf_pl_yes:
+  .as : .xl
+  clc
+  rts
+
+
+; ----------------------------------------------------------------------
+;  Transport.  nsf_ctl: A = NSF_CTL_*, MCU_PARAM+1 already set when it needs it.
+; ----------------------------------------------------------------------
+nsf_stop:
+  .as : .xl
+  lda pcm_nosup
+  bne nsf_stop_none           ; never started: nothing to tell the firmware
+  lda #NSF_CTL_STOP
+  jmp nsf_ctl
+nsf_stop_none:
+  .as : .xl
+  rts
+
+nsf_toggle:
+  .as : .xl
+  jsr nsf_playing
+  bcs nsf_tg_out
+  lda @NSFPLAY_BLK+NSF_STATE
+  cmp #NSF_ST_ERR_TUNE
+  beq nsf_tg_out
+  lda pcm_paused              ; what WE last asked for (pcmplay.a65 pcm_toggle has the why)
+  eor #$01
+  sta pcm_paused
+  bne nsf_tg_pause
+  lda #NSF_CTL_RESUME
+  jmp nsf_ctl
+nsf_tg_pause:
+  .as : .xl
+  lda #NSF_CTL_PAUSE
+  jmp nsf_ctl
+nsf_tg_out:
+  .as : .xl
+  rts
+
+; nsf_song_step: A = +1 / -1 ($ff): the next / previous song, wrapping at both ends.
+nsf_song_step:
+  .as : .xl
+  pha
+  jsr nsf_playing
+  pla
+  bcs nsf_ss_out
+  clc
+  adc @NSFPLAY_BLK+NSF_SONG
+  beq nsf_ss_last             ; below 1: the last song
+  cmp @NSFPLAY_BLK+NSF_SONGS
+  beq nsf_ss_go
+  bcc nsf_ss_go
+  lda #$01                    ; past the last: the first
+  bra nsf_ss_go
+nsf_ss_last:
+  .as : .xl
+  lda @NSFPLAY_BLK+NSF_SONGS
+nsf_ss_go:
+  .as : .xl
+  sta @MCU_PARAM+1
+  stz pcm_paused              ; a new song starts playing
+  lda #NSF_CTL_SONG
+  jsr nsf_ctl
+  jmp nsf_redraw
+nsf_ss_out:
+  .as : .xl
+  rts
+
+; nsf_file_step: A = 0 next / 1 previous .nsf of the folder (L/R); at either end, nothing.
+nsf_file_step:
+  .as : .xl
+  rep #$20 : .al
+  and #$00ff
+  tay
+  lda pcm_cur
+  ldx #TYPE_NSF
+  jsr media_find
+  bcc nsf_fs_none
+  sta pcm_cur
+  sep #$20 : .as
+  jsr nsf_start               ; CMD_MOD_OPEN unloads the old tune on the firmware side
+  jmp nsf_redraw
+nsf_fs_none:
+  .al : .xl
+  sep #$20 : .as
+  rts
+
+nsf_ctl:
+  .as : .xl
+  sta @MCU_PARAM
+  lda #CMD_MOD_CTL
+  sta @MCU_CMD
+  jmp pcm_wait_mcu            ; a timeout leaves nothing to undo
+
+
+; ======================================================================
+;  nsf_draw -- the whole screen from NSFPLAY_BLK.  Self-gating like pcm_draw: rows are
+;  recomposed when the state, the song or the mouse changed; a second ticking redraws only
+;  the clock row.  Entry/exit .as/.xl, DB=$00, DP=0.
+; ======================================================================
+nsf_draw:
+  .as : .xl
+  lda pcm_nosup
+  beq nsf_dr_live
+  jmp nsf_dr_nosup
+nsf_dr_live:
+  .as : .xl
+  jsr nsf_magic_ok
+  bcs nsf_dr_out              ; the block went away under us: leave the last frame up
+  lda @NSFPLAY_BLK+NSF_STATE
+  cmp pcm_seen
+  bne nsf_dr_all
+  lda @NSFPLAY_BLK+NSF_SONG
+  cmp @nsf_seen_song
+  bne nsf_dr_all
+  lda @mouse_lseen
+  cmp pcm_seen_mouse
+  bne nsf_dr_all
+  lda @NSFPLAY_BLK+NSF_POS
+  cmp pcm_seen_pos
+  beq nsf_dr_out
+  sta pcm_seen_pos            ; only the second ticked: the clock row
+  lda #$03
+  sta mt_row
+  jsr nsf_row_status
+nsf_dr_out:
+  .as : .xl
+  rts
+
+nsf_dr_all:
+  .as : .xl
+  lda @NSFPLAY_BLK+NSF_STATE
+  sta pcm_seen
+  lda @NSFPLAY_BLK+NSF_SONG
+  sta @nsf_seen_song
+  lda @NSFPLAY_BLK+NSF_POS
+  sta pcm_seen_pos
+  lda @mouse_lseen
+  sta pcm_seen_mouse
+  stz mt_row                  ; the call order below IS the layout (pcm_flush advances it)
+  jsr mt_blank                ; row 0: the title, else the file name
+  ldx #NSF_TITLE
+  jsr nsf_emit_str
+  bcc nsf_dr_title
+  rep #$20 : .al
+  lda pcm_cur
+  jsr media_name_row
+  sep #$20 : .as
+  bra nsf_dr_artist
+nsf_dr_title:
+  .as : .xl
+  jsr pcm_flush
+nsf_dr_artist:
+  .as : .xl
+  jsr mt_blank                ; row 1
+  ldx #NSF_ARTIST
+  jsr nsf_emit_str
+  jsr pcm_flush
+  jsr mt_blank                ; row 2
+  ldx #NSF_COPYRIGHT
+  jsr nsf_emit_str
+  jsr pcm_flush
+  jsr nsf_row_status          ; row 3
+  lda @NSFPLAY_BLK+NSF_FLAGS
+  and #$02
+  beq nsf_dr_nochip
+  lda #^text_nsf_nochip
+  ldx #!text_nsf_nochip
+  jsr pcm_row_str             ; row 4
+  bra nsf_dr_keys
+nsf_dr_nochip:
+  .as : .xl
+  jsr pcm_row_blank           ; row 4
+nsf_dr_keys:
+  .as : .xl
+  lda media_keys
+  beq nsf_dr_nokeys           ; the pad not read yet: no legend (see media_keys)
+  jsr pcm_wait_frame          ; both rows printed and their keys turned into glyphs
+                              ; before the next NMI uploads them (pcm_draw has the story)
+  lda #^text_pcm_prompt
+  ldx #!text_pcm_prompt
+  jsr pcm_row_str             ; row 5
+  jsl @hint_keys
+  lda @mouse_lseen
+  beq nsf_dr_padkeys
+  lda #^text_media_mouse2
+  ldx #!text_media_mouse2
+  bra nsf_dr_keys2
+nsf_dr_padkeys:
+  .as : .xl
+  lda #^text_nsf_prompt2
+  ldx #!text_nsf_prompt2
+nsf_dr_keys2:
+  .as : .xl
+  jsr pcm_row_str             ; row 6
+  jsl @hint_keys
+  rts
+nsf_dr_nokeys:
+  .as : .xl
+  jsr pcm_row_blank           ; row 5
+  jmp pcm_row_blank           ; row 6
+
+; No handler in this firmware: a static screen, composed once.
+nsf_dr_nosup:
+  .as : .xl
+  lda pcm_seen
+  beq nsf_dr_ns_out
+  stz pcm_seen
+  stz mt_row
+  rep #$20 : .al
+  lda pcm_cur
+  jsr media_name_row          ; row 0
+  sep #$20 : .as
+  jsr pcm_row_blank           ; row 1
+  jsr pcm_row_blank           ; row 2
+  lda #^text_pcm_nosup
+  ldx #!text_pcm_nosup
+  jsr pcm_row_str             ; row 3
+  jsr pcm_row_blank           ; row 4
+  lda #^text_pcm_promptb
+  ldx #!text_pcm_promptb
+  jsr pcm_row_str             ; row 5
+  jsl @hint_keys
+  jsr pcm_row_blank           ; row 6
+nsf_dr_ns_out:
+  .as : .xl
+  rts
+
+
+; ----------------------------------------------------------------------
+;  nsf_row_status -- row 3: "Song n/m   m:ss" (+ "Paused"), or the error the state says.
+; ----------------------------------------------------------------------
+nsf_row_status:
+  .as : .xl
+  lda @NSFPLAY_BLK+NSF_STATE
+  cmp #NSF_ST_ERR_OPEN
+  bcc nsf_rs_song
+  cmp #NSF_ST_ERR_NSF
+  beq nsf_rs_errnsf
+  cmp #NSF_ST_ERR_CORE
+  beq nsf_rs_errcore
+  cmp #NSF_ST_ERR_TUNE
+  beq nsf_rs_errtune
+  lda #^text_pcm_erropen
+  ldx #!text_pcm_erropen
+  jmp pcm_row_str
+nsf_rs_errnsf:
+  .as : .xl
+  lda #^text_nsf_errnsf
+  ldx #!text_nsf_errnsf
+  jmp pcm_row_str
+nsf_rs_errcore:
+  .as : .xl
+  lda #^text_nsf_errcore
+  ldx #!text_nsf_errcore
+  jmp pcm_row_str
+nsf_rs_errtune:
+  .as : .xl
+  lda #^text_nsf_errtune
+  ldx #!text_nsf_errtune
+  jmp pcm_row_str
+nsf_rs_song:
+  .as : .xl
+  jsr mt_blank
+  lda #^text_nsf_song
+  ldx #!text_nsf_song
+  jsr mt_put_str
+  lda #$20
+  jsr mt_emit
+  lda @NSFPLAY_BLK+NSF_SONG
+  jsr nsf_put_num
+  lda #$2f                    ; '/'
+  jsr mt_emit
+  lda @NSFPLAY_BLK+NSF_SONGS
+  jsr nsf_put_num
+  lda #$20
+  jsr mt_emit
+  jsr mt_emit
+  jsr mt_emit
+  rep #$20 : .al
+  lda @NSFPLAY_BLK+NSF_POS
+  sta pcm_tmp
+  sep #$20 : .as
+  jsr pcm_put_time
+  lda @NSFPLAY_BLK+NSF_STATE
+  cmp #NSF_ST_PAUSED
+  bne nsf_rs_flush
+  lda #$20
+  jsr mt_emit
+  jsr mt_emit
+  lda #^text_pcm_paused
+  ldx #!text_pcm_paused
+  jsr mt_put_str
+nsf_rs_flush:
+  .as : .xl
+  jmp pcm_flush
+
+
+; nsf_put_num: A (8-bit, 0..255) in decimal, no leading zeros.
+nsf_put_num:
+  .as : .xl
+  cmp #100
+  bcs nsf_pn_big
+  jmp mt_put_num              ; 0..99
+nsf_pn_big:
+  .as : .xl
+  ldy #$0000
+nsf_pn_hund:
+  .as : .xl
+  cmp #100
+  bcc nsf_pn_rest
+  sec
+  sbc #100
+  iny
+  bra nsf_pn_hund
+nsf_pn_rest:
+  .as : .xl
+  pha
+  tya
+  clc
+  adc #$30
+  jsr mt_emit
+  pla
+  jmp pcm_put_2d
+
+
+; nsf_emit_str: the block's string at offset X (NSF_TITLE / _ARTIST / _COPYRIGHT) into the
+; line, up to 31 characters.  Carry SET = nothing worth printing: empty, or the "<?>" that
+; rips put where the field is unknown.  The firmware already turned anything outside
+; printable ASCII into '?'.  Uses Y.
+nsf_emit_str:
+  .as : .xl
+  lda @NSFPLAY_BLK, x
+  beq nsf_es_empty
+  cmp #$3c                    ; '<'
+  bne nsf_es_go
+  lda @NSFPLAY_BLK+1, x
+  cmp #$3f                    ; '?'
+  bne nsf_es_go
+  lda @NSFPLAY_BLK+2, x
+  cmp #$3e                    ; '>'
+  bne nsf_es_go
+  lda @NSFPLAY_BLK+3, x
+  beq nsf_es_empty
+nsf_es_go:
+  .as : .xl
+  ldy #$001f
+nsf_es_loop:
+  .as : .xl
+  lda @NSFPLAY_BLK, x
+  beq nsf_es_done
+  jsr mt_emit                 ; keeps X and Y
+  inx
+  dey
+  bne nsf_es_loop
+nsf_es_done:
+  .as : .xl
+  clc
+  rts
+nsf_es_empty:
+  .as : .xl
+  sec
+  rts

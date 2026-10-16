@@ -25,12 +25,13 @@
 #include "ff.h"
 
 #define MODULE_MAGIC   0x444f4d53UL   /* "SMOD" */
-#define MODULE_ABI     1
+#define MODULE_ABI     2
 
 /* the modules, and the file each one is */
-#define MODULE_ID_MEMTEST  1          /* memtest.bin: the RAM test (SNES_CMD_MEMTEST) */
-#define MODULE_ID_PCM      2          /* pcmplay.bin: the .pcm player (SNES_CMD_PLAY_PCM) */
-#define MODULE_COUNT       2
+#define MODULE_ID_NSF      1          /* nsfplay.bin: the NSF player (SNES_CMD_MOD_OPEN) */
+#define MODULE_ID_MEMTEST  2          /* memtest.bin: the RAM test (SNES_CMD_MEMTEST) */
+#define MODULE_ID_PCM      3          /* pcmplay.bin: the .pcm player (SNES_CMD_PLAY_PCM) */
+#define MODULE_COUNT       3
 
 /* What start() returns when the module could not be loaded at all */
 #define MODULE_MISSING     (-1)
@@ -39,6 +40,10 @@
    "a firmware without modules" */
 #define MODULE_ST_OK       0
 #define MODULE_ST_MISSING  1          /* the file is missing, damaged or of another ABI */
+
+/* An endless music generator (music_play_gen): fills frames stereo s16 frames into pcm and
+   returns how many.  The frames are mono, L = R: the firmware may keep L only. */
+typedef unsigned (*module_gen_fn)(void *ctx, int16_t *pcm, unsigned frames);
 
 /* The memory test's hot loops stay in the firmware: they are SPI bursts over all 16 MB,
    through board-specific registers.  memtest.h has the struct. */
@@ -60,6 +65,7 @@ typedef struct {
   int      (*psram_stream)(FIL *fp, uint32_t addr, uint32_t size, void (*pump)(void));
   FIL      *file;
   /* the menu music engine (msu1.c) */
+  int      (*music_play_gen)(module_gen_fn gen, void *ctx, uint32_t ring);
   int      (*music_play)(const char *path);
   void     (*music_stop)(void);
   void     (*music_pause)(int paused);
@@ -70,6 +76,7 @@ typedef struct {
   int      (*music_ended)(void);
   uint32_t (*music_tell)(void);
   uint32_t (*music_size)(void);
+  uint32_t (*music_played)(void);
   /* the memory test (memtest.c) */
   int      (*mt_core)(void);          /* fpga_test up: 1; not on the card: 0; failed: -1 */
   void     (*mt_select)(uint8_t unit);
@@ -77,6 +84,8 @@ typedef struct {
   void     (*led)(unsigned int on);
   uint32_t (*ticks)(void);
   void     (*sfx_forget)(void);
+  /* AHB SRAM nobody else uses (the NSF player's cache): *size bytes at the returned address */
+  uint8_t *(*spare)(uint32_t *size);
   /* the board */
   uint32_t cpu_hz;
   const uint8_t *ram0_base;           /* the first cell of each PSRAM chip... */

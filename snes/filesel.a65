@@ -300,6 +300,8 @@ dirent_is_file
   beq dirent_type_pal2 ; it is listed for inspection, never loadable
   cmp #TYPE_DATA
   beq dirent_type_pal2
+  cmp #TYPE_NSF ; .nsf (NES music) -> palette 2, same as an .spc
+  beq dirent_type_pal2
   cmp #TYPE_PCM ; .pcm (MSU-1 track) -> palette 2, same as an .spc
   bne +
 dirent_type_pal2
@@ -600,6 +602,8 @@ select_item:
   beq sel_is_spc
   cmp #TYPE_PCM
   beq sel_is_pcm
+  cmp #TYPE_NSF
+  beq sel_is_pcm        ; .nsf: select_pcm hands it to the NSF player
   cmp #TYPE_SKIN
   beq sel_is_theme
   cmp #TYPE_SUBDIR
@@ -1257,6 +1261,8 @@ open_context_menu:
   cmp #TYPE_DATA        ; card data the user owns (saves, states, sidecars, .msu):
   beq ctx_is_delonly    ; same Delete-only menu as a theme -- the MCU's delete path
   cmp #TYPE_PCM         ; only unlinks the file (sidecar sweep is gated on ROM/NES)
+  beq ctx_is_delonly
+  cmp #TYPE_NSF
   beq ctx_is_delonly
 open_context_menu_cont
   rts
@@ -3804,6 +3810,8 @@ fnl_sf_loop:
   cmp #TYPE_SPC
   beq fnl_sf_check
   cmp #TYPE_PCM
+  beq fnl_sf_check
+  cmp #TYPE_NSF
   beq fnl_sf_check
   cmp #TYPE_NES
   beq fnl_sf_check

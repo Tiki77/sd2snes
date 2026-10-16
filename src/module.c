@@ -18,6 +18,33 @@
 /* sort.c: the READDIR sort cache, idle while a module's screen is open (module_gate) */
 extern uint32_t ptrcache[QSORT_MAXELEM];
 
+#ifdef MODULE_HOST_LINKED
+/* the host build links the modules in: no image, the spare is plain .bss */
+static uint32_t mod_spare_buf[3072 / 4];
+static uint8_t *module_spare(uint32_t *size)
+{
+  *size = sizeof(mod_spare_buf);
+  return (uint8_t *)mod_spare_buf;
+}
+#else
+/* A module's image is loaded at ptrcache, the last thing in the AHB-side RAM (IN_AHBMOD),
+   and what follows it up to MOD_END is free: an image may run past ptrcache into it, and
+   the rest is the module's spare.  LPC175x: the unused end of the 16 KB AHB SRAM; STM32:
+   3 KB reserved there by the linker script. */
+#ifdef CONFIG_MK3_STM32
+extern uint8_t __ahbram_end__[];
+#define MOD_END   ((uint32_t)__ahbram_end__)
+#else
+#define MOD_END   0x20080000UL
+#endif
+static uint8_t *mod_img_end;        /* the loaded image's end, 4-aligned */
+static uint8_t *module_spare(uint32_t *size)
+{
+  *size = MOD_END - (uint32_t)mod_img_end;
+  return mod_img_end;
+}
+#endif
+
 static uint32_t module_ticks(void)
 {
   return getticks();
@@ -29,10 +56,11 @@ static const module_api_t mod_api = {
   sram_readblock, sram_writeblock, sram_memset,
   sram_readbyte, sram_writebyte, sram_readshort, sram_writeshort,
   f_open, f_read, f_close, psram_stream, &file_handle,
-  menu_music_play, menu_music_stop, menu_music_pause, menu_music_lock,
+  menu_music_play_gen, menu_music_play, menu_music_stop, menu_music_pause, menu_music_lock,
   menu_music_noloop, menu_music_seek, menu_music_active, menu_music_ended,
-  menu_music_tell, menu_music_size,
+  menu_music_tell, menu_music_size, menu_music_gen_played,
   memtest_core, fpga_select_mem, memtest_pass, writeled, module_ticks, menu_sfx_forget,
+  module_spare,
   CONFIG_CPU_FREQUENCY, ram0_bases, RAM0_NUM_CHIPS, RAM0_SECOND_ADDR, MEMTEST_ITERATIONS
 };
 
@@ -43,10 +71,10 @@ static uint8_t mod_id;              /* the module in ptrcache, 0 = none (or gone
 #ifdef MODULE_HOST_LINKED
 /* Host builds of the firmware (the Ciclone) cannot run an ARM image: there the modules are
    linked in and nothing is loaded. */
-extern const module_fns_t mtmod_fns, pcmmod_fns;
+extern const module_fns_t nsfmod_fns, mtmod_fns, pcmmod_fns;
 static int module_load(uint8_t id)
 {
-  static const module_fns_t *const fns[MODULE_COUNT] = { &mtmod_fns, &pcmmod_fns };
+  static const module_fns_t *const fns[MODULE_COUNT] = { &nsfmod_fns, &mtmod_fns, &pcmmod_fns };
   if(!id || id > MODULE_COUNT) return 0;
   mod = *fns[id - 1];
   return 1;
@@ -55,7 +83,7 @@ static int module_load(uint8_t id)
 static int module_load(uint8_t id)
 {
   static const char *const file[MODULE_COUNT] = {
-    "/sd2snes/memtest.bin", "/sd2snes/pcmplay.bin"
+    "/sd2snes/nsfplay.bin", "/sd2snes/memtest.bin", "/sd2snes/pcmplay.bin"
   };
   uint8_t *img = (uint8_t *)ptrcache;
   const module_hdr_t *h = (const module_hdr_t *)img;
@@ -64,7 +92,7 @@ static int module_load(uint8_t id)
   if(!id || id > MODULE_COUNT) return 0;
   if(f_open(&file_handle, file[id - 1], FA_READ) != FR_OK) return 0;
   size = f_size(&file_handle);
-  if(size < sizeof(*h) || size > sizeof(ptrcache)
+  if(size < sizeof(*h) || size > MOD_END - (uint32_t)img
      || f_read(&file_handle, img, size, &br) != FR_OK || br != size) {
     f_close(&file_handle);
     return 0;
@@ -75,6 +103,7 @@ static int module_load(uint8_t id)
   if(h->magic != MODULE_MAGIC || h->abi != MODULE_ABI || h->size != size
      || h->state_size > sizeof(scratch_frame) || crc32_finalize(crc) != h->crc)
     return 0;
+  mod_img_end = img + ((size + 3) & ~3UL);
   mod.start = (void *)((uint32_t)img + h->start);
   mod.ctl   = (void *)((uint32_t)img + h->ctl);
   mod.idle  = (void *)((uint32_t)img + h->idle);
@@ -111,7 +140,8 @@ void module_ctl(uint32_t param)
 
 void module_gate(uint8_t cmd)
 {
-  if(cmd == SNES_CMD_PLAY_PCM || cmd == SNES_CMD_PCM_CTL) return;
+  if(cmd == SNES_CMD_MOD_OPEN || cmd == SNES_CMD_MOD_CTL
+     || cmd == SNES_CMD_PLAY_PCM || cmd == SNES_CMD_PCM_CTL) return;
   if(mod_live) mod.stop(scratch_frame);
   mod_live = 0;
   mod_id = 0;                       /* ptrcache and the FRAME are someone else's from here */
