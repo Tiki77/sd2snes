@@ -151,6 +151,8 @@ void prepare_reset() {
   /* Sufami Turbo Slot B: the companion minicart's own battery, flushed here beside the
      pack above because the SNES is already halted.  Only when it actually changed. */
   sufami_slotb_flush_inreset();
+  /* the savestate slot picked in the game; LAST, since ss_base rereads file_lfn */
+  savestate_slot_persist();
   // don't save SGB RTC since we are in reset and it may be undefined
   rdyled(1);
   readled(1);

@@ -21,6 +21,11 @@ extern snes_romprops_t romprops;
    game keys off the base ROM at recents index 0.  Uses file_lfn as the scratch the
    recents lookup fills, so the pointer stays valid until the next
    cfg_get_listed_game. */
+/* The savestate slot the running game started with (1..4), 0 when it has no savestate
+   slots: the slot picked in the game (the in-game menu's STATES tab, the change-slot combo)
+   is written back to its .slot sidecar when it differs (savestate_slot_persist). */
+static uint8_t ss_slot_start;
+
 static const char *ss_base(void) {
   cfg_get_listed_game(LAST_FILE, file_lfn, 0);
   return current_ips_srm_source[0] ? (const char *)current_ips_srm_source
@@ -59,6 +64,7 @@ void savestate_slot_status_stage(void) {
 }
 
 void savestate_program() {
+  ss_slot_start = 0;
   /* Publish savestate slot occupancy for the STATES tab on EVERY game load, BEFORE the
      core gate below.  Placing it here (not after the early return) means occupancy stays
      fresh even on overlay-only / unsupported cores, and it never goes stale because
@@ -221,7 +227,9 @@ void savestate_program() {
   if(savestate_ok) {
     sram_writeshort(0x0101, SS_REQ_ADDR);
     sram_writebyte(CFG.loadstate_delay, SS_DELAY_ADDR);
-    sram_writebyte(CFG.enable_savestate_slots, SS_SLOTS_ADDR);
+    /* the slot the game starts with: the saves screen's choice (.slot sidecar), 1..4 */
+    ss_slot_start = CFG.enable_savestate_slots ? 1 + slot_sidecar_state(ss_base()) : 0;
+    sram_writebyte(ss_slot_start, SS_SLOTS_ADDR);
     sram_writebyte(CFG.enable_ingame_savestate, SS_CTRL_ADDR);
     sram_writebyte(dsp_ok ? 1 : 0, SS_DSP_GATE_ADDR);
     sram_writebyte(sa1_ok ? 1 : 0, SS_SA1_GATE_ADDR);
@@ -478,6 +486,7 @@ void load_backup_state() {
   file_res = FR_OK;
   // clear the busy bit in the slot
   sram_writebyte(slot, SS_SLOTS_ADDR);
+  savestate_slot_persist();
 }
 
 void save_backup_state() {
@@ -500,4 +509,18 @@ void save_backup_state() {
   sram_writebyte(slot, SRAM_SS_STAGED_SLOT_ADDR);
   // clear the busy bit in the slot
   sram_writebyte(slot, SS_SLOTS_ADDR);
+  savestate_slot_persist();
+}
+
+/* The game's savestate slot, when it changed since the game started, to its .slot sidecar:
+   the next start of the game comes back on it.  From a savestate save/load (the SNES is
+   frozen and the card busy anyway) and from prepare_reset (leaving the game).  No-op for a
+   game without savestate slots. */
+void savestate_slot_persist(void) {
+  uint8_t slot;
+  if(!ss_slot_start) return;
+  slot = sram_readbyte(SS_SLOTS_ADDR) & 0x7F;
+  if(slot < 1 || slot > 4 || slot == ss_slot_start) return;
+  slot_sidecar_state_set(ss_base(), slot - 1);
+  ss_slot_start = slot;
 }

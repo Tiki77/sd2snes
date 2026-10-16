@@ -1546,7 +1546,7 @@ int patch_export_write(const uint8_t *patch_path,
    this way is what lets the caller keep a SINGLE 256-byte path buffer: the source
    name is dead the moment f_open succeeds, so the destination is built over it.
    Returns 1 on success, 0 on failure. */
-static int patch_copy_to(const char *dst_path) {
+int patch_copy_to(const char *dst_path) {
     FIL dst;
     UINT br, bw;
     int ok = 1;

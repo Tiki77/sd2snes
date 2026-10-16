@@ -37,6 +37,7 @@ typedef struct __attribute__ ((__packed__)) _ssfix_record {
 } ssfix_record_t;
 
 void savestate_program(void);
+void savestate_slot_persist(void);
 void savestate_set_inputs(void);
 void savestate_set_fixes(void);
 void savestate_enable_handler(int enable);

@@ -6,8 +6,8 @@ strtab independent of the menu's const_lang*.a65). Mirrors the menu's resolve_st
 dispatch format: each localized label is a ROW of N word pointers living between
 `onb_strtab_lo` and `onb_strtab_hi`; onb_resolve_str (onb_ui.a65) recognizes a
 pointer in that range and swaps the column by onb_cur_lang (the menu's language
-index, 8 columns). The tables live in the code bank $C0 (onb_const_lang_b.a65, ahead
-of pool B). The per-language strings live outside the dispatch range, in a pool split
+index, 8 columns). The tables live in a picture bank of their own (onb_const_lang_t.a65,
+TABLE_BANK). The per-language strings live outside the dispatch range, in a pool split
 by language over two banks (POOL_B_LANGS): pool A (en/pt/es/it) in $C1, pool B
 (de/fr/ru/nl) in $C0; onb_strpool_bank gives each column its bank. Accent/Cyrillic encoding is
 build_const.encode_string's; a character the font has no tile for aborts the build
@@ -130,8 +130,8 @@ for _m in range(3, 19):
                                            for l in LANGS)
 
 # The descriptors in tour order, by name: the base tour's cards (1-32, "and more" last),
-# the 2.17 and 2.18 sections (33-40 and 41-45: each its separator card, then the release's cards), then the
-# "and more" items (46-53, ONB_MORE_FIRST in onboarding_main.a65). Per language.
+# the 2.17 and 2.18 sections (33-40 and 41-46: each its separator card, then the release's cards), then the
+# "and more" items (47-54, ONB_MORE_FIRST in onboarding_main.a65). Per language.
 NAMES = [
   # 1 language
   ('Language', 'Idioma', 'Idioma', 'Sprache', 'Langue', 'Lingua', 'Язык', 'Taal'),
@@ -237,21 +237,23 @@ NAMES = [
   ('Music players', 'Tocadores de música', 'Reproductores de música', 'Musik-Player', 'Lecteurs de musique', 'Lettori musicali', 'Музыкальные плееры', 'Muziekspelers'),
   # 45 the NES music (.nsf) player (2.18)
   ('NES music (.nsf)', 'Música de NES (.nsf)', 'Música de NES (.nsf)', 'NES-Musik (.nsf)', 'Musique NES (.nsf)', 'Musica del NES (.nsf)', 'Музыка NES (.nsf)', 'NES-muziek (.nsf)'),
-  # 46 the PPU is cleared before every game boots
+  # 46 the saves screen: each save and savestate slot, the one the game starts with (2.18)
+  ('Saves screen', 'Tela de saves', 'Pantalla de partidas', 'Spielstand-Übersicht', 'Écran des sauvegardes', 'Schermata salvataggi', 'Экран сохранений', 'Saves-overzicht'),
+  # 47 the PPU is cleared before every game boots
   ('Clear PPU on boot', 'Limpar PPU no boot', 'Limpiar PPU al arrancar', 'PPU beim Start löschen', 'Effacer le PPU au boot', "Pulisci PPU all'avvio", 'Очистка PPU при старте', 'Leeg PPU bij starten'),
-  # 47 bus timing compat
+  # 48 bus timing compat
   ('Bus timing compat', 'Compat. de barramento', 'Compat. de bus', 'Bus-Timing-Kompat.', 'Compat. timing bus', 'Compat. timing bus', 'Совместимость шины', 'Compat. bustiming'),
-  # 48 the hardware model in System Information
+  # 49 the hardware model in System Information
   ('Hardware model', 'Modelo do hardware', 'Modelo de hardware', 'Hardware-Modell', 'Modèle du matériel', "Modello dell'hardware", 'Модель устройства', 'Hardwaremodel'),
-  # 49 BS-X and the Memory Pack
+  # 50 BS-X and the Memory Pack
   ('BS-X and Memory Pack', 'BS-X e Memory Pack', 'BS-X y Memory Pack', 'BS-X und Memory Pack', 'BS-X et Memory Pack', 'BS-X e Memory Pack', 'BS-X и Memory Pack', 'BS-X en Memory Pack'),
-  # 50 delete files and saves
+  # 51 delete files and saves
   ('Delete files and saves', 'Apagar arquivos e saves', 'Borrar archivos y saves', 'Dateien/Saves löschen', 'Effacer fichiers/saves', 'Eliminare file e save', 'Удаление файлов', 'Bestanden/saves wissen'),
-  # 51 missing BIOS warning
+  # 52 missing BIOS warning
   ('Missing BIOS warning', 'Aviso de BIOS faltando', 'Aviso de BIOS que falta', 'Fehlendes BIOS melden', 'Alerte de BIOS manquant', 'Avviso di BIOS mancante', 'Нет файла BIOS', 'Melding: BIOS ontbreekt'),
-  # 52 the clock question on boot and the date format
+  # 53 the clock question on boot and the date format
   ('Clock and date', 'Relógio e data', 'Reloj y fecha', 'Uhr und Datum', 'Horloge et date', 'Orologio e data', 'Часы и дата', 'Klok en datum'),
-  # 53 a description for each option
+  # 54 a description for each option
   ('Option descriptions', 'Descrição das opções', 'Descripción de opciones', 'Optionsbeschreibungen', 'Description des options', 'Descrizione opzioni', 'Описание опций', 'Uitleg bij opties'),
 ]
 
@@ -662,7 +664,16 @@ TEXTS = [
    'Un |.nsf| nella lista suona la musica del NES sulla console stessa, tutti e cinque i canali del chip audio. [Sinistra]/[Destra] cambiano brano, [A] mette in pausa, [L]/[R] il file.',
    '|.nsf| в списке играет музыку NES на самой консоли, все пять каналов звукового чипа. [Влево]/[Вправо] меняют мелодию, [A] ставит паузу, [L]/[R] меняют файл.',
    'Een |.nsf| in de lijst speelt NES-muziek op de console zelf, alle vijf kanalen van de geluidschip. [Links]/[Rechts] wisselen het nummer, [A] pauzeert, [L]/[R] het bestand.'),
-  # 46 the PPU is cleared before every game boots
+  # 46 the saves screen (2.18)
+  ("{savesrow} in the [Y] menu, or [R] on the info card, lists each save and savestate slot with its date. Pick the slot the game starts with, duplicate it or delete it.",
+   '{savesrow} no menu do [Y], ou [R] na ficha, lista cada slot de save e de savestate com a data. Escolha o slot com que o jogo inicia, duplique ou apague.',
+   '{savesrow} en el menú [Y], o [R] en la ficha, muestra cada ranura de partida y de savestate con su fecha. Elige con cuál empieza el juego, duplícala o bórrala.',
+   '{savesrow} im [Y]-Menü oder [R] auf der Infokarte zeigt jeden Spielstand- und Savestate-Slot mit Datum. Wähle den Startslot, dupliziere oder lösche ihn.',
+   "{savesrow} dans le menu [Y], ou [R] sur la fiche, liste chaque emplacement de sauvegarde et de savestate avec sa date. Choisissez celui de démarrage, dupliquez-le ou supprimez-le.",
+   '{savesrow} nel menu [Y], o [R] sulla scheda, elenca ogni slot di salvataggio e savestate con la data. Scegli lo slot di avvio, duplicalo o eliminalo.',
+   '{savesrow} в меню [Y] или [R] в карточке показывает каждый слот сохранений и состояний с датой. Выберите слот для запуска, скопируйте или удалите его.',
+   '{savesrow} in het [Y]-menu, of [R] op de spelinfo, toont elk save- en savestate-slot met de datum. Kies het startslot, dupliceer of verwijder het.'),
+  # 47 the PPU is cleared before every game boots
   ("Some romhacks draw their intro without clearing the video memory, and on a real console the menu's leftovers show as garbage. The |sd2snes+| wipes it before every game starts.",
    'Alguns romhacks desenham a abertura sem limpar a memória de vídeo, e num console de verdade as sobras do menu aparecem como lixo. O |sd2snes+| limpa tudo antes de qualquer jogo começar.',
    'Algunos romhacks dibujan su intro sin limpiar la memoria de vídeo, y en una consola real los restos del menú salen como basura. El |sd2snes+| la borra antes de que empiece cualquier juego.',
@@ -671,7 +682,7 @@ TEXTS = [
    "Alcune romhack disegnano l'intro senza pulire la memoria video, e su una console vera gli avanzi del menu appaiono come spazzatura. L'|sd2snes+| la pulisce prima che parta qualsiasi gioco.",
    'Некоторые ромхаки рисуют заставку, не очищая видеопамять, и на настоящей консоли остатки меню видны как мусор. |sd2snes+| очищает её перед запуском любой игры.',
    'Sommige romhacks tekenen hun intro zonder het videogeheugen te wissen, en op een echte console verschijnen restjes van het menu als rommel. De |sd2snes+| wist het voordat elk spel start.'),
-  # 47 bus timing compat
+  # 48 bus timing compat
   ('A game that freezes or glitches right after the logo on some consoles, mostly 1-CHIP ones? Try {cfg} > {ingame} > {buscompat}: it frees the cartridge bus a little earlier, like firmware 1.11.0 did.',
    'Um jogo trava ou dá glitch logo depois do logo em alguns consoles, quase sempre 1-CHIP? Tente {cfg} > {ingame} > {buscompat}: ela libera o barramento do cartucho um pouco antes, como a firmware 1.11.0 fazia.',
    '¿Un juego se cuelga o falla justo tras el logo en algunas consolas, casi siempre 1-CHIP? Prueba {cfg} > {ingame} > {buscompat}: libera el bus del cartucho un poco antes, como hacía el firmware 1.11.0.',
@@ -680,7 +691,7 @@ TEXTS = [
    "Un gioco si blocca o dà glitch subito dopo il logo su alcune console, quasi sempre 1-CHIP? Prova {cfg} > {ingame} > {buscompat}: libera il bus della cartuccia un po' prima, come il firmware 1.11.0.",
    'Игра зависает или сбоит сразу после логотипа на некоторых консолях, чаще 1-CHIP? Попробуй {cfg} > {ingame} > {buscompat}: шина картриджа освобождается чуть раньше, как в прошивке 1.11.0.',
    'Loopt een spel vast of hapert het net na het logo op sommige consoles, meestal 1-CHIP? Probeer {cfg} > {ingame} > {buscompat}: de cartridgebus wordt iets eerder vrijgegeven, zoals firmware 1.11.0 deed.'),
-  # 48 the hardware model in System Information
+  # 49 the hardware model in System Information
   ('{sysinfo} in the main menu ([X]) now also shows which hardware it runs on: |sd2snes Mk.II|, |sd2snes Mk.III| or |FXPAK PRO STM32|.',
    '{sysinfo} no menu principal ([X]) agora mostra também em que hardware ele roda: |sd2snes Mk.II|, |sd2snes Mk.III| ou |FXPAK PRO STM32|.',
    '{sysinfo} en el menú principal ([X]) ahora también muestra en qué hardware corre: |sd2snes Mk.II|, |sd2snes Mk.III| o |FXPAK PRO STM32|.',
@@ -689,7 +700,7 @@ TEXTS = [
    '{sysinfo} nel menu principale ([X]) ora mostra anche su quale hardware gira: |sd2snes Mk.II|, |sd2snes Mk.III| o |FXPAK PRO STM32|.',
    '{sysinfo} в главном меню ([X]) теперь показывает и модель устройства: |sd2snes Mk.II|, |sd2snes Mk.III| или |FXPAK PRO STM32|.',
    '{sysinfo} in het hoofdmenu ([X]) toont nu ook op welke hardware het draait: |sd2snes Mk.II|, |sd2snes Mk.III| of |FXPAK PRO STM32|.'),
-  # 49 BS-X and the Memory Pack
+  # 50 BS-X and the Memory Pack
   ('Satellaview games that use the 8M Memory Pack slot read it from |/sd2snes/saves| as |<rom>.mpk|: saved sound novels, downloaded races and the like. The game still boots without a pack.',
    'Jogos do Satellaview que usam o slot de Memory Pack de 8M leem o pack de |/sd2snes/saves| como |<rom>.mpk|: sound novels salvas, corridas baixadas e afins. O jogo boota mesmo sem o pack.',
    'Los juegos de Satellaview que usan el slot de Memory Pack de 8M lo leen de |/sd2snes/saves| como |<rom>.mpk|: sound novels guardadas, carreras descargadas y más. El juego arranca incluso sin pack.',
@@ -698,16 +709,16 @@ TEXTS = [
    'I giochi Satellaview che usano lo slot Memory Pack da 8M lo leggono da |/sd2snes/saves| come |<rom>.mpk|: sound novel salvate, corse scaricate e simili. Il gioco parte anche senza pack.',
    'Игры Satellaview со слотом Memory Pack 8M читают его из |/sd2snes/saves| как |<rom>.mpk|: сохранённые звуковые новеллы, скачанные гонки и прочее. Игра запускается и без Memory Pack.',
    'Satellaview-spellen met een 8M Memory Pack-slot lezen het pack uit |/sd2snes/saves| als |<rom>.mpk|: opgeslagen sound novels, gedownloade races en meer. Het spel start ook zonder pack.'),
-  # 50 delete files and saves
-  ("From the [Y] menu of the file list, {del} erases the selected file and {delsrm} only the game's saves, all 4 slots. Deleting a ROM also takes its cover, info card, guides and cheats along.",
-   'No menu do [Y] da lista de arquivos, {del} apaga o arquivo selecionado e {delsrm} só os saves do jogo, nos 4 slots. Apagar uma ROM leva junto a capa, a ficha, as guias e os cheats dela.',
-   'Desde el menú [Y] de la lista, {del} borra el archivo elegido y {delsrm} solo los saves del juego, las 4 ranuras. Borrar una ROM también se lleva su carátula, ficha, guías y cheats.',
-   'Im [Y]-Menü der Dateiliste löscht {del} die gewählte Datei und {delsrm} nur die Spielstände, alle 4 Plätze. Eine gelöschte ROM nimmt Cover, Infokarte, Anleitungen und Cheats mit.',
-   'Depuis le menu [Y] de la liste, {del} efface le fichier et {delsrm} les 4 emplacements de sauvegarde du jeu. Supprimer une ROM emporte aussi jaquette, fiche, guides et cheats.',
-   'Dal menu [Y] della lista, {del} cancella il file scelto e {delsrm} solo i salvataggi del gioco, tutti e 4 gli slot. Eliminare una ROM porta via anche copertina, scheda, guide e cheat.',
-   'В списке файлов по кнопке [Y] пункт {del} удаляет выбранный файл, а {delsrm} только сохранения игры, все 4 слота. Вместе с игрой удаляются её обложка, карточка, руководства и читы.',
-   'Vanuit het [Y]-menu van de lijst wist {del} het gekozen bestand en {delsrm} alleen de saves van het spel, alle 4 plekken. Een gewiste ROM neemt ook hoes, spelinfo, gidsen en cheats mee.'),
-  # 51 missing BIOS warning
+  # 51 delete files and saves
+  ("From the [Y] menu of the file list, {del} erases the selected file and {savesrow} opens its saves and savestates, slot by slot. Deleting a ROM also takes its cover, info card, guides and cheats along.",
+   'No menu do [Y] da lista de arquivos, {del} apaga o arquivo selecionado e {savesrow} abre os saves e savestates dele, slot a slot. Apagar uma ROM leva junto a capa, a ficha, as guias e os cheats dela.',
+   'Desde el menú [Y] de la lista, {del} borra el archivo elegido y {savesrow} abre sus partidas y savestates, ranura por ranura. Borrar una ROM también se lleva su carátula, ficha, guías y cheats.',
+   'Im [Y]-Menü der Dateiliste löscht {del} die gewählte Datei, {savesrow} öffnet ihre Spielstände und Savestates, Slot für Slot. Eine gelöschte ROM nimmt Cover, Infokarte, Anleitungen und Cheats mit.',
+   'Depuis le menu [Y] de la liste, {del} efface le fichier et {savesrow} ouvre ses sauvegardes et savestates, emplacement par emplacement. Supprimer une ROM emporte aussi jaquette, fiche, guides et cheats.',
+   'Dal menu [Y] della lista, {del} cancella il file scelto e {savesrow} apre i suoi salvataggi e savestate, slot per slot. Eliminare una ROM porta via anche copertina, scheda, guide e cheat.',
+   'В списке файлов по кнопке [Y] пункт {del} удаляет выбранный файл, а {savesrow} открывает его сохранения и состояния по слотам. Вместе с игрой удаляются её обложка, карточка, руководства и читы.',
+   'Vanuit het [Y]-menu van de lijst wist {del} het gekozen bestand en opent {savesrow} de saves en savestates ervan, per slot. Een gewiste ROM neemt ook hoes, spelinfo, gidsen en cheats mee.'),
+  # 52 missing BIOS warning
   ('Games with special chips (DSP, Super FX, SA-1, S-DD1, CX4, Super Game Boy, BS-X...) need support files on the card. If one is missing, the menu names the file and stays up, instead of freezing or starting a broken game.',
    'Jogos com chips especiais (DSP, Super FX, SA-1, S-DD1, CX4, Super Game Boy, BS-X...) precisam de arquivos de apoio no cartão. Se faltar algum, o menu diz qual é e continua de pé, em vez de travar ou abrir um jogo quebrado.',
    'Los juegos con chips especiales (DSP, Super FX, SA-1, S-DD1, CX4, Super Game Boy, BS-X...) necesitan archivos de apoyo en la tarjeta. Si falta uno, el menú dice cuál y sigue en pie, en vez de colgarse o abrir un juego roto.',
@@ -716,7 +727,7 @@ TEXTS = [
    'I giochi con chip speciali (DSP, Super FX, SA-1, S-DD1, CX4, Super Game Boy, BS-X...) vogliono file di supporto sulla scheda. Se ne manca uno, il menu dice quale e resta attivo, invece di bloccarsi o avviare un gioco rotto.',
    'Играм со специальными чипами (DSP, Super FX, SA-1, S-DD1, CX4, Super Game Boy, BS-X...) нужны файлы BIOS на карте. Если какого-то нет, меню показывает его название и остаётся открытым, а не зависает и не запускает сломанную игру.',
    'Spellen met speciale chips (DSP, Super FX, SA-1, S-DD1, CX4, Super Game Boy, BS-X...) hebben hulpbestanden op de kaart nodig. Ontbreekt er een, dan noemt het menu het bestand en blijft het open, in plaats van te hangen.'),
-  # 52 the clock question on boot and the date format
+  # 53 the clock question on boot and the date format
   ("When the cartridge's clock is not set, the menu asks for the time on start. {askclock} in {browser} turns the question off. The date at the bottom of the list follows the language: month first in English, day first in the others.",
    'Quando o relógio do cartucho não está acertado, o menu pede a hora ao iniciar. {askclock} em {browser} desliga a pergunta. A data no rodapé da lista segue o idioma: mês primeiro em inglês, dia primeiro nos outros.',
    'Si el reloj del cartucho no está en hora, el menú la pide al iniciar. {askclock} en {browser} quita la pregunta. La fecha al pie de la lista sigue el idioma: primero el mes en inglés, el día en los demás.',
@@ -725,7 +736,7 @@ TEXTS = [
    "Se l'orologio della cartuccia non è impostato, il menu chiede l'ora all'avvio. {askclock} in {browser} toglie la domanda. La data in fondo alla lista segue la lingua: prima il mese in inglese, il giorno nelle altre.",
    'Если часы картриджа не выставлены, меню спрашивает время при старте. {askclock} в {browser} отключает вопрос. Дата внизу списка следует языку: в английском сначала месяц, в остальных день.',
    'Is de klok van de cartridge niet ingesteld, dan vraagt het menu bij de start om de tijd. {askclock} in {browser} zet dat uit. De datum onder de lijst volgt de taal: in het Engels eerst de maand, anders de dag.'),
-  # 53 a description for each option
+  # 54 a description for each option
   ("Every option in {cfg} shows a sentence in a box on screen explaining what it does, in the menu's language, so each setting makes sense without a manual.",
    'Cada opção em {cfg} mostra uma frase numa caixa na tela explicando o que ela faz, no idioma do menu, para cada ajuste fazer sentido sem manual.',
    'Cada opción de {cfg} muestra una frase en un recuadro explicando lo que hace, en el idioma del menú, para entender cada ajuste sin manual.',
@@ -787,7 +798,7 @@ def _cells(text):
 
 
 TEXT_W = 30          # == ONB_TEXT_W: cols 1..30
-MORE_FIRST = 45      # == ONB_MORE_FIRST: the "and more" items are the descriptors from here
+MORE_FIRST = 46      # == ONB_MORE_FIRST: the "and more" items are the descriptors from here
 MORE_NAME_W = 24     # an answer row's width (onb_draw_option_value prints labels with 24)
 TEXT_MAX_LINES = 11  # the answer list starts 2 rows below the text and the longest
                      # list (8 languages) has to fit above the progress bar
@@ -800,7 +811,7 @@ _LABELS = {"off": "onb_text_off", "on": "onb_text_on", "menu": "onb_text_rst_men
 _MENU_LABELS = {"cfg": "mtext_mm_cfg", "sgbmenu": "mtext_cfg_sgb", "auto": "text_auto",
                 "prefsgb": "text_gbc_prefer_sgb", "prefgbc": "text_gbc_prefer_gbc",
                 "saves": "text_igm_tab_saves", "del": "text_filesel_context_delete_file",
-                "delsrm": "text_filesel_context_delete_srm", "browser": "mtext_cfg_browser",
+                "savesrow": "text_filesel_context_saves", "browser": "mtext_cfg_browser",
                 "restoretheme": "mtext_browser_restoretheme",
                 "restoreclassic": "mtext_browser_restoreclassic",
                 "hdrmode": "mtext_patch_header_mode", "hdrauto": "text_patch_hdrsel_auto",
@@ -1008,6 +1019,8 @@ POOL_B_LANGS = ("de", "fr", "ru", "nl")
 # where there is room: a bank of 8 demo pictures has 6144 bytes left, enough for one sheet.
 # The link fails on an overflow.
 CJK_POOL_BANK = {"ja": "$cb", "zh": "$c1"}
+# the dispatch tables (onb_const_lang_t.a65): a picture bank with room past its 8 pictures
+TABLE_BANK = "$c4"
 CJK_SHEET_BANK = {"ja": "$ca", "zh": "$c7"}
 
 
@@ -1075,6 +1088,7 @@ def main():
         out_path = sys.argv[sys.argv.index("-o") + 1]
     out_dir = os.path.dirname(out_path)
     out_b = os.path.join(out_dir, "onb_const_lang_b.a65")
+    out_t = os.path.join(out_dir, "onb_const_lang_t.a65")
 
     common_map, lang_maps, fonts, common = cjk_maps()
     langnames = {l: decode_args(_EN[LANG_NAME_LABELS[l]]) for l in CJK_LANGS}
@@ -1110,10 +1124,11 @@ def main():
     L.append("onb_cjk_sheet_bank .byt " + ", ".join("^onb_sheet_" + l if l in CJK_LANGS else "0"
                                                      for l in LANGS))
     L.append("")
-    # The dispatch tables live in the code bank $C0, ahead of pool B, and not in $C1 with
-    # pool A: $C1 ran out (the font, pool A and the Chinese pool). Every reader takes their
-    # bank from ^onb_strtab_lo, and pool B follows onb_strtab_hi, outside the table range.
-    T = ["; ---- dispatch tables (one row of %d word pointers per label) ----" % nlang,
+    # The dispatch tables live in a picture bank of their own (TABLE_BANK): $C1 holds pool A
+    # and the Chinese pool, the code bank $C0 pool B. Every reader takes their bank from
+    # ^onb_strtab_lo, and no pool shares it, so no string falls in the table range.
+    T = head + [".link page %s" % TABLE_BANK, "",
+         "; ---- dispatch tables (one row of %d word pointers per label) ----" % nlang,
          "onb_strtab_lo:"]
     for label in STRINGS:
         T.append("%s:" % label)
@@ -1121,7 +1136,6 @@ def main():
             T.append("  .word !%s_%s" % (label, lang))
     T.append("onb_strtab_hi:")
     T.append("")
-    B[B.index("onb_pool_b:"):B.index("onb_pool_b:")] = T
     S0 = S[CJK_LANGS[0]]
     S0.append("; the common glyphs (0..%d), in every language" % (len(common_map) - 1))
     S0.append("onb_cjk_common:")
@@ -1177,6 +1191,8 @@ def main():
         f.write("\n".join(L) + "\n")
     with open(out_b, "w", encoding="utf-8") as f:
         f.write("\n".join(B) + "\n")
+    with open(out_t, "w", encoding="utf-8") as f:
+        f.write("\n".join(T) + "\n")
     for l in CJK_LANGS:
         with open(os.path.join(out_dir, "onb_cjk_%s.a65" % l), "w", encoding="utf-8") as f:
             f.write("\n".join(C[l]) + "\n")

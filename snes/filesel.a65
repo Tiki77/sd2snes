@@ -1409,55 +1409,6 @@ delete_file_done:
   plp
   rtl
 
-delete_selected_srm:
-; Browser context.  MCU_PARAM holds the selected ROM path (set by
-; ctx_is_file).  Confirm, then delete only the .srm; the ROM list does
-; not change so no refresh is needed.
-  php
-  phb
-  sep #$20 : .as
-  rep #$10 : .xl
-  rep #$20 : .al
-  lda @MCU_PARAM+4
-  clc
-  adc #$0006
-  sta confirm_name_addr
-  sep #$20 : .as
-  lda @MCU_PARAM+6
-  clc
-  adc #$c0
-  sta confirm_name_bank
-  lda #^text_confirm_delete_srm
-  sta confirm_prompt_bank
-  ldx #!text_confirm_delete_srm
-  stx confirm_prompt_addr
-  jsr confirm_delete
-  bcs delete_srm_go
-  plb
-  plp
-  rtl
-delete_srm_go:
-  lda #$01
-  jsr hide_cursor
-  jsr draw_loading_window
-  jsr waitblank
-  lda #$00
-  sta @SNES_CMD
-  lda #CMD_DELETE_SRM
-  sta @MCU_CMD
-- lda @SNES_CMD
-  cmp #$55
-  beq +
-  cmp #$aa
-  beq +
-  bra -
-+ lda #$00
-  sta @MCU_CMD
-  jsr pop_window
-  plb
-  plp
-  rtl
-
 ; ----------------------------------------------------------------------
 ; Favorites context deletes.  MCU_PARAM low byte = favorite list index
 ; (set by select_favorite_file).  The firmware resolves the path via
@@ -1521,51 +1472,6 @@ delete_favorite_file:
   plp
   rtl
 
-delete_favorite_srm:
-  php
-  phb
-  sep #$20 : .as
-  rep #$10 : .xl
-  rep #$20 : .al
-  lda @MCU_PARAM
-  and #$00ff
-  xba
-  clc
-  adc #!FAVORITE_GAMES
-  sta confirm_name_addr
-  sep #$20 : .as
-  lda #^FAVORITE_GAMES
-  sta confirm_name_bank
-  lda #^text_confirm_delete_srm
-  sta confirm_prompt_bank
-  ldx #!text_confirm_delete_srm
-  stx confirm_prompt_addr
-  jsr confirm_delete
-  bcs +
-  plb
-  plp
-  rtl
-+ lda #$01
-  jsr hide_cursor
-  jsr draw_loading_window
-  jsr waitblank
-  lda #$00
-  sta @SNES_CMD
-  lda #CMD_DELETE_SRM_FAV
-  sta @MCU_CMD
-- lda @SNES_CMD
-  cmp #$55
-  beq +
-  cmp #$aa
-  beq +
-  bra -
-+ lda #$00
-  sta @MCU_CMD
-  jsr pop_window
-  plb
-  plp
-  rtl
-
 ; ----------------------------------------------------------------------
 ; Recents context deletes.  MCU_PARAM low byte = recent list index (set
 ; by select_last_file).  Firmware resolves the path via
@@ -1623,51 +1529,6 @@ delete_recent_file:
   sep #$20 : .as
   lda #$01
   sta @filesel_dirty
-  plb
-  plp
-  rtl
-
-delete_recent_srm:
-  php
-  phb
-  sep #$20 : .as
-  rep #$10 : .xl
-  rep #$20 : .al
-  lda @MCU_PARAM
-  and #$00ff
-  xba
-  clc
-  adc #!LAST_GAME
-  sta confirm_name_addr
-  sep #$20 : .as
-  lda #^LAST_GAME
-  sta confirm_name_bank
-  lda #^text_confirm_delete_srm
-  sta confirm_prompt_bank
-  ldx #!text_confirm_delete_srm
-  stx confirm_prompt_addr
-  jsr confirm_delete
-  bcs +
-  plb
-  plp
-  rtl
-+ lda #$01
-  jsr hide_cursor
-  jsr draw_loading_window
-  jsr waitblank
-  lda #$00
-  sta @SNES_CMD
-  lda #CMD_DELETE_SRM_RECENT
-  sta @MCU_CMD
-- lda @SNES_CMD
-  cmp #$55
-  beq +
-  cmp #$aa
-  beq +
-  bra -
-+ lda #$00
-  sta @MCU_CMD
-  jsr pop_window
   plb
   plp
   rtl

@@ -290,6 +290,17 @@ static NO_INLINE void delete_srm_for(const char *srmsrc, int src) {
   }
 }
 
+/* The saves screen (SNES_CMD_SAVES): the game's saves keyed like delete_srm_for's, the
+   action, then SAVES_BLK republished for the screen to redraw from. */
+static NO_INLINE void saves_from(void) {
+  uint8_t where = snescmd_readbyte(SNESCMD_MCU_PARAM + 8);
+  uint8_t op = snescmd_readbyte(SNESCMD_MCU_PARAM + 9);
+  uint8_t ks = snescmd_readbyte(SNESCMD_MCU_PARAM + 10);
+  uint8_t dst = snescmd_readbyte(SNESCMD_MCU_PARAM + 11);
+  saves_command(sel_sidecar(where == 2 ? SEL_FAV : where == 1 ? SEL_RECENT : SEL_BROWSER),
+                op, ks >> 4, ks & 0x0f, dst);
+}
+
 static void delete_srm_from(sel_src_t s) {
   delete_srm_for(sel_sidecar(s), (int)s);
 }
@@ -967,6 +978,9 @@ uint8_t menucmd_dispatch(uint8_t cmd, uint8_t *menu_reload) {
       return 0;
     case SNES_CMD_DELETE_SRM:
       delete_srm_from(SEL_BROWSER);
+      return 0;
+    case SNES_CMD_SAVES:
+      saves_from();
       return 0;
     case SNES_CMD_DELETE_FILE_FAV:
       delete_file_from(SEL_FAV);

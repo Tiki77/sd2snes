@@ -1,6 +1,6 @@
 // ctxrows_recent.i65 -- entry rows of the RECENT GAMES list context menu (Y on a row).
 // 6 entries: Add to favorites / Set as autoboot / Remove from recent games / Cheats /
-// Delete / Delete save file. All of them act on the list INDEX in MCU_PARAM, not on a
+// Delete / Saves... All of them act on the list INDEX in MCU_PARAM, not on a
 // browser direntry -- hence the _recent_ routine variants.
 //
 // Shared by the plain table in snes/menudata.a65 (bank $C0) and by the
@@ -87,14 +87,14 @@
  .byt  0,0,0
 
  .byt  MTYPE_FUNC_CLOSE
- .word !text_filesel_context_delete_srm
- .byt  ^text_filesel_context_delete_srm
- .word !delete_recent_srm-1
- .byt  ^delete_recent_srm-1
+ .word !text_filesel_context_saves
+ .byt  ^text_filesel_context_saves
+ .word !saves_ctx_recent-1
+ .byt  ^saves_ctx_recent-1
  .byt  0
  .byt  0,0,0
- .word !mdesc_filesel_context_delete_srm
- .byt  ^mdesc_filesel_context_delete_srm
+ .word !mdesc_filesel_context_saves
+ .byt  ^mdesc_filesel_context_saves
  .byt  0,0,0
  .byt  0,0,0
  .byt  0,0,0

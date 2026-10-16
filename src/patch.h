@@ -372,4 +372,8 @@ int patch_export_copy_assets(const uint8_t *rom_path, const uint8_t *save_key);
  */
 int patch_unlink_rom_assets(const uint8_t *rom_path);
 
+/* Copies the file open in file_handle to dst_path (created or truncated) and closes both;
+   a failed copy deletes dst_path.  Returns 1 on success.  Also the saves screen's copy. */
+int patch_copy_to(const char *dst_path);
+
 #endif /* IPS_H */

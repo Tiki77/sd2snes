@@ -74,6 +74,43 @@ void srm_slot_load(uint8_t *filename);
 /* Write the sidecar (in-game SET). Updates srm_slot_sel; NEVER touches the live srm_slot.
    Bounded (one f_write). */
 void srm_slot_save(uint8_t *filename, uint8_t slot);
+uint8_t slot_sidecar_state(const char *src);   /* the savestate slot (0..3) a game starts with */
+void slot_sidecar_state_set(const char *src, uint8_t ss);
+
+/* The menu's saves screen and the in-game SAVES tab: SAVES_BLK (SRAM_SAVES_ADDR in
+   memmap.h, lockstep with SAVES_BLK / SVB_* in snes/memmap.i65).  A header, then one
+   entry per slot: the four battery saves, then the four savestates. */
+#define SAVES_SLOTS         4
+#define SS_SLOT_COUNT       4
+#define SAVES_KIND_SRM      0
+#define SAVES_KIND_STATE    1
+#define SAVES_VERSION       1
+#define SAVES_HDR_SIZE      8
+#define SAVES_H_MAGIC       0         /* 'S','V'; the menu zeroes +0 before asking */
+#define SAVES_H_VERSION     2
+#define SAVES_H_RESULT      3         /* SAVES_RES_* of the last action */
+#define SAVES_H_SRM_SEL     4         /* the battery-save slot the game starts with, 0..3 */
+#define SAVES_H_SS_SEL      5         /* the savestate slot the game starts with, 0..3 */
+#define SAVES_H_FLAGS       6
+#define SAVES_HF_SRM_SLOTS  0x01      /* EnableSramSlots: slots 2..4 of the battery saves */
+#define SAVES_HF_SS_SLOTS   0x02      /* EnableSavestateSlots: slots 2..4 of the savestates */
+#define SAVES_HF_STATES     0x04      /* the savestate entries were staged (the menu) */
+#define SAVES_ENTRY_SIZE    32
+#define SAVES_E_FLAGS       0
+#define SAVES_EF_EXISTS     0x01
+#define SAVES_E_DATE        1         /* "DD/MM/YYYY HH:MM" in the menu language's order, NUL */
+#define SAVES_DATE_LEN      17
+#define SAVES_E_SIZE        18        /* "8 KB", NUL */
+#define SAVES_SIZE_LEN      8
+#define SAVES_BLK_SIZE      (SAVES_HDR_SIZE + 2 * SAVES_SLOTS * SAVES_ENTRY_SIZE)
+#define SAVES_OP_INFO       0         /* SNES_CMD_SAVES MCU_PARAM+9 */
+#define SAVES_OP_USE        1
+#define SAVES_OP_COPY       2
+#define SAVES_OP_DELETE     3
+#define SAVES_RES_OK        0
+#define SAVES_RES_FAIL      1
+uint8_t saves_stage(const char *src, uint8_t states, uint8_t result);
+void saves_command(const char *src, uint8_t op, uint8_t kind, uint8_t slot, uint8_t dst);
 
 uint32_t migrate_and_load_srm(uint8_t *filename, uint32_t base_addr);
 uint32_t load_sram(uint8_t* filename, uint32_t base_addr);

@@ -1525,7 +1525,7 @@ sd_bit_shr:
 sd_bit_test:
 	and #$0001
 	beq sd_status_empty
-	lda #$2800 : sta @ig_rc_pal                ; Slice 2: OCCUPIED -> green
+	lda #$2000 : sta @ig_rc_pal                ; OCCUPIED -> plain text (only the active SLOT n is green)
 	lda #IGM_ST_FULL
 	bra sd_status_copy
 sd_status_empty:
@@ -1543,7 +1543,7 @@ sd_status_copy:
 	sta @ig_rc_row                             ; save row for the recolor
 	tax                                        ; X = absolute tile row
 	jsr ovl_flush_abs                          ; clobbers X/Y
-	jsr ig_recolor                             ; recolor the status token green/dim
+	jsr ig_recolor                             ; recolor the status token plain/dim
 	; WS-C: the COMMITTED slot's "SLOT n" label goes GREEN (it used to be the '>' cell). The
 	; cursor no longer tints anything -- the BAR is its marker -- so the two states never fight
 	; over the same colour: green = "this is the active slot", bar = "this is where you are".
@@ -2088,8 +2088,10 @@ svsd_shr:
 svsd_bit:
 	and #$0001
 	beq svsd_empty
-	lda #$2800 : sta @ig_rc_pal                ; Slice 2: EXISTS -> green
-	lda #IGM_SV_EXISTS
+	lda #$2000 : sta @ig_rc_pal                ; EXISTS (the date) -> plain text (only the active SLOT n is green)
+	jsr svs_date                               ; the save's date, carry CLEAR (Y = end column)
+	bcc svsd_copied
+	lda #IGM_SV_EXISTS                         ; a firmware without SAVES_BLK: the word
 	bra svsd_status
 svsd_empty:
 	lda #$2400 : sta @ig_rc_pal                ; MISSING -> dim (palette 1 grey)
@@ -2097,6 +2099,7 @@ svsd_empty:
 svsd_status:
 	ldy #SST_STATUS_COL
 	jsr svs_copy                               ; Y = end column
+svsd_copied:
 	lda #SST_STATUS_COL : sta @ig_rc_col        ; Slice 2: capture the token span for recolor
 	tya : sta @ig_rc_end
 	lda @sst_scr_slot : dec
@@ -2105,7 +2108,7 @@ svsd_status:
 	sta @ig_rc_row                             ; save row for the recolor
 	tax
 	jsr ovl_flush_abs
-	jsr ig_recolor                             ; recolor the status token green/dim
+	jsr ig_recolor                             ; recolor the status token plain/dim
 	; WS-C: the COMMITTED slot's "SLOT n" label goes GREEN (mirrors sst_draw_slot_row).
 	lda @sst_scr_slot
 	cmp @sst_active
@@ -2118,6 +2121,40 @@ svsd_status:
 	jsr ig_recolor
 svsd_no_hl:
 	plp
+	rts
+
+; ---- the date of slot sst_scr_slot's save (SAVES_BLK, which the firmware stages with this
+;      tab's block: the menu language's date order, as the menu's saves screen shows it)
+;      into OVL_RB at SST_STATUS_COL.  Carry SET = no block (an older firmware).  .al/.xl
+;      in and out, DBR=$F4; Y = the end column. ----
+svs_date:
+	rep #$30 : .al : .xl
+	lda @SAVES_BLK                              ; 'S','V'
+	cmp #$5653
+	bne svd_none
+	lda @sst_scr_slot
+	and #$00ff
+	dec
+	asl : asl : asl : asl : asl                ; * SVB_ENTRY_SIZE (32)
+	clc : adc #!SAVES_BLK+SVB_ENTRY0+SVE_DATE
+	tax
+	ldy #SST_STATUS_COL
+	sep #$20 : .as
+svd_l:
+	lda @$ff0000, x
+	beq svd_done
+	sta OVL_RB, y                              ; abs,Y (DBR=$F4)
+	inx
+	iny
+	cpy #IG_HELP_MAXCOL
+	bne svd_l
+svd_done:
+	rep #$30 : .al : .xl
+	clc
+	rts
+svd_none:
+	.al : .xl
+	sec
 	rts
 
 ; ---- SAVES tab input (tab_input_tbl[2]). Only active when EnableSramSlots is on; the status

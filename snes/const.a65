@@ -195,7 +195,6 @@ last_win_w      .byt 60
 
 text_ellipse                      .byt 127, 128, 0
 text_empty                        .byt 0                 ; empty string -> draw_window draws no title
-text_mm_file                      .byt "File Browser", 0
 text_mm_last                      .byt "Recent Games", 0
 text_mm_favorites                 .byt "Favorite Games", 0
 mtext_mm_cfg                      .byt "Configuration", 0
@@ -518,10 +517,6 @@ mdesc_chip_gsu_speed              .byt "Set speed of SuperFX soft core", 0
 mdesc_chip_msu1_volume_boost      .byt "Set volume boost for MSU1 audio if your sd2snes is too quiet (Rev. E-G)", 0
 mdesc_a26_width                   .byt "Atari 2600 picture width: 160 is native 1:1, 256 fills the screen", 0
 mdesc_chip_cc_time_limit          .byt "Campus Challenge '92 / PowerFest '94 round timer", 0
-mdesc_cx4_speed_fast              .byt "Run as fast as possible", 0
-mdesc_cx4_speed_normal            .byt "Run at approx. original speed", 0
-mdesc_gsu_speed_fast              .byt "Run as fast as possible", 0
-mdesc_gsu_speed_normal            .byt "Run at approx. original speed", 0
 
 text_filesel_selected_file .byt "Selected file", 0
 text_filesel_context_add_to_favorites .byt "Add to favorites", 0
@@ -541,8 +536,20 @@ mdesc_filesel_set_as_bgm .byt "Use this SPC as the menu background music", 0
 text_filesel_context_delete_file .byt "Delete", 0
 mdesc_filesel_context_delete_file .byt "Delete the selected file", 0
 
-text_filesel_context_delete_srm .byt "Delete save file", 0
-mdesc_filesel_context_delete_srm .byt "Delete the SRM save file for this ROM", 0
+text_filesel_context_saves .byt "Saves", 0
+mdesc_filesel_context_saves .byt "Each slot's date. Pick, duplicate or delete", 0
+
+; the saves screen (snes/saves.a65); its rows are built from these and the firmware's dates
+text_saves_srm            .byt "Game saves", 0
+text_saves_state          .byt "Savestates", 0
+text_saves_slot           .byt "Slot", 0
+text_saves_date           .byt "Date", 0
+text_saves_size           .byt "Size", 0
+text_saves_keys           .byt "A:Options  B:Back", 0
+text_saves_empty          .byt "(empty)", 0
+text_saves_use            .byt "Use when starting", 0
+text_saves_copy           .byt "Duplicate to", 0
+text_saves_overwrite      .byt "Replace this save?", 0
 
 text_filesel_context_cheats .byt "Cheats", 0
 mdesc_filesel_context_cheats .byt "View, enable or disable cheats from this ROM's YAML file", 0
@@ -561,17 +568,13 @@ text_ce_name          .byt "Name", 0
 
 ; delete-confirmation dialog (see confirm_delete in filesel.a65)
 text_confirm_delete_file .byt "Delete this file?", 0
-text_confirm_delete_srm  .byt "Delete the save file?", 0
 text_confirm_hint        .byt "A:Confirm  B:Cancel", 0
 text_confirm_no_sel      .byt "[No]", 0
 text_confirm_no_unsel    .byt " No ", 0
 text_confirm_yes_sel     .byt "[Yes]", 0
 text_confirm_yes_unsel   .byt " Yes ", 0
 
-text_statusbar_play .byt "A:Play B:Back X:Menu", 0
 text_statusbar_keys .byt "A:Select B:Back X:Menu Y:Context", 0
-text_statusbar_spc  .byt "B:Back", 0
-text_statusbar_menu .byt "A:Select B:Back", 0
 text_last           .byt "Recent games", 0
 text_favorite       .byt "Favorite games", 0
 text_no_last        .byt "No recent games", 0
@@ -720,11 +723,7 @@ text_onbg_hint                    .byt "(A) Yes        (B) No", 0
 text_50Hz       .byt "50Hz", 0
 text_60Hz       .byt "60Hz", 0
 text_auto       .byt "Auto", 0
-text_pal        .byt "PAL", 0
-text_ntsc       .byt "NTSC", 0
 text_add        .byt "Add", 0
-text_remove     .byt "Remove", 0
-text_edit       .byt "Edit", 0
 text_save       .byt "Save", 0
 
 text_1min       .byt "1 min", 0
@@ -780,7 +779,6 @@ text_gbc_exact      .byt "Exact", 0
 
 text_spcplay    .byt "SPC Music Player", 0
 text_spcload    .byt "Loading SPC data to SPC700", 127, 128, 0
-text_spc_statusbar .byt "B:Back", 0
 
 ; The window of both players (spcview.a65, pcmplay.a65): seven rows inside it.
 spcstart_win_x  .byt 10
@@ -789,7 +787,6 @@ spcstart_win_w  .byt 44
 spcstart_win_h  .byt 10
 
 text_loading    .byt "Loading", 127, 128, "                        ",0
-text_saving     .byt "Saving", 127, 128, "                         ",0
 loading_win_x   .byt 2
 loading_win_y   .byt 28
 loading_win_w   .byt 34
@@ -866,16 +863,15 @@ text_gi_publisher .byt "Publisher", 0
 text_gi_year      .byt "Year", 0
 text_gi_players   .byt "Players", 0
 text_gi_genre     .byt "Genre", 0
-text_gi_chip      .byt "Chip", 0
-text_gi_footer    .byt "A: Play   B: Back   Y: Description   Sel: Cheats", 0
-text_gi_footer_nav .byt "A:Play B:Back Y:Desc Sel:Cheats ", 241, 242, ":Game", 0
+text_gi_footer    .byt "A: Play   B: Back   Y: Description   Sel: Cheats   R: Saves", 0
+text_gi_footer_nav .byt "A:Play B:Back Y:Desc Sel:Cheats R:Saves ", 241, 242, ":Game", 0
 text_gi_footer_full .byt "B: Back   Up/Down: Scroll", 0
 ; Footer variants shown when the game HAS a readable guide, i.e. when X opens the viewer
 ; (gi_man_avail in gameinfo.a65 is the single gate both these and the handler answer to).
 ; "Guides" tracks the in-game GUIDES tab label per language, not the document-type slug.
 ; Plus the key legend the guide PICKER puts on the same row while it owns the body.
-text_gi_footer_man .byt "A:Play B:Back Y:Desc X:Guides Sel:Cheats", 0
-text_gi_footer_nav_man .byt "A:Play B:Back Y:Desc X:Guides Sel:Cheats ", 241, 242, ":Game", 0
+text_gi_footer_man .byt "A:Play B:Back Y:Desc X:Guides Sel:Cheats R:Saves", 0
+text_gi_footer_nav_man .byt "A:Play B:Back Y:Desc X:Guides Sel:Cheats R:Saves ", 241, 242, ":Game", 0
 text_gi_footer_pick .byt "A: Open   B: Back", 0
 ; Document-type labels for the GUIDES picker on the game-info screen (X). Same five slugs
 ; as the in-game shell's text_igm_mn_slug_*, but build_const.py DROPS every text_igm_*

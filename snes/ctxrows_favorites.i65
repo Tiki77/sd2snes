@@ -73,14 +73,14 @@
  .byt  0,0,0
 
  .byt  MTYPE_FUNC_CLOSE
- .word !text_filesel_context_delete_srm
- .byt  ^text_filesel_context_delete_srm
- .word !delete_favorite_srm-1
- .byt  ^delete_favorite_srm-1
+ .word !text_filesel_context_saves
+ .byt  ^text_filesel_context_saves
+ .word !saves_ctx_fav-1
+ .byt  ^saves_ctx_fav-1
  .byt  0
  .byt  0,0,0
- .word !mdesc_filesel_context_delete_srm
- .byt  ^mdesc_filesel_context_delete_srm
+ .word !mdesc_filesel_context_saves
+ .byt  ^mdesc_filesel_context_saves
  .byt  0,0,0
  .byt  0,0,0
  .byt  0,0,0

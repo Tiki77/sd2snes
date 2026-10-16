@@ -329,12 +329,12 @@ static __attribute__((noinline)) int theme_font_locate(uint32_t *font_addr) {
     printf("theme: _GFXPTR_ not found in menu image\n");
     return 0;
   }
-  /* The font is in bank $C1 but gfxptr[SLOT_FONT] only carries the low word, so
-     add the bank byte from the _GFXPTR_ table -- that byte is also what tells a
-     menu with the ABI from an old one. Don't test gfxptr[SLOT_FONT] != 0 as a
-     guard: the font sits at offset 0, so zero is its real address (that test
-     used to skip the remap on every build). */
-  if(font_bank != 0xC0 && font_bank != 0xC1) return 0;
+  /* The font is in bank $C1 (the menu; $C2 in the tour, whose $C1 is full) but
+     gfxptr[SLOT_FONT] only carries the low word, so add the bank byte from the
+     _GFXPTR_ table -- that byte is also what tells a menu with the ABI from an old
+     one. Don't test gfxptr[SLOT_FONT] != 0 as a guard: the font sits at offset 0,
+     so zero is its real address (that test used to skip the remap on every build). */
+  if(font_bank < 0xC0 || font_bank > 0xC2) return 0;
   *font_addr = SRAM_MENU_ADDR
              + (((uint32_t)(font_bank - 0xC0)) << 16)
              + gfxptr[SLOT_FONT];

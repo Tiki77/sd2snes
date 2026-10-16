@@ -1,0 +1,1410 @@
+; ======================================================================
+;  The saves screen: one game's battery saves and savestates, slot by slot, with the
+;  date and size of each, the slot the game starts with in green.  A on a slot opens its
+;  actions: make it the slot the game starts with, duplicate it onto another slot of the
+;  same kind, delete it.  Opened from the "Saves..." row of the three context menus
+;  (browser, Recents, Favorites) and from R on the game info screen.
+;
+;  The firmware does the work (SNES_CMD_SAVES, src/menucmd.c + src/memory.c): every command
+;  republishes SAVES_BLK with the text of each slot already formatted -- the date in the
+;  menu language's order, the size -- and the menu only lays it out: a window of its own
+;  with a block per kind (a blue header naming the kind and the Date / Size columns, one row
+;  per slot, green on the slot the game starts with, like the in-game menu), the buttons'
+;  hint at the bottom, and a list loop of its own (sv_loop) whose bar skips the header,
+;  blank and hint lines.  The levels opened over it (actions, a copy's destinations, the
+;  confirm box) leave the ones below on screen, greyed.  The actions and the destinations of a copy
+;  are show_menu tables built here in WRAM (show_menu reads any bank).
+;
+;  show_menu runs its list through the shared window_* / listsel_* / menu_* variables, so
+;  every level that opens one (the screen over its caller, the actions over the screen,
+;  the destinations over the actions, a confirm box over the destinations) saves them in
+;  its own SV_SAVE slot and puts them back before returning to the level below.
+;
+;  Runs with DBR = 0 and DP = 0 (the menu's variables are reached by long addressing, or
+;  absolute through the low-RAM mirror; the pointers print_src and longptr through the
+;  direct page).  Bank $C1; the $C0 routines are reached through the ui_call_* / gi_call_*
+;  trampolines.
+; ======================================================================
+.link page $c1
+#include "memmap.i65"
+; memmap.i65 re-asserts '.link page $c0' on include; re-declare $c1 AFTER it (the last
+; '.link page' wins and they emit no bytes) so every byte lands in bank $C1.
+.link page $c1
+
+; WRAM scratch: $7E9000-$7E93FF, the unused end of the iris block (memmap.i65), which only
+; setup_gfx zeroes.  The screen is modal: nothing else runs while it is open.
+#define SV_LINES    $7E9000     ; 16 B: the window's lines: row index, or SVL_*
+#define SV_LINE     $7E9010     ; a header / legend line being composed (up to SV_LBLW)
+#define SV_NL       $7E9040     ; lines in SV_LINES
+#define SV_DCOL     $7E9041     ; column of the date
+#define SV_W        $7E9042     ; width of every line (the size column ends there)
+#define SVL_BLANK   $ff
+#define SVL_HSRM    $80         ; the battery saves' header
+#define SVL_HSTATE  $81         ; the savestates' header
+#define SVL_LEGEND  $82         ; the buttons' hint (text_saves_keys)
+#define SV_ACT      $7E90C0     ; a row's actions (up to 3)
+#define SV_DSTT     $7E9110     ; "duplicate to": the other three slots
+#define SV_LBL      $7E9160     ; the rows' text, SV_LBLW bytes each
+#define SV_LBLW     48
+#define SV_WHERE    $7E92E0     ; SVW_*: where the game is
+#define SV_KS       $7E92E1     ; the row acted on: kind << 4 | slot
+#define SV_DST      $7E92E2     ; a copy's destination slot
+#define SV_ROW      $7E92E3     ; the row acted on
+#define SV_N        $7E92E4     ; entries written into the table being built
+#define SV_PAD      $7E92E6     ; scratch byte
+#define SV_CROW     $7E92E7     ; the row whose text a confirm box shows
+#define SV_ROWMAP   $7E92E8     ; 8 B: row -> kind << 4 | slot
+#define SV_DSTMAP   $7E92F0     ; 4 B: destination row -> slot
+#define SV_PBAK     $7E92F4     ; 4 B: MCU_PARAM[0..3] across the screen (game info screen)
+#define SV_SAVE     $7E92F8     ; 4 levels x SV_SAVEW: the caller's window/list state
+#define SV_SAVEW    11
+#define SV_E        $7E9330     ; the entry being written, as it goes into a table (23 B)
+#define SV_T        $7E9348     ; scratch word
+#define SV_CNAME    $7E9350     ; the confirm box's "Slot N - <date>" (up to 40 B)
+
+; ======================================================================
+;  Entry points.  Any DBR/DP in, rtl out.
+;  The context menus' "Saves..." rows (MTYPE_FUNC_CLOSE): MCU_PARAM already holds the game,
+;  the browser selection or the Recents/Favorites index, as for the rows around them.
+; ======================================================================
+saves_ctx_browser:
+  php
+  sep #$20 : .as
+  lda #SVW_BROWSER
+  bra sv_ctx
+saves_ctx_recent:
+  php
+  sep #$20 : .as
+  lda #SVW_RECENT
+  bra sv_ctx
+saves_ctx_fav:
+  php
+  sep #$20 : .as
+  lda #SVW_FAV
+sv_ctx:
+  .as
+  phb
+  phd
+  sta @SV_WHERE
+  jsr sv_env
+  jsr saves_modal
+  pld
+  plb
+  plp
+  rtl
+
+; saves_modal: the screen over the browser area, dimmed like under a context menu (and
+; under the context menu's own leftovers).  .as/.xl, DBR = 0.
+saves_modal:
+  .as
+  jsr sfg_backdrop
+  jsl @ui_call_wpush
+  jsl @ui_call_greyout
+  jsr saves_screen
+  jsr sfg_backdrop                           ; the geometry the push saved, for its pop
+  jsl @ui_call_wclose
+  jmp sv_env
+
+; DBR = 0, DP = 0, .as/.xl
+sv_env:
+  sep #$20 : .as
+  rep #$10 : .xl
+  lda #$00
+  pha
+  plb
+  pea $0000
+  pld
+  rts
+
+; ----------------------------------------------------------------------
+;  R on the game info screen: the screen above for the game shown, over the browser the
+;  info screen is torn down to -- like cheathost_from_gi (manhost.a65), whose shape this
+;  follows: the browser comes back (gi_dc_restore), dims behind the screen like under a
+;  context menu, and the info screen is queried and rebuilt on the way back.  MCU_PARAM
+;  [0..3] is kept across (for Recents/Favorites its low byte IS the index the query needs).
+; ----------------------------------------------------------------------
+saves_from_gi:
+  php
+  phb
+  phd
+  jsr sv_env
+  ldx #$0003
+sfg_pbak:
+  lda @MCU_PARAM, x
+  sta @SV_PBAK, x
+  dex
+  bpl sfg_pbak
+  jsl @gi_call_dc_restore                    ; menu graphics back, screen_dma_disable = 0
+  jsr sv_env
+  jsr sfg_nmi                                ; the screen is drawn by the menu NMI's tile
+  lda #$02                                   ;   DMA (gi_dc_restore leaves it off)
+  sta @SFX_MAILBOX                          ; confirm blip, after the restore's cover burst
+  lda @gi_query_cmd
+  ldx #SVW_RECENT
+  cmp #CMD_GAME_INFO_RECENT
+  beq sfg_where
+  ldx #SVW_FAV
+  cmp #CMD_GAME_INFO_FAVORITE
+  beq sfg_where
+  jsl @gi_call_fill_param                    ; browser: MCU_PARAM = cwd + the selected entry
+  jsr sv_env
+  ldx #SVW_BROWSER
+sfg_where:
+  .as
+  txa
+  sta @SV_WHERE
+  jsr saves_modal
+  ldx #$0003
+sfg_prst:
+  lda @SV_PBAK, x
+  sta @MCU_PARAM, x
+  dex
+  bpl sfg_prst
+  jsl @gi_call_query
+  jsr sv_env
+  jsr sfg_nmi                                ; NMI on before gi_dc_show / gin_syncread
+  jsl @gi_call_dc_show
+  pld
+  plb
+  plp
+  rtl
+
+sfg_nmi:
+  .as
+  lda #$81
+  sta @$004200
+  lda #$00
+  sta @isr_done
+  rts
+
+; the browser area the context menus dim (filesel_contextmenu_file's window)
+sfg_backdrop:
+  sep #$20 : .as
+  rep #$10 : .xl
+  ldx #$0902                                 ; window_x = 2, window_y = 9
+  stx window_x
+  ldx #$123c                                 ; window_w = 60, window_h = 18
+  stx window_w
+  rts
+
+; ======================================================================
+;  saves_screen: ask the firmware, build the rows, run the list until B.  SV_WHERE set.
+;  DBR = 0, DP = 0, .as/.xl in and out.
+; ======================================================================
+saves_screen:
+  .as
+  ldx #$0000
+  jsr sv_state_save
+  jsl @ui_call_coversync                     ; a cover request in flight answers $55 too
+  jsl @ui_call_coveroff                      ; and the cover goes (back when the browser is)
+  jsr sv_env
+  lda #SVOP_INFO
+  jsr sv_cmd
+  lda @SAVES_BLK
+  cmp #$53                                  ; 'S': a firmware without this command just ACKs
+  bne ss_nofw
+  jsr sv_build
+  ldx #!text_filesel_context_saves           ; the title: the row that opened the screen
+  stx window_taddr
+  lda #^text_filesel_context_saves
+  sta window_tbank
+  jsl @ui_call_wopen
+  jsr sv_env
+  jsr sv_draw
+  stz pat_top                                ; the mouse's list position (mouse_listmode_pat)
+  lda #$02                                   ; the first slot row (after the pad and header)
+  sta listsel_sel
+  jsr sv_bar
+  jsr sv_loop
+  lda #$ff                                   ; the bar goes with the list: the info screen is
+  sta bar_xl                                 ;   rebuilt after this with the NMI on, and the
+  sta bar_yl                                 ;   bar showed over it for a few frames
+  sta bar_wl
+  jsl @ui_call_wclose
+  jsr sv_env
+  bra ss_out
+ss_nofw:
+  .as
+  lda #$04
+  sta @SFX_MAILBOX                          ; error blip
+ss_out:
+  .as
+  ldx #$0000
+  jmp sv_state_load
+
+; ----------------------------------------------------------------------
+;  sv_loop: the list until B.  Up/Down step over the lines that are not slots, A opens the
+;  slot's actions.  A mouse target on such a line is dropped, or the bar would bounce
+;  around it.  .as/.xl, DBR = 0.
+; ----------------------------------------------------------------------
+sv_loop:
+  .as
+  lda isr_done
+  beq sv_loop
+  stz isr_done
+  lda mouse_lpend
+  beq svl_pad
+  lda mouse_ltgt
+  sec
+  sbc window_y
+  dec                                        ; the target's line
+  jsr sv_line_type
+  bpl svl_pad
+  stz mouse_lpend
+svl_pad:
+  .as
+  jsl @mouse_listmode_pat
+  jsl @ui_call_pad
+  jsr sv_env
+  lda pad_up
+  beq svl_nup
+  lda #$ff
+  bra svl_move
+svl_nup:
+  .as
+  lda pad_down
+  beq svl_ndn
+  lda #$01
+  bra svl_move
+svl_ndn:
+  .as
+  lda pad_b
+  bne svl_out
+  lda pad_a
+  beq sv_loop
+  lda #$02
+  sta @SFX_MAILBOX                          ; confirm blip
+  jsr saves_row
+  bra sv_loop
+svl_move:
+  .as
+  jsr sv_move
+  bra sv_loop
+svl_out:
+  .as
+  lda #$03
+  sta @SFX_MAILBOX                          ; back blip
+  rts
+
+; sv_line_type: A = SV_LINES[A], N set when that is not a slot (or past the last line).
+sv_line_type:
+  .as
+  cmp @SV_NL
+  bcs slt_none
+  rep #$20 : .al
+  and #$00ff                                ; 16-bit AND before TAX (hidden high byte)
+  tax
+  sep #$20 : .as
+  lda @SV_LINES, x
+  rts
+slt_none:
+  .as
+  lda #SVL_BLANK
+  rts
+
+; sv_move: the bar to the next slot line in direction A (1 or $ff), if there is one.
+sv_move:
+  .as
+  sta @SV_PAD
+  lda listsel_sel
+svm_loop:
+  .as
+  clc
+  adc @SV_PAD
+  cmp @SV_NL
+  bcs svm_none                               ; past either end (0 - 1 = $ff too)
+  pha
+  jsr sv_line_type
+  bmi svm_skip
+  pla
+  sta listsel_sel
+  lda #$01
+  sta @SFX_MAILBOX                          ; cursor blip
+  bra sv_bar
+svm_skip:
+  .as
+  pla
+  bra svm_loop
+svm_none:
+  .as
+  rts
+
+; sv_bar: the selection bar on line listsel_sel (show_menu's own geometry: text row =
+; bar_yl + 1 = window_y + 1 + line).
+sv_bar:
+  .as
+  lda window_x
+  inc
+  inc
+  sta bar_xl
+  lda window_w
+  sec
+  sbc #$04
+  sta bar_wl
+  lda window_y
+  clc
+  adc listsel_sel
+  sta bar_yl
+  rts
+
+; sv_draw: every line of the window.  Rows print their text from SV_LBL; the headers and
+; the legend are composed into SV_LINE.  .as/.xl.
+sv_draw:
+  .as
+  stz print_x+1
+  stz print_y+1
+  stz print_count+1
+  lda #$00
+svd_loop:
+  .as
+  cmp @SV_NL
+  bcs svd_done
+  pha
+  sec                                        ; text row = window_y + 1 + line
+  adc window_y
+  sta print_y
+  lda window_x
+  inc
+  inc
+  sta print_x
+  lda @SV_W
+  sta print_count
+  pla
+  pha
+  jsr sv_line_type
+  cmp #SVL_BLANK
+  beq svd_next
+  cmp #SVL_HSRM
+  bcs svd_comp
+  pha                                        ; a slot: its row text, green on the
+  rep #$20 : .al                             ;   slot the game starts with
+  and #$00ff
+  tax
+  sep #$20 : .as
+  lda @SV_ROWMAP, x
+  sta @SV_KS
+  jsr sv_is_sel
+  pla
+  php
+  jsr sv_lbl_addr
+  plp
+  lda #$00
+  bcc svd_print
+  lda #$02
+  bra svd_print
+svd_comp:
+  .as
+  jsr sv_compose
+svd_print:
+  .as
+  sta print_pal
+  stx print_src
+  lda #$7e
+  sta print_bank
+  jsl @gi_call_hiprint
+  jsr sv_env
+  pla
+  pha
+  jsr sv_line_type
+  cmp #SVL_LEGEND
+  bne svd_next
+  jsl @hint_keys                             ; the keys in green
+svd_next:
+  .as
+  pla
+  inc
+  bra svd_loop
+svd_done:
+  .as
+  rts
+
+; sv_compose: header / legend line A into SV_LINE.  X = SV_LINE, A = its palette.
+sv_compose:
+  .as
+  ldx #!SV_LINE
+  jsr sv_mark
+  cmp #SVL_LEGEND
+  beq svc_legend
+  ldy #!text_saves_srm
+  cmp #SVL_HSRM
+  beq svc_kind
+  ldy #!text_saves_state
+  lda #^text_saves_state
+  bra svc_kword
+svc_kind:
+  .as
+  lda #^text_saves_srm
+svc_kword:
+  .as
+  jsr sv_cps
+  lda @SV_DCOL
+  jsr sv_padto
+  ldy #!text_saves_date
+  lda #^text_saves_date
+  jsr sv_cps
+  ldy #!text_saves_size
+  lda #^text_saves_size
+  phx
+  tyx
+  jsr sv_resolve
+  jsr sv_strlen
+  plx
+  jsr sv_right
+  jsr sv_copy
+  lda #$03                                   ; palette 3: the window border's blue
+  bra svc_end
+svc_legend:
+  .as
+  ldy #!text_saves_keys
+  lda #^text_saves_keys
+  jsr sv_cps
+  lda #$00
+svc_end:
+  .as
+  pha
+  lda @SV_W
+  jsr sv_padto
+  lda #$00
+  sta @$7E0000, x
+  ldx #!SV_LINE
+  pla
+  rts
+
+; sv_slotname: "Slot N" (the slot in SV_KS) to $7E:X.
+sv_slotname:
+  .as
+  ldy #!text_saves_slot
+  lda #^text_saves_slot
+  jsr sv_cps
+  lda #$20
+  jsr sv_putc
+  lda @SV_KS
+  and #$03
+  clc
+  adc #$31                                  ; '1' + slot
+  jmp sv_putc
+
+; sv_mark: the line being composed starts at $7E:X (SV_T, for sv_padto).  Keeps A.
+sv_mark:
+  .as
+  pha
+  rep #$20 : .al
+  txa
+  sta @SV_T
+  sep #$20 : .as
+  pla
+  rts
+
+; sv_cps: the string Y/A (addr/bank, resolved for the language) to $7E:X.  X past it.
+sv_cps:
+  .as
+  phx
+  tyx
+  jsr sv_resolve
+  plx
+  jmp sv_copy
+
+; sv_right: pad $7E:X (the line from SV_T) so a field of A columns ends at SV_W.
+sv_right:
+  .as
+  eor #$ff
+  sec
+  adc @SV_W                                 ; SV_W - A
+  ; fall through
+; sv_padto: spaces to $7E:X until the line (from SV_T) is A columns wide.  .as/.xl.
+sv_padto:
+  .as
+  sta @SV_PAD
+spt_loop:
+  .as
+  rep #$20 : .al
+  txa
+  sec
+  sbc @SV_T
+  sep #$20 : .as
+  cmp @SV_PAD
+  bcs spt_out
+  lda #$20
+  jsr sv_putc
+  bra spt_loop
+spt_out:
+  .as
+  rts
+
+; ----------------------------------------------------------------------
+;  sv_show: run show_menu on the WRAM table at X ($7E:X).  .as/.xl in and out.
+; ----------------------------------------------------------------------
+sv_show:
+  .as
+  lda #$7e
+  pha
+  plb
+  jsl @ui_call_show_menu
+  jmp sv_env
+
+; ----------------------------------------------------------------------
+;  sv_cmd: SNES_CMD_SAVES with A = SVOP_*, SV_WHERE / SV_KS / SV_DST, and wait for the
+;  firmware's ready ($55 back in SNES_CMD: the echo of the command comes first, before the
+;  handler runs).  The magic is zeroed first, so a firmware without the command (which
+;  ACKs it) leaves no block behind.  .as/.xl.
+; ----------------------------------------------------------------------
+sv_cmd:
+  .as
+  sta @MCU_PARAM+9
+  lda @SV_WHERE
+  sta @MCU_PARAM+8
+  lda @SV_KS
+  sta @MCU_PARAM+10
+  lda @SV_DST
+  sta @MCU_PARAM+11
+  lda #$00
+  sta @SAVES_BLK
+  sta @SNES_CMD
+  lda #CMD_SAVES
+  sta @MCU_CMD
+svc_wait:
+  .as
+  lda @SNES_CMD
+  cmp #$55
+  beq svc_done
+  cmp #$aa
+  bne svc_wait
+svc_done:
+  .as
+  lda #$00
+  sta @MCU_CMD
+  rts
+
+; sv_act: the action A, then the blip that answers it: confirm, or error when the firmware
+; says it failed.  .as/.xl.
+sv_act:
+  .as
+  jsr sv_cmd
+  lda @SAVES_BLK+SVB_RESULT
+  beq sva_ok
+  lda #$02                                   ; error = confirm + 2
+sva_ok:
+  .as
+  clc
+  adc #$02
+  sta @SFX_MAILBOX
+  rts
+
+; ----------------------------------------------------------------------
+;  sv_state_save / sv_state_load: the window and list variables show_menu drives, in
+;  SV_SAVE + X: window_x/y/w/h, listsel_sel/step/max/pickbutton, menu_top/vis/
+;  scroll_active (three runs of adjacent bytes in data.a65).  .as/.xl, DBR = 0 out.
+; ----------------------------------------------------------------------
+sv_state_save:
+  .as
+  rep #$20 : .al
+  txa
+  clc
+  adc #!SV_SAVE
+  tay
+  ldx #!window_x
+  lda #$0003
+  mvn $7e, $7e
+  ldx #!listsel_sel
+  lda #$0003
+  mvn $7e, $7e
+  ldx #!menu_top
+  lda #$0002
+  mvn $7e, $7e
+  jmp sv_env
+
+sv_state_load:
+  .as
+  rep #$20 : .al
+  txa
+  clc
+  adc #!SV_SAVE
+  tax
+  ldy #!window_x
+  lda #$0003
+  mvn $7e, $7e
+  ldy #!listsel_sel
+  lda #$0003
+  mvn $7e, $7e
+  ldy #!menu_top
+  lda #$0002
+  mvn $7e, $7e
+  jmp sv_env
+
+; ----------------------------------------------------------------------
+;  A nested list over the current one: the current state in SV_SAVE level X, two columns
+;  right and one row down like a submenu, the table at Y ($7E:Y).  .as/.xl.
+; ----------------------------------------------------------------------
+sv_nested:
+  .as
+  phx
+  phy
+  jsr sv_state_save
+  lda @window_x
+  clc
+  adc #$02
+  sta @window_x
+  lda @window_y
+  inc
+  sta @window_y
+  plx
+  jsr sv_show
+  plx
+  jmp sv_state_load
+
+; ======================================================================
+;  Building the tables.
+; ======================================================================
+
+; sv_build: the lines, the row texts and the window geometry from SAVES_BLK.  .as/.xl.
+;   line 0 pad, the battery saves' header, their rows (4, or 1 with slots off); when the
+;   game has savestates a blank, their header and rows; a blank and the buttons' hint.
+sv_build:
+  .as
+  jsr sv_geom
+  lda #$00
+  sta @SV_N
+  sta @SV_NL
+  sta @SV_KS
+  lda #SVL_BLANK
+  jsr sv_line
+  lda #SVL_HSRM
+  jsr sv_line
+svb_srm:
+  .as
+  jsr sv_add_row
+  lda #SVF_SRM_SLOTS
+  jsr svb_more
+  bcc svb_srm
+  lda @SAVES_BLK+SVB_FLAGS
+  and #SVF_STATES
+  beq svb_legend
+  lda #SVL_BLANK
+  jsr sv_line
+  lda #SVL_HSTATE
+  jsr sv_line
+  lda #$10
+  sta @SV_KS
+svb_st:
+  .as
+  jsr sv_add_row
+  lda #SVF_SS_SLOTS
+  jsr svb_more
+  bcc svb_st
+svb_legend:
+  .as
+  lda #SVL_BLANK
+  jsr sv_line
+  lda #SVL_LEGEND
+  jsr sv_line
+svb_geo:
+  .as
+  ; w = SV_W + 4, centred; h = lines + 3, centred in text rows 9..25
+  lda @SV_W
+  clc
+  adc #$04
+  sta window_w
+  lda #60
+  sec
+  sbc @SV_W
+  lsr
+  sta window_x
+  lda @SV_NL
+  clc
+  adc #$03
+  sta window_h
+  eor #$ff
+  sec
+  adc #17                                   ; 17 - h
+  lsr
+  clc
+  adc #$09
+  sta window_y
+  rts
+
+; svb_more: carry CLEAR when the kind has its slots on (flag A) and SV_KS is not its last
+; slot -- then SV_KS is the next one.
+svb_more:
+  .as
+  and @SAVES_BLK+SVB_FLAGS
+  beq svbm_no
+  lda @SV_KS
+  inc
+  sta @SV_KS
+  and #$03
+  beq svbm_no                               ; slot 4 done (the increment wrapped to 0)
+  clc
+  rts
+svbm_no:
+  .as
+  sec
+  rts
+
+; sv_line: line type A at the end of SV_LINES.
+sv_line:
+  .as
+  pha
+  rep #$20 : .al
+  lda @SV_NL
+  and #$00ff
+  tax
+  sep #$20 : .as
+  pla
+  sta @SV_LINES, x
+  lda @SV_NL
+  inc
+  sta @SV_NL
+  rts
+
+; sv_geom: the columns from the words of the menu language.  The kind headers and the
+; "* Slot N" of a row share the first column; the date starts four after the wider of them;
+; the size (at least "9999 KB") ends the line.
+sv_geom:
+  .as
+  ldy #!text_saves_srm
+  lda #^text_saves_srm
+  jsr svg_len
+  sta @SV_DCOL
+  ldy #!text_saves_state
+  lda #^text_saves_state
+  jsr svg_len
+  jsr svg_max
+  ldy #!text_saves_slot
+  lda #^text_saves_slot
+  jsr svg_len
+  clc
+  adc #$04                                   ; "  " + the word + " N"
+  jsr svg_max
+  lda @SV_DCOL
+  clc
+  adc #$04
+  sta @SV_DCOL
+  ldy #!text_saves_size
+  lda #^text_saves_size
+  jsr svg_len
+  cmp #$07
+  bcs svg_sw
+  lda #$07
+svg_sw:
+  .as
+  clc
+  adc @SV_DCOL
+  adc #20                                   ; the date (16) and four spaces
+  sta @SV_W
+  rts
+svg_max:
+  .as
+  cmp @SV_DCOL
+  bcc svgm_out
+  sta @SV_DCOL
+svgm_out:
+  .as
+  rts
+; A = width of the string Y/A (addr/bank)
+svg_len:
+  .as
+  tyx
+  jsr sv_resolve
+  jmp sv_strlen
+
+; sv_head: the table at $7E:Y starts (listsel_step 1, title X/A addr/bank); SV_N = 0 and
+; SV_E cleared for its entries.  .as/.xl.
+sv_head:
+  .as
+  phx
+  tyx
+  sta @$7E0003, x
+  rep #$20 : .al
+  pla
+  sta @$7E0001, x
+  sep #$20 : .as
+  lda #$01
+  sta @$7E0000, x
+  lda #$00
+  sta @SV_N
+  ldx #MENU_ENTRY_SIZE-1
+shd_clr:
+  .as
+  sta @SV_E, x
+  dex
+  bpl shd_clr
+  rts
+
+; sv_add_row: row SV_N, the slot in SV_KS: its text in SV_LBL, its line in SV_LINES.
+; "  Slot N", the date at SV_DCOL (or "(empty)"), the size ending at SV_W, every row as
+; wide as SV_W: the row is reprinted over its old text, and a slot that loses its save
+; would otherwise keep the tail of its date.  .as/.xl.
+sv_add_row:
+  .as
+  lda @SV_N
+  jsr sv_line
+  rep #$20 : .al
+  lda @SV_N
+  and #$00ff
+  tax
+  sep #$20 : .as
+  lda @SV_KS
+  sta @SV_ROWMAP, x
+  lda @SV_N
+  jsr sv_lbl_addr                           ; X = the row's text
+  jsr sv_mark
+  lda #$20
+  jsr sv_putc
+  jsr sv_putc
+  jsr sv_slotname
+  lda @SV_DCOL
+  jsr sv_padto
+  jsr sv_entry_ptr                           ; longptr = the slot's SAVES_BLK entry, A = flags
+  and #$01
+  beq sar_empty
+  ldy #SVE_DATE
+  jsr sv_copy_lp
+  ldy #SVE_SIZE                              ; the size, ending at SV_W
+sar_slen:
+  .as
+  lda [longptr], y
+  beq sar_sright
+  iny
+  bra sar_slen
+sar_sright:
+  .as
+  tya
+  sec
+  sbc #SVE_SIZE
+  jsr sv_right
+  ldy #SVE_SIZE
+  jsr sv_copy_lp
+  bra sar_eol
+sar_empty:
+  .as
+  ldy #!text_saves_empty
+  lda #^text_saves_empty
+  jsr sv_cps
+sar_eol:
+  .as
+  lda @SV_W
+  jsr sv_padto
+  lda #$00
+  sta @$7E0000, x
+  lda @SV_N
+  inc
+  sta @SV_N
+  rts
+
+; one character to $7E:X, X past it.  .as.
+sv_putc:
+  .as
+  sta @$7E0000, x
+  inx
+  rts
+
+; [longptr] from Y up to its NUL to $7E:X.  .as/.xl.
+sv_copy_lp:
+  .as
+  lda [longptr], y
+  beq scl_end
+  jsr sv_putc
+  iny
+  bra sv_copy_lp
+scl_end:
+  .as
+  rts
+
+; sv_is_sel: carry SET when the slot in SV_KS is the one the game starts with (its kind
+; having slots at all).  .as.
+sv_is_sel:
+  .as
+  lda @SV_KS
+  and #$10
+  bne sis_state
+  lda @SAVES_BLK+SVB_FLAGS
+  and #SVF_SRM_SLOTS
+  beq sis_no
+  lda @SAVES_BLK+SVB_SRM_SEL
+  bra sis_cmp
+sis_state:
+  .as
+  lda @SAVES_BLK+SVB_FLAGS
+  and #SVF_SS_SLOTS
+  beq sis_no
+  lda @SAVES_BLK+SVB_SS_SEL
+sis_cmp:
+  .as
+  sta @SV_PAD
+  lda @SV_KS
+  and #$03
+  cmp @SV_PAD
+  beq sis_yes
+sis_no:
+  .as
+  clc
+  rts
+sis_yes:
+  .as
+  sec
+  rts
+
+; sv_entry_ptr: longptr = SAVES_BLK entry of the slot in SV_KS, A = its flags (bit0 = the
+; file exists).  .as/.xl, keeps X.
+sv_entry_ptr:
+  .as
+  lda @SV_KS
+  and #$10
+  lsr
+  lsr                                       ; kind * 4
+  sta @SV_PAD
+  lda @SV_KS
+  and #$03
+  clc
+  adc @SV_PAD                               ; entry index 0..7
+  rep #$20 : .al
+  and #$00ff
+  asl
+  asl
+  asl
+  asl
+  asl                                       ; * SVB_ENTRY_SIZE (32)
+  clc
+  adc #!SAVES_BLK+SVB_ENTRY0
+  sta longptr
+  sep #$20 : .as
+  lda #^SAVES_BLK
+  sta longptr+2
+  lda [longptr]
+  rts
+
+; sv_lbl_addr: X = the text of row A (SV_LBL + A * SV_LBLW, bank $7E).  .as/.xl.
+sv_lbl_addr:
+  .as
+  rep #$20 : .al
+  and #$00ff
+  sta @SV_T
+  asl
+  clc
+  adc @SV_T                                 ; * 3
+  asl
+  asl
+  asl
+  asl                                       ; * 48
+  clc
+  adc #!SV_LBL
+  tax
+  sep #$20 : .as
+  rts
+
+; sv_resolve: the string X/A (addr/bank, a language table or a plain string) resolved into
+; print_src / print_bank.  .as/.xl.
+sv_resolve:
+  .as
+  sta print_bank
+  stx print_src
+  jsl @ui_call_resolve
+  jmp sv_env
+
+; sv_strlen: A = length of [print_src] (< 256).  .as/.xl.
+sv_strlen:
+  .as
+  ldy #$0000
+sl_loop:
+  .as
+  lda [print_src], y
+  beq sl_end
+  iny
+  bra sl_loop
+sl_end:
+  .as
+  tya
+  rts
+
+; sv_copy: [print_src] to $7E:X up to its NUL (not copied); X past it, A = bytes.  .as/.xl.
+sv_copy:
+  .as
+  ldy #$0000
+sc_loop:
+  .as
+  lda [print_src], y
+  beq sl_end
+  jsr sv_putc
+  iny
+  bra sc_loop
+
+; sv_put: SV_E as entry SV_N of the table at $7E:X, SV_N + 1.  .as/.xl.
+sv_put:
+  .as
+  lda @SV_N
+  jsr sv_entry_at
+  txy
+  ldx #!SV_E
+  rep #$20 : .al
+  lda #MENU_ENTRY_SIZE-1
+  mvn $7e, $7e
+  sep #$20 : .as
+  lda @SV_N
+  inc
+  sta @SV_N
+  jmp sv_env
+
+; sv_end: the end marker after the SV_N entries of the table at $7E:X.  .as/.xl.
+sv_end:
+  .as
+  lda @SV_N
+  jsr sv_entry_at
+  lda #$00
+  sta @$7E0000, x
+  rts
+
+; sv_entry_at: X = $7E address of entry A of the table at $7E:X (header 4 + A * 23).
+sv_entry_at:
+  .as
+  inx
+  inx
+  inx
+  inx
+  sta @SV_PAD
+sea_loop:
+  .as
+  lda @SV_PAD
+  beq sea_done
+  rep #$20 : .al
+  txa
+  clc
+  adc #MENU_ENTRY_SIZE
+  tax
+  sep #$20 : .as
+  lda @SV_PAD
+  dec
+  sta @SV_PAD
+  bra sea_loop
+sea_done:
+  .as
+  rts
+
+; ======================================================================
+;  A on a slot (sv_loop): the slot's actions, a show_menu next to the row, titled with the
+;  slot.  Back from the actions, the rows are rebuilt from the block the firmware
+;  republished and reprinted.  .as/.xl, DBR = 0.
+;    Start the game with this slot -- when its kind has slots
+;    Duplicate to...               -- when the file exists and its kind has slots
+;    Delete                        -- when the file exists
+; ======================================================================
+saves_row:
+  .as
+  lda listsel_sel
+  jsr sv_line_type                           ; the line's row
+  sta @SV_ROW
+  rep #$20 : .al
+  and #$00ff
+  tax
+  sep #$20 : .as
+  lda @SV_ROWMAP, x
+  sta @SV_KS
+  ldx #!SV_LINE                              ; the title: "Slot N"
+  jsr sv_mark
+  jsr sv_slotname
+  lda #$00
+  sta @$7E0000, x
+  ldx #!SV_LINE
+  lda #$7e
+  ldy #!SV_ACT
+  jsr sv_head
+  lda #MTYPE_FUNC_CLOSE
+  sta @SV_E
+  jsr sv_kind_slots
+  beq sr_copy
+  ldx #!text_saves_use
+  lda #^text_saves_use
+  ldy #!saves_act_use-1
+  jsr sr_add
+sr_copy:
+  .as
+  jsr sv_entry_ptr
+  and #$01
+  beq sr_done
+  jsr sv_kind_slots
+  beq sr_del
+  ldx #!text_saves_copy
+  lda #^text_saves_copy
+  ldy #!saves_act_copy-1
+  jsr sr_add
+sr_del:
+  .as
+  ldx #!text_filesel_context_delete_file
+  lda #^text_filesel_context_delete_file
+  ldy #!saves_act_del-1
+  jsr sr_add
+sr_done:
+  .as
+  ldx #!SV_ACT
+  jsr sv_end
+  lda @SV_N
+  beq sr_none
+  jsl @ui_call_wpush                         ; the list stays, greyed, under the actions
+  jsl @ui_call_greyout
+  jsr sv_env
+  lda window_y                               ; next to the row, the copy's list (one more
+  pha                                        ;   row down, 5 high) above the status bar
+  sec                                        ; (+1: below the row, which stays in sight)
+  adc listsel_sel
+  cmp #20
+  bcc sr_y
+  lda #19
+sr_y:
+  .as
+  sta window_y
+  ldx #SV_SAVEW
+  ldy #!SV_ACT
+  jsr sv_nested
+  pla
+  sta window_y
+  jsl @ui_call_wclose
+  jsr sv_env
+  jsr sv_build                               ; what the action changed
+  jsr sv_draw
+  jmp sv_bar
+sr_none:
+  .as
+  lda #$04
+  sta @SFX_MAILBOX                          ; nothing to do on this slot
+  rts
+
+; one action: label X/A, function Y (its address - 1; all of them sit in this bank)
+sr_add:
+  .as
+  sta @SV_E+3
+  rep #$20 : .al
+  txa
+  sta @SV_E+1
+  tya
+  sta @SV_E+4
+  sep #$20 : .as
+  lda #^saves_act_use
+  sta @SV_E+6
+  ldx #!SV_ACT
+  jmp sv_put
+
+; sv_kind_slots: A (Z clear) = nonzero when the kind in SV_KS has slots 2..4.  .as.
+sv_kind_slots:
+  .as
+  lda @SV_KS
+  and #$10
+  beq sks_srm
+  lda #SVF_SS_SLOTS
+  bra sks_test
+sks_srm:
+  .as
+  lda #SVF_SRM_SLOTS
+sks_test:
+  .as
+  and @SAVES_BLK+SVB_FLAGS
+  rts
+
+; ----------------------------------------------------------------------
+;  The actions (MTYPE_FUNC_CLOSE of SV_ACT).  Called by show_menu, rtl out.
+; ----------------------------------------------------------------------
+saves_act_use:
+  php
+  phb
+  phd
+  jsr sv_env
+  lda #SVOP_USE
+  jsr sv_act
+  pld
+  plb
+  plp
+  rtl
+
+saves_act_del:
+  php
+  phb
+  phd
+  jsr sv_env
+  lda @SV_ROW
+  sta @SV_CROW
+  ldx #!text_confirm_delete_file
+  lda #^text_confirm_delete_file
+  jsr sv_confirm
+  bcc sad_out
+  lda #SVOP_DELETE
+  jsr sv_act
+sad_out:
+  .as
+  pld
+  plb
+  plp
+  rtl
+
+; saves_act_copy: the other slots of the same kind; the destination's own row does the copy.
+saves_act_copy:
+  php
+  phb
+  phd
+  jsr sv_env
+  ldx #!text_saves_copy
+  lda #^text_saves_copy
+  ldy #!SV_DSTT
+  jsr sv_head
+  lda #MTYPE_FUNC_CLOSE
+  sta @SV_E
+  rep #$20 : .al
+  lda #!saves_copy_pick-1
+  sta @SV_E+4
+  sep #$20 : .as
+  lda #^saves_copy_pick
+  sta @SV_E+6
+  lda #$7e
+  sta @SV_E+3
+  lda #$00
+  sta @SV_DST
+sac_loop:
+  .as
+  lda @SV_KS
+  and #$03
+  cmp @SV_DST
+  beq sac_next                              ; not onto itself
+  rep #$20 : .al
+  lda @SV_N
+  and #$00ff
+  tax
+  sep #$20 : .as
+  lda @SV_DST
+  sta @SV_DSTMAP, x
+  jsr sv_row_of                             ; A = the destination's row
+  jsr sv_lbl_addr
+  rep #$20 : .al
+  txa
+  sta @SV_E+1
+  sep #$20 : .as
+  ldx #!SV_DSTT
+  jsr sv_put
+sac_next:
+  .as
+  lda @SV_DST
+  inc
+  sta @SV_DST
+  cmp #$04
+  bcc sac_loop
+  ldx #!SV_DSTT
+  jsr sv_end
+  ldx #SV_SAVEW*2
+  ldy #!SV_DSTT
+  jsr sv_nested
+  pld
+  plb
+  plp
+  rtl
+
+; the row of slot SV_DST of the kind in SV_KS: the battery saves come first (4 rows when
+; their slots are on, else 1), then the savestates.  .as.
+sv_row_of:
+  .as
+  lda @SV_KS
+  and #$10
+  beq sro_srm
+  lda @SAVES_BLK+SVB_FLAGS
+  and #SVF_SRM_SLOTS
+  beq sro_one
+  lda #$04
+  bra sro_add
+sro_one:
+  .as
+  lda #$01
+sro_add:
+  .as
+  clc
+  adc @SV_DST
+  rts
+sro_srm:
+  .as
+  lda @SV_DST
+  rts
+
+; A on a destination (MTYPE_FUNC_CLOSE of SV_DSTT): confirm over a save, then copy.
+saves_copy_pick:
+  php
+  phb
+  phd
+  jsr sv_env
+  rep #$20 : .al
+  lda @listsel_sel
+  and #$00ff
+  tax
+  sep #$20 : .as
+  lda @SV_DSTMAP, x
+  sta @SV_DST
+  ; is there a save in the destination?  (SV_KS points at it for a moment)
+  lda @SV_KS
+  pha
+  and #$10
+  ora @SV_DST
+  sta @SV_KS
+  jsr sv_entry_ptr
+  sta @SV_PAD
+  pla
+  sta @SV_KS
+  lda @SV_PAD
+  and #$01
+  beq scp_go
+  jsr sv_row_of
+  sta @SV_CROW
+  ldx #!text_saves_overwrite
+  lda #^text_saves_overwrite
+  jsr sv_confirm
+  bcc scp_out
+scp_go:
+  .as
+  lda #SVOP_COPY
+  jsr sv_act
+scp_out:
+  .as
+  pld
+  plb
+  plp
+  rtl
+
+; sv_confirm: the yes/no box (confirm_delete, "No" first) with the prompt X/A and, under
+; it, "Slot N - <date>" of row SV_CROW (its save exists: a delete or an overwrite) -- the
+; row's own text is padded to the list's width and the box centres what it is given.
+; Carry SET = yes.  The box draws its own window through window_*, so the list under it
+; gets its state back afterwards.  .as/.xl.
+sv_confirm:
+  .as
+  sta @confirm_prompt_bank
+  rep #$20 : .al
+  txa
+  sta @confirm_prompt_addr
+  lda @SV_CROW
+  and #$00ff
+  tax
+  sep #$20 : .as
+  lda @SV_KS
+  pha
+  lda @SV_ROWMAP, x
+  sta @SV_KS
+  ldx #!SV_CNAME
+  jsr sv_slotname
+  lda #$20
+  jsr sv_putc
+  lda #$2d                                   ; '-'
+  jsr sv_putc
+  lda #$20
+  jsr sv_putc
+  jsr sv_entry_ptr
+  ldy #SVE_DATE
+  jsr sv_copy_lp
+  lda #$00
+  sta @$7E0000, x
+  pla
+  sta @SV_KS
+  ldx #!SV_CNAME
+  stx confirm_name_addr
+  lda #$7e
+  sta @confirm_name_bank
+  ldx #SV_SAVEW*3
+  jsr sv_state_save
+  jsl @ui_call_confirm
+  php
+  jsr sv_env
+  ldx #SV_SAVEW*3
+  jsr sv_state_load
+  plp
+  rts

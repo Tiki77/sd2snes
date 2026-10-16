@@ -1,5 +1,5 @@
 // ctxrows_file.i65 -- entry rows of the BROWSER file context menu (Y on a .sfc/.nes).
-// 5 entries: Add to favorites / Cheats / Set as autoboot / Delete / Delete save file.
+// 5 entries: Add to favorites / Cheats / Set as autoboot / Delete / Saves...
 //
 // Shared by the plain table in snes/menudata.a65 (bank $C0) and by the
 // ShowGameInfo == 2 variant in snes/contextdata.a65 (bank $C1), which prepends the
@@ -72,14 +72,14 @@
  .byt  0,0,0
 
  .byt  MTYPE_FUNC_CLOSE
- .word !text_filesel_context_delete_srm
- .byt  ^text_filesel_context_delete_srm
- .word !delete_selected_srm-1
- .byt  ^delete_selected_srm-1
+ .word !text_filesel_context_saves
+ .byt  ^text_filesel_context_saves
+ .word !saves_ctx_browser-1
+ .byt  ^saves_ctx_browser-1
  .byt  0
  .byt  0,0,0
- .word !mdesc_filesel_context_delete_srm
- .byt  ^mdesc_filesel_context_delete_srm
+ .word !mdesc_filesel_context_saves
+ .byt  ^mdesc_filesel_context_saves
  .byt  0,0,0
  .byt  0,0,0
  .byt  0,0,0

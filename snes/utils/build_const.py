@@ -457,7 +457,7 @@ def main():
     #   text_gi_year/genre/players  the game-info metadata row: 5/7/10-column fields
     WIDTH_LIMITS = (("text_gi_year", 5), ("text_gi_genre", 7), ("text_gi_players", 10),
                     ("text_statusbar_keys", 41), ("text_si_", 40), ("text_cheat_noname", 42), ("text_cheat_flag_", 4),
-                    ("text_no_", 22), ("cheat_tab_head", 48),
+                    ("text_no_", 22), ("cheat_tab_head", 48), ("text_gi_footer", 60),
                     ("text_mtl_", 40), ("text_mt_", 32), ("text_pcm_", 40), ("text_nsf_", 40),
                     ("mtext_", 40),
                     ("mdesc_", 160), ("text_err_", 26), ("text_ce_", 6))

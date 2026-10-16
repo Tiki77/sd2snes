@@ -2132,38 +2132,187 @@ static int append_srm_name(char *buf, size_t buflen, uint8_t *filename, uint8_t 
   return append_save_basename(buf, buflen, filename, ext);
 }
 
+/* The saves of a game are keyed off its PATCH when a patched load is active (see
+   append_save_basename). */
+static const char *save_src(uint8_t *filename) {
+  return current_ips_srm_source[0] ? (const char *)current_ips_srm_source : (const char *)filename;
+}
+
+/* The .slot sidecar, <saves>/<BB>/<stem>.slot, keyed like the .srm: byte 0 = the battery
+   save slot the game starts with, byte 1 = its savestate slot, each ASCII '1'..'4'.  A
+   sidecar from before the savestate byte has one byte (savestate slot 1), and a firmware of
+   then reads byte 0 only.  0xff = no valid byte. */
+static void slot_sidecar_read(const char *src, uint8_t *srm, uint8_t *ss) {
+  char sc[256];
+  uint8_t b[2];
+  UINT br = 0;
+  *srm = *ss = 0xff;
+  if(path_asset(sc, sizeof(sc), SAVE_BASEDIR, src, ".slot") < 0) return;
+  file_open((uint8_t*)sc, FA_READ);
+  if(!file_res) f_read(&file_handle, b, 2, &br);
+  file_close();
+  file_res = 0;   /* absent/unreadable sidecar is fine -> slot 1 */
+  if(br >= 1 && b[0] >= '1' && b[0] < '1' + SRM_SLOT_COUNT) *srm = b[0] - '1';
+  if(br >= 2 && b[1] >= '1' && b[1] < '1' + SS_SLOT_COUNT) *ss = b[1] - '1';
+}
+
+static int slot_sidecar_write(const char *src, uint8_t srm, uint8_t ss) {
+  char sc[256];
+  uint8_t b[2];
+  UINT bw = 0;
+  if(path_asset(sc, sizeof(sc), SAVE_BASEDIR, src, ".slot") < 0) return 0;   /* would truncate */
+  path_asset_mkdir(sc);                       /* create only AFTER the name exists */
+  b[0] = '1' + (srm < SRM_SLOT_COUNT ? srm : 0);
+  b[1] = '1' + (ss < SS_SLOT_COUNT ? ss : 0);
+  file_open((uint8_t*)sc, FA_CREATE_ALWAYS | FA_WRITE);
+  if(!file_res) f_write(&file_handle, b, 2, &bw);
+  file_close();
+  file_res = 0;
+  return bw == 2;
+}
+
 void srm_slot_load(uint8_t *filename) {
+  uint8_t srm, ss;
   srm_slot = 0;
   srm_slot_sel = 0;
   if(!CFG.enable_sram_slots) return;   /* OFF -> forced slot 0, no I/O */
-  char sc[256];
-  append_save_basename(sc, sizeof(sc), filename, ".slot");
-  file_open((uint8_t*)sc, FA_READ);
-  if(!file_res) {
-    uint8_t b = 0;
-    UINT br = 0;
-    f_read(&file_handle, &b, 1, &br);
-    if(br == 1 && b >= '1' && b <= '0' + SRM_SLOT_COUNT) {
-      srm_slot = b - '1';
-      srm_slot_sel = srm_slot;
-    }
-  }
-  file_close();
-  file_res = 0;   /* absent/unreadable sidecar is fine -> default slot 0 */
+  slot_sidecar_read(save_src(filename), &srm, &ss);
+  if(srm != 0xff) srm_slot = srm_slot_sel = srm;
 }
 
 void srm_slot_save(uint8_t *filename, uint8_t slot) {
+  uint8_t srm, ss;
   if(slot >= SRM_SLOT_COUNT) slot = 0;
-  char sc[256];
-  if(append_save_basename(sc, sizeof(sc), filename, ".slot") < 0) return;   /* would truncate */
-  path_asset_mkdir(sc);                       /* create only AFTER the name exists */
-  uint8_t b = '1' + slot;
-  UINT bw = 0;
-  file_open((uint8_t*)sc, FA_CREATE_ALWAYS | FA_WRITE);
-  if(!file_res) f_write(&file_handle, &b, 1, &bw);
-  file_close();
-  file_res = 0;
+  slot_sidecar_read(save_src(filename), &srm, &ss);   /* keep the savestate slot */
+  slot_sidecar_write(save_src(filename), slot, ss);
   srm_slot_sel = slot;   /* NEVER touch the live srm_slot -- applies on the next load */
+}
+
+/* The savestate slot a game starts with (0..3), from its .slot sidecar; src = the
+   savestates' key (ss_base in savestate.c). */
+uint8_t slot_sidecar_state(const char *src) {
+  uint8_t srm, ss;
+  slot_sidecar_read(src, &srm, &ss);
+  return ss == 0xff ? 0 : ss;
+}
+
+/* ...and set it (0..3), keeping the battery-save byte. */
+void slot_sidecar_state_set(const char *src, uint8_t ss) {
+  uint8_t srm, old;
+  slot_sidecar_read(src, &srm, &old);
+  slot_sidecar_write(src, srm, ss);
+}
+
+/* ---- The saves screen (SAVES_BLK, src/memmap.h) -------------------------------------
+   One block for the menu's saves screen and the in-game SAVES tab: per slot, whether the
+   file exists, its date and its size, as text the menu prints as is.  The date follows
+   the menu language like the clock does (snes/time.a65 time_date_sep, lockstep below). */
+_Static_assert(SAVES_BLK_SIZE == 264, "SAVES_BLK: memmap.h reserves 264 B");
+_Static_assert(SAVES_E_SIZE + SAVES_SIZE_LEN <= SAVES_ENTRY_SIZE && SAVES_E_DATE + SAVES_DATE_LEN <= SAVES_E_SIZE,
+               "SAVES_BLK entry fields overlap");
+static const uint8_t saves_date_fmt[] = {   /* bit 7 = day first; low 7 bits = separator */
+  0x2f, 0xaf, 0xaf, 0xae, 0xaf, 0xaf, 0xae, 0xad, 0x2f, 0x2f
+};
+
+/* The file of slot `slot` (0..3) of `kind` for the saves keyed off src; -1 = no name. */
+static int saves_path(char *p, int n, const char *src, uint8_t kind, uint8_t slot) {
+  char ext[10];
+  if(kind == SAVES_KIND_SRM) {
+    srm_slot_ext(ext, sizeof(ext), slot);
+    return path_asset(p, n, SAVE_BASEDIR, src, ext);
+  }
+  ext[0] = '0'; ext[1] = '1' + slot;          /* "<stem>0N.state", as savestate.c names it */
+  memcpy(ext + 2, ".state", 7);
+  return path_asset(p, n, SS_BASEDIR, src, ext);
+}
+
+/* Slot `slot` of `kind` into its SAVES_BLK entry (all zero when the file is absent, or
+   when `on` is 0: a slot the options turn off). */
+static void saves_entry(const char *src, uint8_t kind, uint8_t slot, uint8_t on) {
+  uint8_t e[SAVES_ENTRY_SIZE];
+  char path[256];
+  FILINFO fno;
+  memset(e, 0, sizeof(e));
+  fno.lfname = NULL;
+  if(on && saves_path(path, sizeof(path), src, kind, slot) >= 0
+     && f_stat((TCHAR *)path, &fno) == FR_OK) {
+    uint8_t f = saves_date_fmt[CFG.language < sizeof(saves_date_fmt) ? CFG.language : 0];
+    unsigned d = fno.fdate & 0x1f, m = (fno.fdate >> 5) & 0x0f;
+    uint32_t sz = fno.fsize;
+    e[SAVES_E_FLAGS] = SAVES_EF_EXISTS;
+    /* FAT fdate [15:9] year-1980, [8:5] month, [4:0] day; ftime [15:11] hour, [10:5] min */
+    snprintf((char *)e + SAVES_E_DATE, SAVES_DATE_LEN, "%02u%c%02u%c%04u %02u:%02u",
+             (f & 0x80) ? d : m, f & 0x7f, (f & 0x80) ? m : d, f & 0x7f,
+             1980 + (fno.fdate >> 9), fno.ftime >> 11, (fno.ftime >> 5) & 0x3f);
+    if(sz >= 1024) snprintf((char *)e + SAVES_E_SIZE, SAVES_SIZE_LEN, "%lu KB",
+                            (unsigned long)((sz >> 10) > 9999 ? 9999 : (sz >> 10)));
+    else snprintf((char *)e + SAVES_E_SIZE, SAVES_SIZE_LEN, "%lu B", (unsigned long)sz);
+  }
+  file_res = FR_OK;
+  sram_writeblock(e, SRAM_SAVES_ADDR + SAVES_HDR_SIZE
+                     + (kind * SAVES_SLOTS + slot) * SAVES_ENTRY_SIZE, sizeof(e));
+}
+
+/* Publish SAVES_BLK for the saves keyed off src: the battery saves always, the savestates
+   with `states` (the menu; in a game the block feeds the SAVES tab only, and the autosave
+   that restages it should not pay for four more lookups).  A slot the options turn off
+   stays empty.  The header goes last: the menu zeroes the magic before asking.  Returns
+   the battery-save occupancy mask (bit i = slot i). */
+uint8_t saves_stage(const char *src, uint8_t states, uint8_t result) {
+  uint8_t h[SAVES_HDR_SIZE], mask = 0, srm, ss;
+  memset(h, 0, sizeof(h));
+  for(uint8_t s = 0; s < SAVES_SLOTS; s++) {
+    saves_entry(src, SAVES_KIND_SRM, s, !s || CFG.enable_sram_slots);
+    if(sram_readbyte(SRAM_SAVES_ADDR + SAVES_HDR_SIZE + s * SAVES_ENTRY_SIZE) & SAVES_EF_EXISTS)
+      mask |= 1 << s;
+    if(states) saves_entry(src, SAVES_KIND_STATE, s, !s || CFG.enable_savestate_slots);
+  }
+  slot_sidecar_read(src, &srm, &ss);
+  h[SAVES_H_MAGIC] = 'S';
+  h[SAVES_H_MAGIC + 1] = 'V';
+  h[SAVES_H_VERSION] = SAVES_VERSION;
+  h[SAVES_H_RESULT] = result;
+  h[SAVES_H_SRM_SEL] = srm == 0xff ? 0 : srm;
+  h[SAVES_H_SS_SEL] = ss == 0xff ? 0 : ss;
+  h[SAVES_H_FLAGS] = (CFG.enable_sram_slots ? SAVES_HF_SRM_SLOTS : 0)
+                   | (CFG.enable_savestate_slots ? SAVES_HF_SS_SLOTS : 0)
+                   | (states ? SAVES_HF_STATES : 0);
+  sram_writeblock(h, SRAM_SAVES_ADDR, sizeof(h));
+  return mask;
+}
+
+/* The saves screen's actions on slot `slot` of `kind` (SAVES_OP_*): make it the slot the
+   game starts with, copy it over slot `dst`, or delete it.  Returns SAVES_RES_*. */
+static uint8_t saves_do(const char *src, uint8_t op, uint8_t kind, uint8_t slot, uint8_t dst) {
+  char path[256];
+  uint8_t srm, ss;
+  if(kind > SAVES_KIND_STATE || slot >= SAVES_SLOTS) return SAVES_RES_FAIL;
+  if(op == SAVES_OP_USE) {
+    if(!(kind == SAVES_KIND_SRM ? CFG.enable_sram_slots : CFG.enable_savestate_slots))
+      return SAVES_RES_FAIL;
+    slot_sidecar_read(src, &srm, &ss);
+    if(kind == SAVES_KIND_SRM) srm = slot; else ss = slot;
+    return slot_sidecar_write(src, srm, ss) ? SAVES_RES_OK : SAVES_RES_FAIL;
+  }
+  if(saves_path(path, sizeof(path), src, kind, slot) < 0) return SAVES_RES_FAIL;
+  if(op == SAVES_OP_DELETE)
+    return f_unlink((TCHAR *)path) == FR_OK ? SAVES_RES_OK : SAVES_RES_FAIL;
+  if(op != SAVES_OP_COPY || dst >= SAVES_SLOTS || dst == slot) return SAVES_RES_FAIL;
+  file_open((uint8_t *)path, FA_READ);
+  if(file_res) { file_res = 0; return SAVES_RES_FAIL; }
+  /* the source is open: its name is dead, build the destination over it */
+  if(saves_path(path, sizeof(path), src, kind, dst) < 0) {
+    file_close();
+    file_res = 0;
+    return SAVES_RES_FAIL;
+  }
+  path_asset_mkdir(path);
+  return patch_copy_to(path) ? SAVES_RES_OK : SAVES_RES_FAIL;
+}
+
+void saves_command(const char *src, uint8_t op, uint8_t kind, uint8_t slot, uint8_t dst) {
+  uint8_t res = op == SAVES_OP_INFO ? SAVES_RES_OK : saves_do(src, op, kind, slot, dst);
+  saves_stage(src, 1, res);
 }
 
 /* is there a <rom>.mpk?  cheap f_stat that gates the ROM scan below */
@@ -2253,18 +2402,11 @@ void saveinfo_stage(uint8_t *filename) {
                (unsigned)((fno.ftime >> 5) & 0x3F));
     }
 
-    /* Slot occupancy bitmask -> SRM_SLOT_STATUS $FF0717 (read by the SAVES tab).
-       Slots ON: f_stat all 4 slot names, bit i = slot i present.  Slots OFF: bit0
-       mirrors the legacy <stem>.srm existence (byte-identical status view). */
-    if(CFG.enable_sram_slots) {
-      for(uint8_t s = 0; s < SRM_SLOT_COUNT; s++) {
-        char f[256];
-        append_srm_name(f, sizeof(f), filename, s);
-        if(f_stat((TCHAR *)f, NULL) == FR_OK) slotmask |= (1 << s);
-      }
-    } else if(flags & 0x02) {
-      slotmask = 0x01;   /* legacy .srm exists */
-    }
+    /* Slot occupancy bitmask -> SRM_SLOT_STATUS $FF0717 (read by the SAVES tab), and
+       each slot's date and size -> SAVES_BLK (the tab shows them).  Slots ON: bit i =
+       slot i present.  Slots OFF: bit0 mirrors the legacy <stem>.srm existence
+       (byte-identical status view); saves_stage leaves slots 1..3 empty then. */
+    slotmask = saves_stage(save_src(filename), 0, SAVES_RES_OK);
   }
 
   blk[0] = flags;

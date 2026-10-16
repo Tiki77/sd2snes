@@ -116,6 +116,12 @@ ui_call_confirm:
   jsr confirm_delete
   rtl
 
+; ui_call_show_menu: the saves screen (snes/saves.a65, $C1) runs its lists through
+; show_menu, over tables it builds in WRAM: DBR = the table's bank, X = its address.
+ui_call_show_menu:
+  jsr show_menu
+  rtl
+
 ; ui_call_confirm_yes: the same box with "Yes" preselected -- the experimental-core warning
 ; (snes/expwarn.a65) is a heads-up before a launch the user already asked for, so A starts
 ; the game.  DB must be the WRAM bank (confirm_sel is absolute).
@@ -138,6 +144,11 @@ ui_call_greyout:
 ; would otherwise read as the answer to ours (the same hazard patch_create_rom guards).
 ui_call_coversync:
   jsr cover_sync_before_cmd
+  rtl
+
+; the saves screen (snes/saves.a65) hides the cover while it is open; DB = 0
+ui_call_coveroff:
+  jsr cover_menu_off
   rtl
 
 ; --- $C0 trampolines for the PCM player screen (snes/pcmplay.a65, bank $C1).

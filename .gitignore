@@ -173,6 +173,8 @@ snes/igmenu_lang.i65
 # generated onboarding tour string pool (snes/utils/gen_onb_lang.py)
 snes/onboarding/onb_const_lang.a65
 snes/onboarding/onb_const_lang_b.a65
+snes/onboarding/onb_const_lang_t.a65
+snes/onboarding/onb_font.a65
 snes/onboarding/onb_cjk_ja.a65
 snes/onboarding/onb_cjk_zh.a65
 snes/onboarding/onb_cjk_sheets.a65

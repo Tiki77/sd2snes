@@ -9,9 +9,11 @@
 ; With BrowserIcons off (CFG_BROWSER_ICONS) nothing is drawn: di_name_off / di_name_w tell
 ; print_direntry to start the name in the icon's column, 54 cells wide, as before the icons.
 
-.link page $c1
+.link page $c2
 #include "memmap.i65"
-.link page $c1
+; Bank $C2 since the saves screen (saves.a65) filled $C1: entered by jsl, its tables
+; read by long addressing, so the bank it sits in does not matter to it.
+.link page $c2
 
 ; icon ids: index into di_pal and (x2) into di_str
 #define DI_NONE    0

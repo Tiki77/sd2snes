@@ -1,8 +1,7 @@
-.link page $c1
+.link page $c0
 #include "memmap.i65"
-; memmap.i65 re-asserts '.link page $c0' on include; re-declare $c1 AFTER it (the
-; last '.link page' wins and they emit no bytes) so every byte lands in bank $C1.
-.link page $c1
+; Bank $C0 since the saves screen (saves.a65) filled $C1: everything here is reached by
+; jsl and calls out by jsl, so the bank it sits in does not matter to it.
 
 ; ===========================================================================
 ; expwarn.a65 -- the experimental-core warning (NES, Master System, Atari 2600 and

@@ -836,6 +836,28 @@
 #define MODULE_ID_NSF               1   /* src/module.h */
 #define MODULE_STATUS               $FF4E80 /* what the last CMD_MOD_OPEN did: 0 ok, MODULE_ST_MISSING = no usable module file. Lockstep with SRAM_MODULE_STATUS in src/memmap.h */
 #define MODULE_ST_MISSING           1
+#define CMD_SAVES                   $4f /* the saves screen (snes/saves.a65): MCU_PARAM+8 = SVW_* (where the game is; +0..7 as for that family's other commands), +9 = SVOP_*, +10 = kind << 4 | slot, +11 = the destination slot of a copy. The answer is SAVES_BLK. Lockstep with SNES_CMD_SAVES in src/snes.h. */
+#define SVW_BROWSER                 0
+#define SVW_RECENT                  1
+#define SVW_FAV                     2
+#define SVOP_INFO                   0
+#define SVOP_USE                    1
+#define SVOP_COPY                   2
+#define SVOP_DELETE                 3
+#define SAVES_BLK                   $FF4E90 /* 264 B: header + 4 battery saves + 4 savestates, layout SAVES_* in src/memory.h. Lockstep with SRAM_SAVES_ADDR in src/memmap.h */
+#define SVB_RESULT                  3   /* SVRES_* of the last action */
+#define SVB_SRM_SEL                 4   /* battery-save slot the game starts with, 0..3 */
+#define SVB_SS_SEL                  5   /* savestate slot the game starts with, 0..3 */
+#define SVB_FLAGS                   6   /* SVF_* */
+#define SVF_SRM_SLOTS               $01
+#define SVF_SS_SLOTS                $02
+#define SVF_STATES                  $04
+#define SVB_ENTRY0                  8   /* entries of 32 B: 4 battery saves then 4 savestates */
+#define SVB_ENTRY_SIZE              32
+#define SVE_FLAGS                   0   /* bit0 = the file exists */
+#define SVE_DATE                    1   /* 16 chars + NUL, the menu language's date order */
+#define SVE_SIZE                    18  /* "8 KB" + NUL */
+#define SVRES_OK                    0
 #define PCM_CTL_STOP                0
 #define PCM_CTL_PAUSE               1   /* freezes the DAC only -- the file stays open at its position */
 #define PCM_CTL_RESUME              2

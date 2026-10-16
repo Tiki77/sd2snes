@@ -103,11 +103,11 @@
                                    ; the normal screen's gap; footer on row 26, always fixed below)
 #define GIB_FULL_ROWS    8         ; rows 17..24 -> the full-description scroll window height
 #define GIB_FOOT_ROW     26        ; footer row: aligns with the browser status bar (see layout note)
-#define GIB_FOOT_W       56        ; normal-screen footer print_count. The "X: Guides" + "Sel:
-                                   ; Cheats" variants run to 53 encoded bytes in the widest
+#define GIB_FOOT_W       60        ; normal-screen footer print_count: columns 2..61, up to
+                                   ; the scrollbar column. The "X: Guides" + "Sel: Cheats" +
+                                   ; "R: Saves" variants reach 60 encoded bytes in the widest
                                    ; languages (DE, IT; the up/down arrows are one byte each);
-                                   ; 56 is build_const.py's WIDTH_DEFAULT for text_gi_*, i.e.
-                                   ; the enforced ceiling.
+                                   ; build_const.py's WIDTH_LIMITS holds text_gi_footer* to 60.
 #define GIB_SB_X         62        ; scrollbar column: last usable half-col (edge mask clips px > 252)
 
 ; -- gameinfo_select_file: drop-in for the `jsr ips_select_file` in filesel.a65.
@@ -284,6 +284,8 @@ gin_loop:
   bne gin_manual             ; the scroll owns the text area, so X stays inert there)
   lda pad_select             ; SELECT -> the game's cheat list (normal screen only too)
   bne gin_cheats
+  lda pad_r                  ; R -> the game's saves (normal screen only too)
+  bne gin_saves
   lda gi_query_fill          ; Up/Down jump games -- FILE BROWSER only (Recents/Favorites
   beq gin_loop               ; carry a list index in MCU_PARAM, not filesel_sel)
   lda pad_up
@@ -306,6 +308,11 @@ gin_cheats:
   ; one before returning, like manhost_from_gi -- so gin_drain again: the B that closed the
   ; list is still held.
   jsl @cheathost_from_gi
+  jmp gin_drain
+gin_saves:
+  ; saves_from_gi ($C1): the same shape as cheathost_from_gi -- the screen over the
+  ; browser, this one rebuilt on the way back, gin_drain for the B still held.
+  jsl @saves_from_gi
   jmp gin_drain
 gin_full:
   ; --- full-description (Y) mode ---
