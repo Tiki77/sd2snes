@@ -197,21 +197,14 @@ wire GPR_WR_EN = gpr_enable & reg_we_rising;
 
 reg [23:0] cpu_idb; // tmp register for reg file read
 
-/* Need to cache when:
-   1f48 is written
-  AND (selected cache page is invalid
-       OR selected cache page does not contain requested page already)
-*/
+/* Need to cache when 1f48 is written */
 reg CACHE_TRIG_ENr;
-reg CACHE_TRIG_EN2r;
 reg cpu_cache_en;
 initial begin
   CACHE_TRIG_ENr = 1'b0;
-  CACHE_TRIG_EN2r = 1'b0;
   cpu_cache_en = 1'b0;
 end
-always @(posedge CLK) CACHE_TRIG_EN2r <= CACHE_TRIG_ENr;
-wire CACHE_TRIG_EN = CACHE_TRIG_EN2r;
+wire CACHE_TRIG_EN = CACHE_TRIG_ENr;
 
 reg DMA_TRIG_ENr;
 initial DMA_TRIG_ENr = 1'b0;
@@ -236,7 +229,9 @@ reg [23:0] cpu_a;
 reg fl_n;
 reg fl_z;
 reg fl_c;
+reg condtrue;
 
+wire cpu_cache_miss = ~cachevalid[~cpu_page] | |(cachetag[~cpu_page] ^ cpu_p);
 
 reg cpu_go_en_r;
 initial cpu_go_en_r = 1'b0;
@@ -336,21 +331,23 @@ always @(posedge CLK) begin
   if(VECTOR_WR_EN) vector[ADDR[4:0]] <= DI;
 end
 
-reg [4:0] CACHE_ST;
-parameter ST_CACHE_IDLE  = 5'b00001;
-parameter ST_CACHE_START = 5'b00010;
-parameter ST_CACHE_WAIT  = 5'b00100;
-parameter ST_CACHE_ADDR  = 5'b01000;
-parameter ST_CACHE_END   = 5'b10000;
+reg [3:0] CACHE_ST;
+parameter ST_CACHE_IDLE  = 4'b0001;
+parameter ST_CACHE_START = 4'b0010;
+parameter ST_CACHE_WAIT  = 4'b0100;
+parameter ST_CACHE_ADDR  = 4'b1000;
 initial CACHE_ST = ST_CACHE_IDLE;
 
-reg [4:0] DMA_ST;
-parameter ST_DMA_IDLE  = 5'b00001;
-parameter ST_DMA_START = 5'b00010;
-parameter ST_DMA_WAIT  = 5'b00100;
-parameter ST_DMA_ADDR  = 5'b01000;
-parameter ST_DMA_END   = 5'b10000;
+reg [3:0] DMA_ST;
+parameter ST_DMA_IDLE  = 4'b0001;
+parameter ST_DMA_START = 4'b0010;
+parameter ST_DMA_WAIT  = 4'b0100;
+parameter ST_DMA_ADDR  = 4'b1000;
 initial DMA_ST = ST_DMA_IDLE;
+
+reg [4:0] bus_timer;
+initial bus_timer = 5'd0;
+wire bus_idle = (bus_timer == 5'd0);
 
 reg [23:0] CACHE_SRC_ADDRr;
 wire [22:0] MAPPED_CACHE_SRC_ADDR = {CACHE_SRC_ADDRr[23:16],CACHE_SRC_ADDRr[14:0]};
@@ -376,16 +373,12 @@ initial cache_count = 9'b0;
 always @(posedge CLK) begin
   case(CACHE_ST)
     ST_CACHE_IDLE: begin
-      if(CACHE_TRIG_EN
-         & (~cachevalid[cx4_mmio_cachepage]
-            | |(cachetag[cx4_mmio_cachepage] ^ cx4_mmio_pgmpage))) begin
+      if(CACHE_TRIG_EN) begin
         CACHE_ST <= ST_CACHE_START;
         cache_pgmpage <= cx4_mmio_pgmpage;
         cache_cachepage <= cx4_mmio_cachepage;
         cx4_busy[BUSY_CACHE] <= 1'b1;
-      end else if(cpu_cache_en
-         & (~cachevalid[~cpu_page]
-            | |(cachetag[~cpu_page] ^ cpu_p))) begin
+      end else if(cpu_cache_en & cpu_cache_miss & condtrue) begin
         CACHE_ST <= ST_CACHE_START;
         cache_pgmpage <= cpu_p;
         cache_cachepage <= ~cpu_page;
@@ -397,13 +390,15 @@ always @(posedge CLK) begin
       cx4_busy[BUSY_CACHE] <= 1'b1;
       CACHE_SRC_ADDRr <= cx4_mmio_pgmoff + {cache_pgmpage, 9'b0};
       cx4_pgmrom_addr <= {cache_cachepage, 9'b0};
-      CACHE_ST <= ST_CACHE_WAIT;
       cache_count <= 9'b0;
-      CACHE_BUS_RRQr <= 1'b1;
+      if(bus_idle) begin
+        CACHE_BUS_RRQr <= 1'b1;
+        CACHE_ST <= ST_CACHE_WAIT;
+      end else CACHE_ST <= ST_CACHE_START;
     end
     ST_CACHE_WAIT: begin
       CACHE_BUS_RRQr <= 1'b0;
-      if(~CACHE_BUS_RRQr & BUS_RDY) begin
+      if(~CACHE_BUS_RRQr & BUS_RDY & (bus_timer <= 5'd1)) begin
         CACHE_ST <= ST_CACHE_ADDR;
         cx4_pgmrom_we <= 1'b1;
         cache_count <= cache_count + 1;
@@ -413,7 +408,7 @@ always @(posedge CLK) begin
       cx4_pgmrom_we <= 1'b0;
       CACHE_SRC_ADDRr <= CACHE_SRC_ADDRr + 1;
       cx4_pgmrom_addr <= cx4_pgmrom_addr + 1;
-      if(cache_count == 9'h1ff) begin
+      if(cache_count == 9'h000) begin
         cx4_busy[BUSY_CACHE] <= 1'b0;
         cachetag[cache_cachepage] <= cache_pgmpage;
         cachevalid[cache_cachepage] <= 1'b1;
@@ -455,13 +450,15 @@ always @(posedge CLK) begin
       cx4_busy[BUSY_DMA] <= 1'b1;
       DMA_SRC_ADDRr <= cx4_mmio_dmasrc;
       cx4_dma_datram_addr <= cx4_mmio_dmatgt[11:0];
-      DMA_ST <= ST_DMA_WAIT;
       dma_count <= cx4_mmio_dmalen;
-      DMA_BUS_RRQr <= 1'b1;
+      if(bus_idle) begin
+        DMA_BUS_RRQr <= 1'b1;
+        DMA_ST <= ST_DMA_WAIT;
+      end else DMA_ST <= ST_DMA_START;
     end
     ST_DMA_WAIT: begin
       DMA_BUS_RRQr <= 1'b0;
-      if(~DMA_BUS_RRQr & BUS_RDY) begin
+      if(~DMA_BUS_RRQr & BUS_RDY & (bus_timer <= 5'd1)) begin
         DMA_ST <= ST_DMA_ADDR;
         cx4_dma_datram_we <= 1'b1;
         dma_count <= dma_count - 1;
@@ -522,23 +519,23 @@ parameter ST_CPU_4    = 6'b100000;
 
 initial CPU_STATE = ST_CPU_IDLE;
 
-parameter OP_NOP   = 5'b00000;
-parameter OP_JP    = 5'b00001;
-parameter OP_SKIP  = 5'b00010;
-parameter OP_RT    = 5'b00011;
-parameter OP_LD    = 5'b00100;
-parameter OP_ST    = 5'b00101;
-parameter OP_SWP   = 5'b00110;
-parameter OP_RDROM = 5'b00111;
-parameter OP_RDRAM = 5'b01000;
-parameter OP_WRRAM = 5'b01001;
-parameter OP_ALU   = 5'b01010;
-parameter OP_MUL   = 5'b01011;
-parameter OP_WAI   = 5'b01100;
-parameter OP_BUS   = 5'b01101;
-parameter OP_CMP   = 5'b01110;
-parameter OP_SEX   = 5'b01111;
-parameter OP_HLT   = 5'b10000;
+parameter OP_NOP    = 5'b00000;
+parameter OP_JP     = 5'b00001;
+parameter OP_SKIP   = 5'b00010;
+parameter OP_RT     = 5'b00011;
+parameter OP_LD     = 5'b00100;
+parameter OP_ST     = 5'b00101;
+parameter OP_SWP    = 5'b00110;
+parameter OP_RDROM  = 5'b00111;
+parameter OP_RDRAM  = 5'b01000;
+parameter OP_WRRAM  = 5'b01001;
+parameter OP_ALU    = 5'b01010;
+parameter OP_MUL    = 5'b01011;
+parameter OP_WAI    = 5'b01100;
+parameter OP_INCMAR = 5'b01101;
+parameter OP_CMP    = 5'b01110;
+parameter OP_SEX    = 5'b01111;
+parameter OP_HLT    = 5'b10000;
 
 parameter MUL_DELAY = 3'h2;
 
@@ -549,8 +546,10 @@ reg op_imm;
 reg op_p;
 reg op_call;
 reg op_jump;
-reg condtrue;
 reg mul_strobe = 0;
+
+wire cpu_bus_start = (op == OP_LD || op == OP_ALU || op == OP_MUL || op == OP_CMP)
+                   & ~op_imm & (op_param[7:1] == 7'h17);
 
 // savestate normalize ($F0): a dirty freeze can leave BUSY_CPU stuck at 1, which
 // saturates every busywait the handler does afterwards.  Only this bit, and only
@@ -598,6 +597,9 @@ wire [23:0] ss_idb_rd = (ss_ridx_r == 8'h00) ? cpu_a
                       : (ss_ridx_r == 8'h13) ? cpu_busaddr
                       : (ss_ridx_r == 8'h1c) ? cpu_ramaddr
                       : 24'b0;
+
+reg [1:0] cpu_wait_subcyc;
+initial cpu_wait_subcyc = 2'b00;
 
 always @(posedge CLK) begin
   if(ss_core_act) begin
@@ -744,16 +746,17 @@ always @(posedge CLK) begin
             default: cx4_cpu_datram_addr <= 24'b0;
           endcase
         end
-        OP_BUS: cpu_bus_rq <= 1'b1;
       endcase
+      if(cpu_bus_start) cpu_bus_rq <= 1'b1;
     end
     ST_CPU_1: begin
       CPU_STATE <= ST_CPU_2;
       condtrue <= 1'b0;
+      cpu_bus_rq <= 1'b0;
       case(op)
         OP_JP: begin
           cpu_cache_en <= 1'b0;
-          if(!cpu_cache_en && !cx4_busy[BUSY_CACHE]) begin
+          if(!cx4_busy[BUSY_CACHE] && !(cpu_cache_en && cpu_cache_miss && condtrue)) begin
             jp_docache <= 1'b0;
             if(condtrue) begin
               if(op_call) begin
@@ -763,22 +766,31 @@ always @(posedge CLK) begin
               end
               cpu_pc <= op_param;
               cpu_page <= cpu_page ^ op_p;
+              cpu_wait <= 8'h02;
+              CPU_STATE <= speed ? ST_CPU_2 : ST_CPU_4;
             end else cpu_pc <= cpu_pc + 1;
+          end else begin
+            CPU_STATE <= ST_CPU_1;
+            condtrue <= condtrue;
           end
         end
         OP_SKIP: begin
-          if(condtrue) cpu_pc <= cpu_pc + 2;
-          else cpu_pc <= cpu_pc + 1;
+          if(condtrue) begin
+            cpu_pc <= cpu_pc + 2;
+            cpu_wait <= 8'h01;
+            CPU_STATE <= speed ? ST_CPU_2 : ST_CPU_4;
+          end else cpu_pc <= cpu_pc + 1;
         end
         OP_RT: begin
           cpu_page <= cpu_page_stack[cpu_sp - 1];
           cpu_pc <= pcs_rdata;
           cpu_sp <= cpu_sp - 1;
+          cpu_wait <= 8'h02;
+          CPU_STATE <= speed ? ST_CPU_2 : ST_CPU_4;
         end
-        OP_WAI: if(BUS_RDY) cpu_pc <= cpu_pc + 1;
-        OP_BUS: begin
-          cpu_bus_rq <= 1'b0;
-          cpu_pc <= cpu_pc + 1;
+        OP_WAI: begin
+          if(BUS_RDY && bus_timer <= 5'd3) cpu_pc <= cpu_pc + 1;
+          else CPU_STATE <= ST_CPU_1;
         end
         default: cpu_pc <= cpu_pc + 1;
       endcase
@@ -850,8 +862,9 @@ always @(posedge CLK) begin
       endcase
     end
     ST_CPU_3: begin
+      cpu_wait_subcyc <= 2'b00;
       case(op)
-        OP_BUS: cpu_busaddr <= cpu_busaddr + 1;
+        OP_INCMAR: cpu_busaddr <= cpu_busaddr + 1;
         OP_WRRAM: cx4_cpu_datram_we <= 1'b0;
         OP_CMP: begin
           fl_n <= cpu_alu_res[23];
@@ -880,41 +893,7 @@ always @(posedge CLK) begin
         end
       endcase
       cpu_op <= cpu_op_w;
-
-      casex(cpu_op_w[15:11])
-        5'b00100: begin // SKIP
-          cpu_wait <= 8'h01;
-          CPU_STATE <= speed ? ST_CPU_0 : ST_CPU_4;
-        end
-        5'b00111: begin // RT
-          cpu_wait <= 8'h03;
-          CPU_STATE <= speed ? ST_CPU_0 : ST_CPU_4;
-        end
-        5'b00x01, 5'b00x10: begin // JP
-          if(cpu_op_w[13]) begin // CALL
-            cpu_wait <= 8'h03;
-          end else begin
-            cpu_wait <= 8'h03;
-          end
-          CPU_STATE <= speed ? ST_CPU_0 : ST_CPU_4;
-        end
-/*        5'b01110, 5'b01101, 5'b11101: begin // RDROM, RDRAM, WRRAM
-          cpu_wait <= 8'h03;
-          CPU_STATE <= speed ? ST_CPU_0 : ST_CPU_4;
-        end
-/*        5'b10011: begin // MUL
-          cpu_wait <= 8'h03;
-          CPU_STATE <= ST_CPU_4;
-        end*/
-/*        5'b01000: begin // BUSRD
-          cpu_wait <= 8'h03;
-          CPU_STATE <= ST_CPU_4;
-        end*/
-        default: begin
-          cpu_wait <= 8'h00;
-          CPU_STATE <= ST_CPU_0;
-        end
-      endcase
+      CPU_STATE <= ST_CPU_0;
 
       casex(cpu_op_w[15:11])
         5'b00000: op <= OP_NOP;
@@ -949,7 +928,7 @@ always @(posedge CLK) begin
         5'b10011: op <= OP_MUL;
 
         5'b00011: op <= OP_WAI;
-        5'b01000: op <= OP_BUS;
+        5'b01000: op <= OP_INCMAR;
 
         5'b11111: op <= OP_HLT;
       endcase
@@ -960,12 +939,28 @@ always @(posedge CLK) begin
       op_sa <= cpu_op_w[9:8];
     end
     ST_CPU_4: begin
-      cpu_wait <= cpu_wait - 1;
-      if(cpu_wait) CPU_STATE <= ST_CPU_4;
-      else CPU_STATE <= ST_CPU_0;
+      if(cpu_wait_subcyc == 2'b11) begin
+        cpu_wait_subcyc <= 2'b00;
+        cpu_wait <= cpu_wait - 1;
+        if(cpu_wait == 8'h01) CPU_STATE <= ST_CPU_2;
+        else CPU_STATE <= ST_CPU_4;
+      end else begin
+        cpu_wait_subcyc <= cpu_wait_subcyc + 1;
+        CPU_STATE <= ST_CPU_4;
+      end
     end
   endcase
   end
+end
+
+wire [2:0] rom_ws = cx4_mmio_r1f50[6:4];
+wire [2:0] ram_ws = cx4_mmio_r1f50[2:0];
+wire [2:0] bus_ws = (cpu_bus_start & op_param[0]) ? ram_ws : rom_ws;
+wire [4:0] bus_timer_load = speed ? 5'd0 : {bus_ws, 2'b10};
+
+always @(posedge CLK) begin
+  if(BUS_RRQ) bus_timer <= bus_timer_load;
+  else if(~bus_idle) bus_timer <= bus_timer - 1;
 end
 
 reg[2:0] BUSRD_STATE;
@@ -1000,6 +995,7 @@ always @(posedge CLK) if(cx4_cpu_en) begin
       ST_BUSRD_END: begin
         if(~cpu_busaddr[22]) cpu_busdata <= BUS_DI;
         else cpu_busdata <= 8'h00;
+        BUSRD_STATE <= ST_BUSRD_IDLE;
       end
     endcase
   end
@@ -1057,11 +1053,11 @@ wire ss_idle_w = ~|cx4_busy
                & (CPU_STATE == ST_CPU_IDLE)
                & (CACHE_ST  == ST_CACHE_IDLE)
                & (DMA_ST    == ST_DMA_IDLE)
-               & ~CACHE_TRIG_ENr & ~CACHE_TRIG_EN2r & ~DMA_TRIG_ENr & ~cpu_go_en_r;
+               & ~CACHE_TRIG_ENr & ~DMA_TRIG_ENr & ~cpu_go_en_r;
 
 // Halt protocol (window $FE bit0, same semantics as the GSU/SA-1 cores): on a halt
 // request let the CX4 run to its stop point, then hold it frozen after a 16-cycle
-// settle (covers both CACHE_TRIG stages).  A saturating timeout -- prescaler 8 bits
+// settle (covers the CACHE_TRIG stage).  A saturating timeout -- prescaler 8 bits
 // + counter 14 bits = ~45.9ms @80MHz, split in two short carry chains to help
 // placement on the nearly full mk2 -- freezes anyway and latches ss_dirty_r (sticky
 // until the next halt request): a dirty capture may lose one in-flight CX4 program.

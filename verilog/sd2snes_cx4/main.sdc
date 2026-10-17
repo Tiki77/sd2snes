@@ -46,7 +46,8 @@ create_clock -name {SPI_SCK} -period 20.833 -waveform { 0.000 10.417 } [get_port
 # Create Generated Clock
 #**************************************************************
 
-create_generated_clock -name {snes_dcm|altpll_component|auto_generated|pll1|clk[0]} -source [get_pins {snes_dcm|altpll_component|auto_generated|pll1|inclk[0]}] -duty_cycle 50.000 -multiply_by 10 -master_clock {CLKIN} [get_pins { snes_dcm|altpll_component|auto_generated|pll1|clk[0] }] 
+derive_pll_clocks
+derive_clock_uncertainty
 
 
 #**************************************************************

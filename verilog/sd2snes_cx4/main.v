@@ -864,7 +864,7 @@ always @(posedge CLK2) begin
       if(cx4_active & (CX4_RD_PENDr | ~snapshot_pause)) begin
         if (CX4_RD_PENDr & (~snescmd_unlock | free_slot | SNES_DEADr)) begin
           STATE <= ST_CX4_RD_ADDR;
-          ST_MEM_DELAYr <= 16;
+          ST_MEM_DELAYr <= ROM_CYCLE_LEN;
         end
       end else if(free_slot | SNES_DEADr) begin
         if(MCU_RD_PENDr) begin
