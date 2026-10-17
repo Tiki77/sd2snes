@@ -148,5 +148,9 @@ uint8_t load_bs_pack(uint8_t* filename);  /* returns 1 if a real pack was loaded
 void save_bs_pack(uint8_t* filename);
 uint32_t calc_sram_crc_raw(uint32_t addr, uint32_t size); /* no reset bail: caller holds reset */
 uint32_t calc_pack_crc_inreset(void);     /* reset-tolerant pack CRC for prepare_reset */
+/* .srm path of the live slot for a game load (reads the slot sidecar), NO legacy migration:
+   used by the NES battery (nesave.c), whose file must never be renamed out of the ROM folder. */
+int srm_path_for_load(char *buf, size_t buflen, uint8_t *filename);
+int srm_path_for_save(char *buf, size_t buflen, uint8_t *filename); /* live slot, folder created */
 
 #endif

@@ -69,6 +69,7 @@ nes_process_frame:
         sta @nes_vgap_pend       ; v3.1: idem p/ o VOFS por faixa (canal 4)
         sta @nes_dbg_ntbank      ; SONDA 1: paginas de CIRAM tocadas no frame
         sta @nes_psp_present     ; v3.3: $16 e' POR FRAME (transiente)
+        sta @nes_npg_s11n        ; v3.11: idem p/ o $11 que o colapso consulta
         sta @nes_psp_fb          ; SONDA 3: idem p/ o flag de fallback do b4
         sta @nes_cspl_pend       ; v2.3: idem p/ o raster-split de CHR (frame
                                   ; sem CMD_CHR_SPLITS = tabela de tile-base
@@ -103,6 +104,13 @@ npf_loop:
 npf_have_more:
         ldy #$0000
         lda [nes_parse_ptr],y   ; opcode
+        ; CMD_NT_RUN primeiro: e' o UNICO comando que se repete dezenas de vezes
+        ; por frame (scroll rapido: ate' 90 runs), enquanto os outros chegam 0-1
+        ; vez. Cada teste que ele pula economiza 5 ciclos POR RUN; os demais
+        ; comandos pagam +5 uma vez. Os opcodes sao todos distintos, entao a
+        ; ordem dos testes nao muda o que e' despachado.
+        cmp #CMD_NT_RUN
+        beq npf_op_ntrun
         cmp #CMD_NOP
         beq npf_op_nop
         cmp #CMD_FRAME_HDR
@@ -121,12 +129,14 @@ npf_have_more:
         beq npf_op_chrsplits8
         cmp #CMD_PPU_SPLITS
         beq npf_op_ppusplits
+        cmp #CMD_M5_STATE
+        beq npf_op_m5state
+        cmp #CMD_M5_EVENTS
+        beq npf_op_m5events
         cmp #CMD_PALETTE
         beq npf_op_pal
         cmp #CMD_PALETTE_FULL
         beq npf_op_palfull
-        cmp #CMD_NT_RUN
-        beq npf_op_ntrun
         cmp #CMD_CHR_BANK
         beq npf_op_chrbank
         cmp #CMD_CHR_RUN
@@ -191,6 +201,12 @@ npf_op_chrsplits8:
 npf_op_ppusplits:
         jsr nes_handle_ppu_splits ; v3.3: $16 -- devolve o tamanho em X
         bra npf_advance
+npf_op_m5state:
+        jsr nes_m5_handle         ; MMC5: $17 (+ o $18 que o segue) -- devolve o
+        bra npf_advance           ; total consumido em X
+npf_op_m5events:
+        jsr nes_m5_skip_events    ; $18 sem $17 (anomalo): so' pula
+        bra npf_advance
 npf_op_chrrun:
         jsr nes_chr_handle_run    ; v2.2-lite (CHR-RAM): estagia o payload;
         bra npf_advance           ; devolve o tamanho (4+len) em X
@@ -199,8 +215,17 @@ npf_op_oam:
         ldx #$0101                ; 257
         bra npf_advance
 npf_op_done:
-        ldx #$0002
-        bra npf_advance
+        ; CMD_FRAME_DONE e' o ULTIMO comando do frame: o que vier depois dele na
+        ; janela drenada NAO pertence a este frame. Quando o poll drena o
+        ; buffer MAIS ANTIGO (seq-1) o NES_LEN que o control block publica e'
+        ; o do frame mais NOVO, entao uma copia maior que o frame traz atras do
+        ; F0 o lixo de um frame anterior daquele buffer (no boot, runs de zeros
+        ; do despejo da CIRAM inteira). Parsear esse resto reaplicava os
+        ; zeros: o atributo $3C0-$3C7 do titulo do SMB1 voltava a 0 e a barra
+        ; de status saia verde. Encerra aqui, como se tivesse consumido tudo.
+        lda #$01
+        sta @nes_frame_valid
+        bra npf_finish
 
 npf_advance:
         ; X = tamanho do comando que acabou de ser processado. Avanca o
@@ -430,6 +455,46 @@ nhr_bgsel_same:
 ; nes_data.a65) e seta nes_split_pend = id do buffer; o COMMIT pra NMI
 ; acontece so' no fecho do frame (npf_finish). Devolve tamanho em X.
 ; ============================================================
+; ------------------------------------------------------------
+; nhs_negscroll -- (MAIN, v3.13) Y de scroll 240-255 no NES (a "rolagem
+; negativa": $2005 Y=$FE treme a tela do titulo do SMB3 uma linha por quadro).
+; No NES essas linhas sao as linhas 30/31 de atributo e o coarse Y volta a 0 SEM
+; trocar de nametable, entao a tela comeca (256 - Y) linhas ACIMA do topo da
+; MESMA nametable. A captura das faixas publica a ancora com a volta de 240 das
+; linhas comuns (Y - 240 e o bit de nametable invertido): a faixa 0 vinha com a
+; nametable de baixo, e o logo do SMB3 sumia um quadro sim, um nao. O CMD_REGS
+; traz o Y cru; quando a faixa 0 e' exatamente essa volta (sy = Y - 240, nt =
+; ntsel ^ 2), ela passa a Y - 16 com a mesma nametable invertida: no espaco
+; logico de 480 linhas (arranjo H) da' Y - 256 + CROP na nametable certa, e no
+; arranjo V (32x32 de 256 linhas) a volta de 256 do SNES leva ao mesmo ponto.
+; Entra .as/.xl; payload do $11 por [nes_parse_ptr] (entrada 0 em Y=2..5).
+; ------------------------------------------------------------
+nhs_negscroll:
+        sep #$20 : .as
+        rep #$10 : .xl
+        lda @nes_regs_scrolly+1
+        bne nns_out
+        lda @nes_regs_scrolly
+        cmp #240
+        bcc nns_out                  ; Y comum
+        sec
+        sbc #240
+        ldy #$0004
+        cmp [nes_parse_ptr],y        ; faixa 0 = a volta de 240?
+        bne nns_out
+        lda @nes_regs_ntselect
+        eor #$02
+        ldy #$0005
+        cmp [nes_parse_ptr],y
+        bne nns_out
+        lda @nes_regs_scrolly
+        sec
+        sbc #16
+        ldy #$0004
+        sta [nes_parse_ptr],y        ; Y - 16 (a nametable invertida fica)
+nns_out:
+        rts
+
 nes_handle_splits:
         sep #$20 : .as
         rep #$10 : .xl
@@ -454,6 +519,16 @@ nhs_go:
         lda #$04                  ; clamp K<=4 (contrato)
         sta nes_sp_cnt
 nhs_cnt_ok:
+        sep #$20 : .as
+        jsr nhs_negscroll            ; v3.13: Y 240-255 do NES (ver la')
+        sep #$20 : .as
+        rep #$10 : .xl
+        lda nes_sp_cnt               ; v3.11: o $16 deste frame consulta o
+        sta @nes_npg_s11n            ; ntsel de cada faixa (nes_npg_collapse)
+        rep #$20 : .al
+        lda nes_parse_ptr
+        sta @nes_npg_s11
+        sep #$20 : .as
         ; v1.5.1: a tabela HDMA segue o FRAME BUFFER alvo (target 1 -> tab0,
         ; 2 -> tab1). O display NUNCA le tab0/tab1 diretamente -- ele le a
         ; nes_hdma_live (copiada pelo NMI ao aplicar) => zero hazard de
@@ -967,15 +1042,24 @@ nvb_base:
         sep #$20 : .as
 nvb_base_nov:
         rep #$20 : .al
-        ; --- v3.8: o NES_SPLIT_EFF_DELAY N A O entra aqui.  Ele ja' foi
-        ;     aplicado a' SNAP no pre-pass do $11 (nhs_pre_store), que e' o
-        ;     lugar CERTO: o contrato e' "entrada com scanline S => faixa
-        ;     visivel de S+1 em diante", ou seja o atraso e' da FRONTEIRA, nao
-        ;     do VALOR.  Somar aqui tambem contava o atraso DUAS vezes: a
-        ;     fronteira ficava certa (S+1-CROP) e o conteudo entrava uma linha
-        ;     adiantado.  Medido no pixel (run_vgap_gate --synth): a banda de
-        ;     referencia caia na linha 204 em vez de 205.  Nenhum gate de
-        ;     TABELA pegava, porque o modelo do oraculo somava o mesmo 1. ---
+        ; --- O NES_SPLIT_EFF_DELAY ENTRA no valor das faixas j>0 (e tambem na
+        ;     SNAP, que e' a fronteira): o `sy` do $11 e' a linha de nametable
+        ;     que a PPU desenha na scanline S da entrada, entao na primeira
+        ;     linha da faixa (S+1) o conteudo e' sy+1.  Medido contra um
+        ;     emulador de referencia, pixel a pixel: o piso quadriculado do
+        ;     titulo do SMB3 (split por $2006 no hblank da linha 193, sy=192)
+        ;     mostra a linha de tile 24 com a 1a linha em 193, nao em 194; sem
+        ;     este +1 o piso inteiro saia uma linha mais tarde (2,7% dos
+        ;     pixels).  A v3.8 tinha tirado o +1 porque o oraculo de pixel do
+        ;     gate sintetico esperava a banda na linha 205; o que a PPU mostra
+        ;     e' 204 (v3.7).  A entrada 0 e' o ESTADO no inicio do display, nao
+        ;     uma mudanca: sem atraso. ---
+        lda @nes_sp_vi
+        beq nvb_base_nodly
+        lda @nes_sp_vt
+        clc
+        adc #NES_SPLIT_EFF_DELAY
+        sta @nes_sp_vt
 nvb_base_nodly:
         .al : .xl
         lda #VIEWPORT_CROP_Y      ; faixa que comeca ACIMA do corte: as
@@ -1372,6 +1456,199 @@ npa_filled:
         rts
 
 ; ============================================================
+; nes_npg_collapse -- v3.11: COLAPSO das faixas cujo codigo de nametable o $2107
+; nao consegue nomear (nem 1A/1B nem V) para a TELA UNICA da pagina que a faixa
+; realmente mostra: a do quadrante que o ntsel dela seleciona (o $11 do mesmo
+; frame da' o ntsel por faixa; sem $11, o do REGS). E' o TxSROM (118): bit 7 de
+; cada registrador de CHR escolhe a pagina de um quadrante, e jogos como Ys III
+; poem a barra de status em (0,0,1,1)-invertido (codigo $3) sob um playfield
+; em 1A -- sem isto o frame inteiro caia no fallback do header e a barra saia
+; preta. APROXIMACAO declarada: a faixa usa a pagina do quadrante em que ela
+; COMECA; se o scroll dela atravessar para um quadrante de outra pagina, a
+; parte atravessada sai com a pagina errada (o mesmo que uma tela unica
+; mostraria). Frame com todas as faixas em H classico ($C) NAO e' tocado (o
+; header ja' o desenha certo). Reescreve so' o nibble baixo de @nes_psp_pay
+; (o b4 ja' foi consumido pelo nes_psp_apply). Entra/sai .as.
+; ============================================================
+nes_npg_collapse:
+        sep #$20 : .as
+        rep #$10 : .xl
+        ; --- algum codigo fora de {1A, 1B, V}? e todos sao H classico? ---
+        lda #$00
+        sta @nes_npg_t               ; bit0 = ha' codigo a colapsar, bit1 = ha' nao-H
+        rep #$20 : .al
+        lda #$0000
+        sta @nes_npg_i
+nnc_tri:
+        rep #$30 : .al : .xl
+        lda @nes_npg_i
+        asl
+        tax
+        sep #$20 : .as
+        lda @nes_psp_pay,x
+        and #$0f
+        cmp #$0c
+        beq nnc_tri_h
+        pha
+        lda @nes_npg_t
+        ora #$02
+        sta @nes_npg_t
+        pla
+        beq nnc_tri_next
+        cmp #$0f
+        beq nnc_tri_next
+        cmp #$0a
+        beq nnc_tri_next
+nnc_tri_h:
+        sep #$20 : .as
+        lda @nes_npg_t
+        ora #$01
+        sta @nes_npg_t
+nnc_tri_next:
+        rep #$20 : .al
+        lda @nes_npg_i
+        inc
+        sta @nes_npg_i
+        sep #$20 : .as
+        cmp @nes_psp_cnt
+        bcc nnc_tri
+        lda @nes_npg_t
+        cmp #$03
+        beq nnc_go                   ; ha' o que colapsar E nao e' so' H
+        rts
+nnc_go:
+        ; --- o $11 deste frame: copia [sl, ntsel] de cada entrada ---
+        sep #$20 : .as
+        lda #$00
+        sta @nes_npg_n
+        lda @nes_npg_s11n
+        cmp #$02
+        bcc nnc_bands
+        cmp #$05
+        bcc nnc_ncnt
+        lda #$04
+nnc_ncnt:
+        sep #$20 : .as
+        sta @nes_npg_n
+        rep #$20 : .al
+        lda nes_parse_ptr            ; o mesmo buffer de frame: so' o ponteiro
+        pha                          ; muda (devolvido abaixo)
+        lda @nes_npg_s11
+        sta nes_parse_ptr
+        sep #$20 : .as
+        ldx #$0000
+        ldy #$0002
+nnc_cp:
+        sep #$20 : .as
+        lda [nes_parse_ptr],y        ; sl
+        sta @nes_npg_ssl,x
+        iny
+        iny
+        iny
+        lda [nes_parse_ptr],y        ; ntsel
+        and #$03
+        sta @nes_npg_snt,x
+        iny
+        inx
+        txa
+        cmp @nes_npg_n
+        bcc nnc_cp
+        rep #$20 : .al
+        pla
+        sta nes_parse_ptr
+        sep #$20 : .as
+nnc_bands:
+        rep #$30 : .al : .xl
+        lda #$0000
+        sta @nes_npg_i
+nnc_band:
+        rep #$30 : .al : .xl
+        lda @nes_npg_i
+        asl
+        tax                          ; X = i*2 (arrays do $16 em word)
+        sep #$20 : .as
+        lda @nes_psp_pay,x
+        and #$0f
+        beq nnc_next                 ; 1A
+        cmp #$0f
+        beq nnc_next                 ; 1B
+        cmp #$0a
+        beq nnc_next                 ; V: o $2107 o nomeia
+        sta @nes_npg_code
+        ; --- ntsel em vigor na scanline da faixa ---
+        lda @nes_regs_ntselect
+        and #$03
+        sta @nes_npg_q
+        lda @nes_psp_sl,x
+        sta @nes_npg_bsl
+        phx
+        ldx #$0000
+nnc_q:
+        sep #$20 : .as
+        txa
+        cmp @nes_npg_n
+        bcs nnc_qdone
+        lda @nes_npg_ssl,x
+        cmp @nes_npg_bsl
+        beq nnc_qtake
+        bcs nnc_qdone                ; entrada comeca DEPOIS da faixa
+nnc_qtake:
+        sep #$20 : .as
+        lda @nes_npg_snt,x
+        sta @nes_npg_q
+        inx
+        bra nnc_q
+nnc_qdone:
+        sep #$20 : .as
+        plx
+        ; --- pagina do quadrante q = bit q do codigo ---
+        rep #$20 : .al
+        lda @nes_npg_q
+        and #$0003                   ; byte alto ESCONDIDO zerado antes do tay
+        tay
+        sep #$20 : .as
+        lda @nes_npg_code
+nnc_sh:
+        sep #$20 : .as
+        cpy #$0000
+        beq nnc_shd
+        lsr
+        dey
+        bra nnc_sh
+nnc_shd:
+        sep #$20 : .as
+        and #$01
+        beq nnc_p0
+        lda #$0f
+        bra nnc_put
+nnc_p0:
+        sep #$20 : .as
+        lda #$00
+nnc_put:
+        sep #$20 : .as
+        sta @nes_npg_t
+        lda @nes_psp_pay,x
+        and #$f0
+        ora @nes_npg_t
+        sta @nes_psp_pay,x
+        rep #$20 : .al
+        lda @nes_npg_coll
+        inc
+        sta @nes_npg_coll
+nnc_next:
+        rep #$30 : .al : .xl
+        lda @nes_npg_i
+        inc
+        sta @nes_npg_i
+        sep #$20 : .as
+        cmp @nes_psp_cnt
+        bcs nnc_done
+        brl nnc_band
+nnc_done:
+        sep #$20 : .as
+        rts
+
+; ============================================================
 ; nes_psp_ntpage -- v3.4 SS4.1: PAGINA DE NAMETABLE POR FAIXA, via $2107
 ; (BG1SC) no canal 5 de HDMA -- o eixo do Dragon Buster (1A -> 1B na
 ; scanline 175 em 702 frames), do devilman (354) e do Cosmo (595).
@@ -1414,6 +1691,9 @@ nes_psp_ntpage:
         bne npg_go
         rts
 npg_go:
+        jsr nes_npg_collapse         ; v3.11: codigos que o $2107 nao nomeia
+        sep #$20 : .as
+        rep #$10 : .xl
         ; --- varredura unica: uniao das paginas + triagem do override ---
         lda #$00
         sta @nes_npg_mask
@@ -1449,9 +1729,18 @@ npg_no_p0:
         sta @nes_npg_mask
         pla
 npg_no_p1:
-        ; single-screen? ($0 ou $F). Qualquer outro codigo => size misto
+        ; single-screen ($0 ou $F) ou V ($A)? Qualquer outro codigo => size
+        ; misto que muda a ALTURA do mapa (H = 32x64): fallback.
+        ; v3.11: o V entra. Ele e' 64x32 com base 0 -- as DUAS paginas lado a
+        ; lado, cada uma na tela k dela, 32 linhas de altura como o single-
+        ; screen. O que muda entre V e single-screen e' so' a LARGURA (onde o
+        ; HOFS da' a volta), e o $2107 por faixa troca base e size juntos;
+        ; VOFS e costura sao os mesmos. Casos de silicio: Dragon Ball Z Gaiden
+        ; (V em cima, 1B na caixa de baixo) e Akuma-kun (1A / V / 1B).
         beq npg_ss
         cmp #$0f
+        beq npg_ss
+        cmp #$0a
         beq npg_ss
         lda #$01
         sta @nes_npg_bad
@@ -1501,8 +1790,24 @@ npg_mask_ok:
         lda @nes_npg_bad
         bne npg_done                 ; size misto: fallback (Tier 2)
         ; monta a lista [sl, valor] reusando o ESTAGIO de build do ch3
-        ; (nes_cspl_build le so' nes_cs_cnt + @nes_cspl_sl + @nes_cspl_nba, e
-        ;  o nes_psp_apply ja' trata esses arrays como scratch do frame)
+        ; (nes_cspl_build le so' nes_cs_cnt + @nes_cspl_sl + @nes_cspl_nba).
+        ; ⚠️ Esses arrays NAO sao scratch do frame: o FAST-SKIP do $15
+        ; (nes_chrw_handle_splits, guarda qok) reconstroi a tabela do ch3 do
+        ; frame SEGUINTE direto deles, sem refazer o pre-pass. Escrever aqui os
+        ; bytes de $2107 ($00/$04) sem devolver os do $15 fazia o proximo
+        ; frame exibir o BG com BG12NBA = $00/$04 (o vao vazio da VRAM e a
+        ; regiao de OBJ): mapa do Armadillo (118) PRETO e a barra em lixo, em
+        ; todo frame com $15 + troca de pagina por faixa. Entao: salva os 16 B
+        ; (nba + sl, contiguos) e devolve logo depois do build.
+        rep #$30 : .al : .xl
+        ldx #$000e
+npg_sv:
+        lda @nes_cspl_nba,x
+        sta @nes_npg_save,x
+        dex
+        dex
+        bpl npg_sv
+        sep #$20 : .as
         rep #$10 : .xl
         ldx #!nes_ndma_tab0
         stx nes_cs_tab
@@ -1530,16 +1835,21 @@ npg_fill:
         lda @nes_psp_pay,x
         and #$0f
         beq npg_page0                ; codigo $0 = 1A = pagina fisica 0
+        cmp #$0a
+        beq npg_vert                 ; codigo $A = V = base 0, 64x32
         lda #$04                     ; codigo $F = 1B = base 1 (tela 1)
         bra npg_put
+npg_vert:
+        sep #$20 : .as
+        lda #$01
+        bra npg_put
 npg_page0:
+        sep #$20 : .as
         lda #$00
 npg_put:
-        sta @nes_mrg_tmp
-        lda @nes_regs_bg1sc
-        and #$03                     ; SIZE do frame (0 aqui por construcao,
-        ora @nes_mrg_tmp             ; mas nunca contradiz o header)
-        rep #$20 : .al
+        sep #$20 : .as               ; o valor e' o $2107 INTEIRO da faixa
+        rep #$20 : .al               ; (base<<2 | size): com o V no conjunto o
+                                     ; size deixa de ser o do frame
         and #$00ff
         sta @nes_cspl_nba,x
         lda @nes_mrg_i
@@ -1573,6 +1883,14 @@ npg_pend_ok:
         sta @nes_nspl_pend
         pla
         sta @nes_cspl_pend
+        rep #$30 : .al : .xl         ; devolve o estagio do ch3 (ver npg_sv)
+        ldx #$000e
+npg_rs:
+        lda @nes_npg_save,x
+        sta @nes_cspl_nba,x
+        dex
+        dex
+        bpl npg_rs
         rep #$20 : .al               ; breadcrumb: frames com override do ch5
         lda @nes_npg_ovr
         inc
@@ -1777,6 +2095,378 @@ nes_handle_nt_run:
         lda [nes_parse_ptr],y   ; len (0-255)
         sta @nes_hnr_len
 
+        ; ============================================================
+        ; FRONT RAPIDO (missao de perf, out/2026). Run INTEIRO na area de CELULAS
+        ; de UM banco fisico, dentro da CIRAM e com len > 0 -- 100% dos runs de
+        ; scroll de celulas (SMB3 P-run: 72% sao de UMA celula; Excitebike: todos).
+        ; Faz exatamente o que o caminho geral faria para essa classe (mesmos
+        ; estados finais, mesma politica de orcamento/adiamento), sem o que ele
+        ; so' paga por causa das outras classes: o calculo de 'room', o split em
+        ; dois segmentos, os dois nhn_seg_cost, o salto por nes_nt_fits/ntdefer
+        ; como sub-rotinas e, para 1 byte, o stub de MVN (MVN = 7 ciclos/byte
+        ; mais ~100 de preparo). Qualquer run fora da classe cai em nhn_old_cont
+        ; e segue o caminho geral INALTERADO.
+        ;
+        ; Estado que o caminho geral deixa e este tambem deixa: nes_hnr_ntoff/
+        ; len/copylen/ntend, bankb/segs/sege/fast, nes_nt_cost, nes_nt_facc,
+        ; nes_dbg_ntbank, a copia no shadow, e o desvio de politica. SO' nao
+        ; escreve os temporarios que o caminho geral escreve e ninguem le depois:
+        ; nes_hnr_room, nes_hnr_s0s..s1e, nes_cr_p0 (e nes_cr_base/gmid, que o
+        ; nhn_seg_cost usa) e, no conversor de 1 celula, nes_cr_end/tm_rs.
+        ; Verificado por diferencial de estado contra o caminho geral.
+        ; ============================================================
+        beq nhn_old_cont          ; len == 0 (Z do lda; o sta nao mexe em flags)
+        rep #$30 : .al : .xl
+        and #$00ff
+        tax                       ; X = len (1..255)
+        lda @nes_hnr_ntoff
+        cmp #$0800
+        bcs nhn_old_cont          ; fora da CIRAM: ramo geral (contadores de badrun)
+        cpx #$0001
+        bne nhn_fast_n
+        brl nhn_streak            ; 1 byte (celula OU attr): laco de runs seguidos
+nhn_fast_n:
+        and #$0400
+        sta nes_hnr_bankb         ; banco fisico onde o run comeca
+        txa
+        clc
+        adc @nes_hnr_ntoff
+        sta nes_hnr_sege          ; ntend (sem estouro: ntoff < $800, len <= 255)
+        lda nes_hnr_bankb
+        clc
+        adc #$03c0                ; fim da area de CELULAS desse banco
+        cmp nes_hnr_sege
+        bcs nhn_fast_ok           ; fim da area >= ntend: o run cabe inteiro
+        brl nhn_old_cont          ; passa de $3C0 (attrs) ou entra no outro banco
+nhn_fast_ok:
+        txa
+        sta @nes_hnr_copylen      ; == len (nada truncado: ntend <= $3C0 + banco)
+        sta @nes_nt_cost          ; == soma dos dois nhn_seg_cost (celulas = copylen)
+        lda nes_hnr_sege
+        sta @nes_hnr_ntend
+        lda @nes_hnr_ntoff
+        sta nes_hnr_segs
+        sep #$20 : .as
+        lda #$01
+        sta nes_hnr_fast
+        lda nes_hnr_bankb+1       ; 0 = banco 0, 4 = banco 1
+        lsr : lsr
+        inc                       ; 1 / 2 = a MESMA marca da SONDA 1 do caminho geral
+        ora @nes_dbg_ntbank
+        sta @nes_dbg_ntbank
+        rep #$20 : .al
+        lda @nes_nt_facc          ; bytes de NT_RUN neste frame
+        clc
+        adc @nes_hnr_copylen
+        sta @nes_nt_facc
+        ; --- 2+ bytes: o MESMO MVN do caminho geral ---
+        sep #$20 : .as
+        lda nes_parse_bank
+        sta @nes_mvn_stub+2
+        phb                       ; MVN deixa DB = banco destino ($7F)
+        rep #$30 : .al : .xl
+        lda nes_parse_ptr
+        clc
+        adc #$0004
+        tax
+        lda @nes_hnr_ntoff
+        clc
+        adc #!nes_nametable_shadow
+        tay
+        lda @nes_hnr_copylen
+        dec
+        jsl @nes_mvn_stub
+        sep #$20 : .as
+        plb
+nhn_fast_pol:
+        ; Politica == nes_chrfd_ntdefer + nes_nt_fits do caminho geral, em linha.
+        ; Regime ADIAVEL (despejo de CHR-RAM em voo E tela apagada) e' raro e tem
+        ; ramos de adiamento: segue o caminho geral, que refaz o teste.
+        lda @nes_chrfd_mode
+        beq nhn_fp_norm
+        lda @nes_regs_ppumask
+        and #$18
+        bne nhn_fp_norm
+        brl nhn_dispatch
+nhn_fp_norm:
+        rep #$20 : .al
+        lda @nes_nt_cost
+        cmp #NHN_INCR_MAX_CELLS+1
+        bcs nhn_fp_glob           ; caro: pass global (mesmo destino do geral)
+        clc
+        adc @nes_nt_fcells        ; cost + gasto do frame
+        cmp @nes_nt_fbud
+        beq nhn_fp_fit            ; cabe EXATAMENTE
+        bcs nhn_fp_glob           ; nao cabe no orcamento do frame
+nhn_fp_fit:
+        sta @nes_nt_fcells        ; contabiliza no orcamento (A = fcells + cost)
+        jsr ncr_setup_bgbase      ; sai .al
+        rep #$10 : .xl
+        jsr nhn_fast_seg
+        brl nhn_copy_done
+nhn_fp_glob:
+        brl nhn_global_path
+
+; ------------------------------------------------------------
+; nhn_streak -- (MAIN) runs de UM byte SEGUIDOS (celula ou attr). No scroll
+; rapido o jogo escreve uma coluna de 30 tiles (e os attrs dela) um por um
+; (PPUCTRL com incremento de 32), e o renderer recebe 30-90 CMD_NT_RUN de 1
+; byte colados: cada um pagava o despacho do parser, a entrada do handler, a
+; politica, o setup do conversor e a saida. Aqui o primeiro run (ja' lido pelo
+; front: len == 1, dentro da CIRAM, ntoff em nes_hnr_ntoff) e todos os
+; CMD_NT_RUN de 1 byte que vierem logo depois sao consumidos num laco so';
+; devolve em X o total de bytes (o npf_advance soma em ptr/consumed como se
+; fosse um comando grande).
+;
+; O que fica fora do laco e' o que nao muda entre dois runs do MAIN: bgbase
+; (PPUCTRL), orcamento (nes_nt_fbud), mascara de banco, regime. O gasto
+; (fcells), os bytes (facc) e a marca da SONDA 1 acumulam em DP e saem de uma
+; vez no fim. nes_chrfd_mode/ppumask sao lidos 1x (a NMI pode limpar o modo no
+; meio: vale como se ela tivesse caido logo depois do laco). A faixa suja do
+; tilemap (nes_tm_lo/hi) continua sendo marcada POR CELULA, colada na escrita,
+; como no conversor de sempre (a janela de corrida com a NMI nao aumenta).
+; Qualquer run que nao seja "CMD_NT_RUN, len 1, dentro da CIRAM, cabe no
+; orcamento" ENCERRA o laco SEM consumi-lo: o despachador o entrega ao handler
+; pelo caminho de sempre. Se nem o primeiro cabe (n == 0), segue o caminho
+; geral (nhn_old_cont).
+;
+; DP (tudo temporario do handler): s0s = fcells corrente, s0e = nes_nt_fbud,
+; s1s = ultimo offset em que um comando de 5 bytes ainda cabe no frame,
+; s1e = Y salvo em volta do conversor, segs = n, sege/bankb = runs nos bancos
+; 0/1 (SONDA 1), cr_ce != 0 = ha' banco mascarado (testa por run),
+; nes_cr_tmp = len | dado<<8 do run corrente.
+; ------------------------------------------------------------
+nhn_streak:
+        sep #$20 : .as
+        lda @nes_chrfd_mode
+        beq nss_reg_ok
+        lda @nes_regs_ppumask
+        and #$18
+        bne nss_reg_ok
+        brl nhn_old_cont          ; regime ADIAVEL (raro): caminho geral
+nss_reg_ok:
+        jsr ncr_setup_bgbase      ; nes_cr_bgbase (sai .al)
+        rep #$30 : .al : .xl
+        lda @nes_nt_fcells
+        sta nes_hnr_s0s
+        lda @nes_nt_fbud
+        sta nes_hnr_s0e
+        lda nes_parse_len
+        sec
+        sbc nes_parse_consumed    ; bytes que o frame ainda tem a partir deste run
+        sec
+        sbc #$0005                ; menos um comando de 1 byte
+        bcs nss_lim_ok
+        lda #$0000                ; nenhum run seguinte cabe
+nss_lim_ok:
+        sta nes_hnr_s1s
+        lda #$0000
+        sta nes_hnr_segs          ; n = runs consumidos
+        sta nes_hnr_sege          ; runs no banco 0
+        sta nes_hnr_bankb         ; runs no banco 1
+        sta nes_cr_ce             ; 0 = os dois bancos ligados (H/V: o caso comum)
+        lda #$ffff
+        sta nes_cr_cs             ; cache de paleta vazio (chave real <= $07DE)
+        lda #$0000
+        sep #$20 : .as
+        lda nes_cr_bankmask
+        cmp #$03
+        beq nss_mask_all
+        rep #$20 : .al
+        inc nes_cr_ce
+nss_mask_all:
+        rep #$20 : .al
+        ldy #$0003
+        lda [nes_parse_ptr],y     ; run 1: len | dado<<8
+        sta nes_cr_tmp
+        lda @nes_hnr_ntoff
+        tax
+        bra nss_body
+nss_loop:
+        cpy nes_hnr_s1s           ; cabe outro comando de 5 bytes no frame?
+        beq nss_inframe
+        bcs nss_exit
+nss_inframe:
+        sep #$20 : .as
+        lda [nes_parse_ptr],y
+        cmp #CMD_NT_RUN
+        bne nss_exit
+        iny
+        rep #$20 : .al
+        lda [nes_parse_ptr],y     ; nt_off
+        tax
+        iny
+        iny
+        lda [nes_parse_ptr],y     ; len | dado<<8
+        sta nes_cr_tmp
+nss_body:
+        rep #$30 : .al : .xl      ; X = nt_off, Y = offset do byte 'len'
+        lda nes_cr_tmp
+        and #$00ff
+        cmp #$0001
+        bne nss_back              ; run de varias celulas: caminho de sempre
+        txa
+        cmp #$0800
+        bcs nss_back              ; fora da CIRAM
+        and #$03ff
+        cmp #$03c0
+        bcs nss_attr              ; byte de attr
+        lda nes_hnr_s0s
+        inc                       ; custo de 1 celula
+        bra nss_budget
+nss_attr:
+        lda nes_hnr_s0s
+        clc
+        adc #$0010                ; custo de 1 attr = 16 celulas (bloco 4x4)
+nss_budget:
+        cmp nes_hnr_s0e
+        beq nss_fit               ; cabe EXATAMENTE (== nes_nt_fits)
+        bcs nss_back              ; estourou o orcamento do frame: pass global
+nss_fit:
+        sta nes_hnr_s0s
+        inc nes_hnr_segs
+        sep #$20 : .as
+        lda nes_cr_tmp+1          ; dado
+        sta @nes_nametable_shadow,x
+        rep #$20 : .al
+        cpx #$0400
+        bcs nss_bank1
+        inc nes_hnr_sege          ; SONDA 1: pagina fisica 0
+        lda nes_cr_ce
+        beq nss_conv
+        sep #$20 : .as
+        lda nes_cr_bankmask
+        and #$01
+        ; rep nao mexe em Z
+        rep #$20 : .al
+        bne nss_conv
+        bra nss_next              ; banco mascarado (single-mode): so' o shadow
+        ; largura na entrada = a dos branches (diretiva, sem bytes)
+        .al
+nss_bank1:
+        inc nes_hnr_bankb         ; SONDA 1: pagina fisica 1
+        lda nes_cr_ce
+        beq nss_conv
+        sep #$20 : .as
+        lda nes_cr_bankmask
+        and #$02
+        rep #$20 : .al
+        beq nss_next
+        ; largura na entrada = a dos branches (diretiva, sem bytes)
+        .al
+nss_conv:
+        txa
+        and #$03ff
+        cmp #$03c0
+        bcs nss_conv_attr
+        ; --- celula, em linha. A palavra de paleta so' depende dos bits 1-4 e
+        ;     6-10 da celula (attr byte + qual quarto dele): numa coluna de
+        ;     scroll, linhas vizinhas repetem a chave e pulam o calculo. O
+        ;     cache vale so' dentro do laco e morre em toda escrita de attr
+        ;     (e' o unico run que muda o byte que ele leu). O tile e' o dado
+        ;     que acabou de ir pro shadow, entao nao se relê. ---
+        txa
+        and #$07de
+        cmp nes_cr_cs
+        beq nss_phit
+        sta nes_cr_cs
+        phx
+        phy
+        txy                       ; Y = celula
+        jsr ncc_palword           ; A = palavra de paleta
+        sta nes_cr_aend
+        ply
+        plx
+nss_phit:
+        lda nes_cr_tmp+1
+        and #$00ff                ; dado
+        ora nes_cr_aend           ; palavra do tilemap
+        pha
+        txa
+        asl
+        clc
+        adc nes_cr_dstoff
+        tax                       ; X = destino
+        pla
+        sta @nes_tilemap_shadow,x
+        inx
+        inx
+        txa                       ; X_end = destino + 2
+        cmp @nes_tm_hi
+        bcc nss_hi_ok
+        sta @nes_tm_hi
+nss_hi_ok:
+        sec
+        sbc #$0002                ; inicio
+        cmp @nes_tm_lo
+        bcs nss_next
+        sta @nes_tm_lo
+        bra nss_next
+nss_conv_attr:
+        sty nes_hnr_s1e
+        lda #$ffff
+        sta nes_cr_cs             ; muda um attr byte: o cache de paleta morre
+        ; bloco 4x4 do attr: n = attr - (banco + $3C0) = nt_off & $3F;
+        ; canto = banco + (n&$38)<<4 + (n&7)<<2 (== o calculo do nab_loop)
+        stx nes_cr_a
+        txa
+        and #$0038
+        asl : asl : asl : asl
+        sta nes_cr_base
+        txa
+        and #$0007
+        asl : asl
+        clc
+        adc nes_cr_base
+        sta nes_cr_base
+        txa
+        and #$0400
+        clc
+        adc nes_cr_base
+        sta nes_cr_base
+        jsr nab_blk4              ; sai .al/.xl
+        ldy nes_hnr_s1e
+nss_next:
+        iny
+        iny                       ; len(1) + dado(1): Y = offset do proximo run
+        bra nss_loop
+nss_back:
+        rep #$20 : .al
+        tya
+        sec
+        sbc #$0003                ; Y = offset deste run (nao consumido)
+        tay
+nss_exit:
+        rep #$30 : .al : .xl
+        lda nes_hnr_segs
+        bne nss_commit
+        brl nhn_old_cont          ; nenhum consumido (ex.: nao coube): geral
+nss_commit:
+        clc
+        adc @nes_nt_facc          ; +1 byte de NT_RUN por run
+        sta @nes_nt_facc
+        lda nes_hnr_s0s
+        sta @nes_nt_fcells
+        lda nes_hnr_sege
+        beq nss_nb0
+        sep #$20 : .as
+        lda @nes_dbg_ntbank
+        ora #$01
+        sta @nes_dbg_ntbank
+        rep #$20 : .al
+nss_nb0:
+        lda nes_hnr_bankb
+        beq nss_nb1
+        sep #$20 : .as
+        lda @nes_dbg_ntbank
+        ora #$02
+        sta @nes_dbg_ntbank
+        rep #$20 : .al
+nss_nb1:
+        tyx                       ; X = bytes consumidos (n * 5)
+        sep #$20 : .as
+        rts
+nhn_old_cont:
         rep #$20 : .al
         lda @nes_hnr_ntoff
         cmp #$0800                ; v1.1: CIRAM FISICA inteira (2 bancos)
@@ -2094,6 +2784,13 @@ nfs_b0:
 nfs_test:
         rep #$20 : .al            ; rep nao mexe em Z
         beq nfs_done              ; banco mascarado (single-mode)
+        lda nes_hnr_segs
+        inc
+        cmp nes_hnr_sege
+        bne nfs_range
+        ldy nes_hnr_segs          ; 1 celula (o caso de scroll): conversor proprio
+        jmp nes_convert_cell      ; sai .al/.xl
+nfs_range:
         lda nes_hnr_sege
         sta nes_cr_end
         ldy nes_hnr_segs
@@ -2239,47 +2936,264 @@ nab_loop:
         clc
         adc nes_hnr_bankb
         sta nes_cr_base
-        jsr nab_range4            ; linha 0 do bloco (A = base)
-        lda nes_cr_base
-        clc
-        adc #$0020
-        jsr nab_range4            ; linha 1
-        lda nes_cr_base
-        clc
-        adc #$0040
-        jsr nab_range4            ; linha 2
-        lda nes_cr_base
-        clc
-        adc #$0060
-        jsr nab_range4            ; linha 3
+        jsr nab_blk4              ; as 4 linhas do bloco (== 4x nab_range4)
         inc nes_cr_a
         bra nab_loop
 nis_done:
         rts
 
 ; ------------------------------------------------------------
-; nab_range4 -- converte as 4 celulas [A, A+4) se a celula cai na area de
-; CELULAS do seu banco ((A & $3FF) < $3C0 -- linhas 30/31 do bloco de attr
-; caem fora da tela NES: skip). A e' FISICO (v1.1). Entra/sai .al/.xl.
-; Preserva nes_cr_a/aend/base e nes_hnr_* (nes_convert_range nao os toca).
+; nab_blk4 -- converte o bloco 4x4 de celulas que o attr byte nes_cr_a governa:
+; as 4 linhas de 4 celulas [base+32r, +4), r = 0..3, saltando as que caem nas
+; linhas 30/31 do banco (fora da tela NES -- (celula & $3FF) >= $3C0). E' o que
+; eram 4 chamadas de nes_convert_range (uma por linha, sempre pelo caminho de
+; grupo completo e alinhado) com o setup de linha refeito 4 vezes; aqui o attr
+; byte e' lido UMA vez (linhas 0-1 usam o nibble baixo, 2-3 o alto) e as palavras
+; sao as MESMAS, na mesma ordem, com a faixa suja marcada POR LINHA como antes.
+; Entra: nes_cr_base = celula FISICA do canto do bloco (multiplo de 4),
+; nes_cr_a = offset FISICO do attr byte. Entra/sai .al/.xl. Clobbera A/X/Y e
+; nes_cr_tmp/p0/p1/gend/gmid/twz; preserva nes_cr_a/aend/base/bgbase e nes_hnr_*.
 ; ------------------------------------------------------------
-nab_range4:
-        rep #$20 : .al            ; runtime ja chega .al (redundante); a
-                                   ; DIRETIVA e' obrigatoria: textualmente
-                                   ; o bloco anterior termina .as (gotcha
-                                   ; snescom-as-al-leak)
-        sta nes_cr_gmid           ; scratch (livre fora do conversor)
+nab_blk4:
+        rep #$30 : .al : .xl
+        stz nes_cr_twz             ; sentinela do 'lda nes_cr_tw+1' (ver ncr_fast)
+        ldy nes_cr_a
+        lda [nes_nt_ptr],y         ; attr byte
+        and #$00ff
+        sta nes_cr_tmp             ; nibble corrente em nes_cr_tmp[3:0]
+        lda #$0002
+        sta nes_cr_gend            ; metades restantes (baixa, alta)
+        ldy nes_cr_base            ; Y = celula do canto
+nbk_half:
+        lda nes_cr_tmp
+        and #$0003
+        xba
+        asl : asl                  ; (attr&3)<<10
+        ora nes_cr_bgbase
+        sta nes_cr_p0
+        lda nes_cr_tmp
+        and #$000c
+        xba                        ; ((attr>>2)&3)<<10
+        ora nes_cr_bgbase
+        sta nes_cr_p1
+        lda #$0002
+        sta nes_cr_gmid            ; linhas desta metade
+nbk_row:
+        tya
         and #$03ff
-        cmp #$03c0                ; linha 30/31 dentro do banco? fora
-        bcs nabr_skip
-        lda nes_cr_gmid
-        tay
+        cmp #$03c0
+        bcs nbk_skip               ; linha 30/31: fora da tela
+        tya
+        asl
         clc
-        adc #$0004
-        sta nes_cr_end
-        jsr nes_convert_range     ; entra com Y=inicio; sai .al/.xl
-nabr_skip:
+        adc nes_cr_dstoff
+        tax                        ; X = destino no tilemap
+        lda [nes_nt_ptr],y         ; colunas 0-1 (paleta p0)
+        sta nes_cr_tw
+        and #$00ff
+        ora nes_cr_p0
+        sta @nes_tilemap_shadow,x
+        lda nes_cr_tw+1            ; coluna 1 ja' estendida (twz == 0)
+        ora nes_cr_p0
+        sta @nes_tilemap_shadow+2,x
+        iny
+        iny
+        lda [nes_nt_ptr],y         ; colunas 2-3 (paleta p1)
+        sta nes_cr_tw
+        and #$00ff
+        ora nes_cr_p1
+        sta @nes_tilemap_shadow+4,x
+        lda nes_cr_tw+1
+        ora nes_cr_p1
+        sta @nes_tilemap_shadow+6,x
+        txa
+        clc
+        adc #$0008                 ; X_end = destino + 8
+        cmp @nes_tm_hi
+        bcc nbk_hi_ok
+        sta @nes_tm_hi
+nbk_hi_ok:
+        sec
+        sbc #$0008                 ; inicio da linha
+        cmp @nes_tm_lo
+        bcs nbk_lo_ok
+        sta @nes_tm_lo
+nbk_lo_ok:
+        tya
+        clc
+        adc #$001e                 ; Y estava em celula+2: proxima linha = +32
+        tay
+        bra nbk_next
+nbk_skip:
+        tya
+        clc
+        adc #$0020
+        tay
+nbk_next:
+        dec nes_cr_gmid
+        bne nbk_row
+        lda nes_cr_tmp
+        lsr : lsr : lsr : lsr      ; nibble alto -> linhas 2-3
+        sta nes_cr_tmp
+        dec nes_cr_gend
+        bne nbk_half
         rts
+
+; ------------------------------------------------------------
+; ncc_palword -- palavra de paleta do tilemap de UMA celula: ((attr >> sh) & 3)
+; << 10 | nes_cr_bgbase, com o attr byte do bloco 4x4 dela lido do shadow e
+; sh = 4*(celula bit 6) + 2*(celula bit 1) -- a mesma conta do refresh de
+; grupo do nes_convert_range. Entra: Y = celula FISICA (.al/.xl). Sai: A =
+; palavra, .al/.xl. Clobbera X/Y e nes_cr_p1 (e SO' ele: nes_cr_tmp, que o laco
+; do nhn_streak usa para o dado do run, fica intacto).
+; ------------------------------------------------------------
+ncc_palword:
+        tya
+        lsr
+        and #$03fe                 ; ((c>>2)&$1FF)*2: bits 2-10 da celula, em palavras
+        tax
+        lda @nes_attidx_tab,x      ; banco | $3C0 | (coluna de quadrante) | (linha de quadrante)<<3
+        tyx                        ; X = celula
+        tay                        ; Y = indice do attr byte
+        lda [nes_nt_ptr],y         ; attr (16b; mascara abaixo)
+        and #$00ff
+        sta nes_cr_p1
+        txa
+        and #$0040                 ; bit6 da celula (linha&2): attr >> 4
+        beq ncc_rs0
+        lda nes_cr_p1
+        lsr : lsr : lsr : lsr
+        sta nes_cr_p1
+ncc_rs0:
+        txa
+        and #$0002                 ; bit1 (coluna 2-3 do grupo): attr >> 2
+        beq ncc_cs0
+        lda nes_cr_p1
+        lsr : lsr
+        sta nes_cr_p1
+ncc_cs0:
+        lda nes_cr_p1
+        and #$0003
+        xba
+        asl : asl                  ; paleta << 10
+        ora nes_cr_bgbase
+        rts
+
+; ------------------------------------------------------------
+; nes_convert_cell -- UMA celula: o mesmo que nes_convert_range com [Y, Y+1) --
+; mesma palavra no tilemap, mesma faixa suja [dst, dst+2) -- sem montar linha,
+; grupo, gend/gmid nem os dois mini-lacos (o custo do range para 1 celula era
+; ~370 ciclos, dos quais ~330 de preparo). Chamada pelo nhn_fast_seg quando o
+; segmento tem 1 celula; o laco do nhn_streak tem a conversao em linha.
+; Entra: Y = celula FISICA (16b, qualquer largura); requer nes_cr_bgbase e o ptr
+; dp nes_nt_ptr como o nes_convert_range. Sai .al/.xl. Clobbera A/X/Y e
+; nes_cr_p0/p1. NAO escreve nes_cr_end nem nes_tm_rs (temporarios do range).
+; ------------------------------------------------------------
+nes_convert_cell:
+        rep #$30 : .al : .xl
+        phy
+        jsr ncc_palword
+        sta nes_cr_p0
+        plx                        ; X = celula
+        txy
+        lda [nes_nt_ptr],y
+        and #$00ff
+        ora nes_cr_p0              ; palavra do tilemap
+        pha
+        txa
+        asl
+        clc
+        adc nes_cr_dstoff
+        tax                        ; X = destino
+        pla
+        sta @nes_tilemap_shadow,x
+        inx
+        inx
+        txa                        ; X_end = destino + 2
+        cmp @nes_tm_hi
+        bcc ncc_hi_ok
+        sta @nes_tm_hi
+ncc_hi_ok:
+        sec
+        sbc #$0002                 ; inicio
+        cmp @nes_tm_lo
+        bcs ncc_lo_ok
+        sta @nes_tm_lo
+ncc_lo_ok:
+        rts
+
+; ------------------------------------------------------------
+; nes_attidx_tab -- indice do attr byte de uma celula, em palavras, indexado por
+; X = ((c>>2) & $1FF) * 2 (bits 2-10 da celula FISICA): banco ($400 se o bit 10)
+; | $3C0 | (bits 2-4 = coluna de quadrante) | (bits 7-9 = linha de quadrante)<<3.
+; E' o (cel>>4)&$38 + (cel>>2)&7 + $3C0 + (cel&$400) do nes_convert_range sem as
+; sete instrucoes de mascara/deslocamento. 1 KB de ROM; lido com @long,x.
+; ------------------------------------------------------------
+nes_attidx_tab:
+        .word $03c0,$03c1,$03c2,$03c3,$03c4,$03c5,$03c6,$03c7
+        .word $03c0,$03c1,$03c2,$03c3,$03c4,$03c5,$03c6,$03c7
+        .word $03c0,$03c1,$03c2,$03c3,$03c4,$03c5,$03c6,$03c7
+        .word $03c0,$03c1,$03c2,$03c3,$03c4,$03c5,$03c6,$03c7
+        .word $03c8,$03c9,$03ca,$03cb,$03cc,$03cd,$03ce,$03cf
+        .word $03c8,$03c9,$03ca,$03cb,$03cc,$03cd,$03ce,$03cf
+        .word $03c8,$03c9,$03ca,$03cb,$03cc,$03cd,$03ce,$03cf
+        .word $03c8,$03c9,$03ca,$03cb,$03cc,$03cd,$03ce,$03cf
+        .word $03d0,$03d1,$03d2,$03d3,$03d4,$03d5,$03d6,$03d7
+        .word $03d0,$03d1,$03d2,$03d3,$03d4,$03d5,$03d6,$03d7
+        .word $03d0,$03d1,$03d2,$03d3,$03d4,$03d5,$03d6,$03d7
+        .word $03d0,$03d1,$03d2,$03d3,$03d4,$03d5,$03d6,$03d7
+        .word $03d8,$03d9,$03da,$03db,$03dc,$03dd,$03de,$03df
+        .word $03d8,$03d9,$03da,$03db,$03dc,$03dd,$03de,$03df
+        .word $03d8,$03d9,$03da,$03db,$03dc,$03dd,$03de,$03df
+        .word $03d8,$03d9,$03da,$03db,$03dc,$03dd,$03de,$03df
+        .word $03e0,$03e1,$03e2,$03e3,$03e4,$03e5,$03e6,$03e7
+        .word $03e0,$03e1,$03e2,$03e3,$03e4,$03e5,$03e6,$03e7
+        .word $03e0,$03e1,$03e2,$03e3,$03e4,$03e5,$03e6,$03e7
+        .word $03e0,$03e1,$03e2,$03e3,$03e4,$03e5,$03e6,$03e7
+        .word $03e8,$03e9,$03ea,$03eb,$03ec,$03ed,$03ee,$03ef
+        .word $03e8,$03e9,$03ea,$03eb,$03ec,$03ed,$03ee,$03ef
+        .word $03e8,$03e9,$03ea,$03eb,$03ec,$03ed,$03ee,$03ef
+        .word $03e8,$03e9,$03ea,$03eb,$03ec,$03ed,$03ee,$03ef
+        .word $03f0,$03f1,$03f2,$03f3,$03f4,$03f5,$03f6,$03f7
+        .word $03f0,$03f1,$03f2,$03f3,$03f4,$03f5,$03f6,$03f7
+        .word $03f0,$03f1,$03f2,$03f3,$03f4,$03f5,$03f6,$03f7
+        .word $03f0,$03f1,$03f2,$03f3,$03f4,$03f5,$03f6,$03f7
+        .word $03f8,$03f9,$03fa,$03fb,$03fc,$03fd,$03fe,$03ff
+        .word $03f8,$03f9,$03fa,$03fb,$03fc,$03fd,$03fe,$03ff
+        .word $03f8,$03f9,$03fa,$03fb,$03fc,$03fd,$03fe,$03ff
+        .word $03f8,$03f9,$03fa,$03fb,$03fc,$03fd,$03fe,$03ff
+        .word $07c0,$07c1,$07c2,$07c3,$07c4,$07c5,$07c6,$07c7
+        .word $07c0,$07c1,$07c2,$07c3,$07c4,$07c5,$07c6,$07c7
+        .word $07c0,$07c1,$07c2,$07c3,$07c4,$07c5,$07c6,$07c7
+        .word $07c0,$07c1,$07c2,$07c3,$07c4,$07c5,$07c6,$07c7
+        .word $07c8,$07c9,$07ca,$07cb,$07cc,$07cd,$07ce,$07cf
+        .word $07c8,$07c9,$07ca,$07cb,$07cc,$07cd,$07ce,$07cf
+        .word $07c8,$07c9,$07ca,$07cb,$07cc,$07cd,$07ce,$07cf
+        .word $07c8,$07c9,$07ca,$07cb,$07cc,$07cd,$07ce,$07cf
+        .word $07d0,$07d1,$07d2,$07d3,$07d4,$07d5,$07d6,$07d7
+        .word $07d0,$07d1,$07d2,$07d3,$07d4,$07d5,$07d6,$07d7
+        .word $07d0,$07d1,$07d2,$07d3,$07d4,$07d5,$07d6,$07d7
+        .word $07d0,$07d1,$07d2,$07d3,$07d4,$07d5,$07d6,$07d7
+        .word $07d8,$07d9,$07da,$07db,$07dc,$07dd,$07de,$07df
+        .word $07d8,$07d9,$07da,$07db,$07dc,$07dd,$07de,$07df
+        .word $07d8,$07d9,$07da,$07db,$07dc,$07dd,$07de,$07df
+        .word $07d8,$07d9,$07da,$07db,$07dc,$07dd,$07de,$07df
+        .word $07e0,$07e1,$07e2,$07e3,$07e4,$07e5,$07e6,$07e7
+        .word $07e0,$07e1,$07e2,$07e3,$07e4,$07e5,$07e6,$07e7
+        .word $07e0,$07e1,$07e2,$07e3,$07e4,$07e5,$07e6,$07e7
+        .word $07e0,$07e1,$07e2,$07e3,$07e4,$07e5,$07e6,$07e7
+        .word $07e8,$07e9,$07ea,$07eb,$07ec,$07ed,$07ee,$07ef
+        .word $07e8,$07e9,$07ea,$07eb,$07ec,$07ed,$07ee,$07ef
+        .word $07e8,$07e9,$07ea,$07eb,$07ec,$07ed,$07ee,$07ef
+        .word $07e8,$07e9,$07ea,$07eb,$07ec,$07ed,$07ee,$07ef
+        .word $07f0,$07f1,$07f2,$07f3,$07f4,$07f5,$07f6,$07f7
+        .word $07f0,$07f1,$07f2,$07f3,$07f4,$07f5,$07f6,$07f7
+        .word $07f0,$07f1,$07f2,$07f3,$07f4,$07f5,$07f6,$07f7
+        .word $07f0,$07f1,$07f2,$07f3,$07f4,$07f5,$07f6,$07f7
+        .word $07f8,$07f9,$07fa,$07fb,$07fc,$07fd,$07fe,$07ff
+        .word $07f8,$07f9,$07fa,$07fb,$07fc,$07fd,$07fe,$07ff
+        .word $07f8,$07f9,$07fa,$07fb,$07fc,$07fd,$07fe,$07ff
+        .word $07f8,$07f9,$07fa,$07fb,$07fc,$07fd,$07fe,$07ff
 
 ; ============================================================
 ; nes_handle_oam -- CMD_OAM (256 bytes NES crus a partir de Y=1: Y,tile,
@@ -2335,6 +3249,8 @@ nabr_skip:
 nes_handle_oam:
         sep #$20 : .as             ; declaracao explicita (gotcha .as/.al)
         rep #$10 : .xl
+        jsr nho_hmask              ; v3.13: janelas de sprite ainda descendo
+        sep #$20 : .as
         ; --- v2.7: PPUCTRL bit5 = sprites 8x16 -> caminho PROPRIO (o SNES
         ;     nao tem tamanho 8x16; cada entrada NES vira DUAS entradas de
         ;     OAM SNES). Antes disso o renderer tratava TODO jogo como 8x8:
@@ -2378,6 +3294,18 @@ nho_loop:
         iny
         lda [nes_parse_ptr],y   ; tile (indice 8-bit == indice NES)
         sta @nes_oam_shadow+2,x
+        pha                     ; v3.13: sem janela descendo, nada a testar
+        lda @nes_oam_hmask
+        beq nho_visp
+        pla
+        jsr nho_hide_chk        ; carry SET = janela ainda descendo
+        bcc nho_vis
+        lda #$f0
+        sta @nes_oam_shadow+1,x ; escondido neste frame
+        bra nho_vis
+nho_visp:
+        pla
+nho_vis:
         iny
         lda [nes_parse_ptr],y   ; attr NES
         sta nes_ho_a
@@ -2473,6 +3401,15 @@ nhob_loop:
         sta @nes_oam_shadow+2,x ; provisorio: cima = par, baixo = par+1
         inc
         sta @nes_oam_shadow+6,x ; (trocados abaixo se V-FLIP)
+        lda @nes_oam_hmask      ; v3.13: sem janela descendo, nada a testar
+        beq nhob_vis
+        lda nes_ho_a
+        jsr nho_hide_chk        ; carry SET = janela ainda descendo
+        bcc nhob_vis
+        lda #$f0
+        sta @nes_oam_shadow+1,x ; as duas metades escondidas neste frame
+        sta @nes_oam_shadow+5,x
+nhob_vis:
         iny
         lda [nes_parse_ptr],y   ; attr NES
         sta nes_ho_a
@@ -2548,6 +3485,101 @@ nhob_hidden:
 ; range (estado em DP, ~60 cyc/celula vs ~110 do loop antigo) -- o mesmo
 ; nucleo atende o caminho INCREMENTAL do nes_handle_nt_run, entao
 ; incremental==global por construcao (sem 2 implementacoes pra divergir).
+; ------------------------------------------------------------
+; nho_hmask / nho_hide_chk -- (MAIN, v3.13) esconde no frame os sprites cujo
+; tile cai numa janela da regiao EXIBIDA que ainda esta' descendo. Com isso uma
+; troca de conjunto de sprites carrega in-place (regra 3), sem o quadro preto da
+; regra 4: o sprite nunca aparece com os tiles de outro banco, e volta no frame
+; em que a janela fecha. Os comandos de banco ($14/$15) vem ANTES do CMD_OAM no
+; pacote, entao o arm deste frame ja' esta' na pendencia aqui; a NMI pode fechar
+; a janela entre o decode e o apply (o sprite fica 1 frame a mais escondido).
+;   janela de um sprite = (msb << 2) | (tile >> 6): a OBJ da regiao sao 8
+;   janelas de 64 tiles (2 KB) em sequencia, tile de 9 bits.
+; ------------------------------------------------------------
+nho_hmask:
+        sep #$20 : .as
+        lda #$00
+        sta @nes_oam_hmask
+        lda @nes_chrw_active
+        beq nhm_out
+        lda @nes_chr_ram_mode
+        bne nhm_out
+        lda #$00
+        sta @nes_oam_hobj
+        ; so' metade que o FUNDO tambem le: janela SO-OBJ desce inteira antes
+        ; da OAM ou a OAM do quadro anterior fica (nes_chrw_early_obj), entao
+        ; esconder ali so' sumia com o sprite (o Mario do SMB3 a cada pose).
+        lda @nes_chrw_need0
+        and #$03                    ; NES_CHRW_PLANE_OBJ | NES_CHRW_PLANE_BG
+        cmp #$03
+        bne nhm_n1
+        lda #$0f
+        sta @nes_oam_hobj
+nhm_n1:
+        sep #$20 : .as
+        lda @nes_chrw_need1
+        and #$03                    ; NES_CHRW_PLANE_OBJ | NES_CHRW_PLANE_BG
+        cmp #$03
+        bne nhm_cur
+        lda @nes_oam_hobj
+        ora #$f0
+        sta @nes_oam_hobj
+nhm_cur:
+        sep #$20 : .as
+        lda @nes_chr_cur_slot
+        bne nhm_r1
+        lda @nes_chrw_pend0
+        bra nhm_and
+nhm_r1:
+        sep #$20 : .as
+        lda @nes_chrw_pend1
+nhm_and:
+        sep #$20 : .as
+        and @nes_oam_hobj
+        sta @nes_oam_hmask
+nhm_out:
+        sep #$20 : .as
+        rts
+
+; A = tile (8 bits) e nes_ho_msb = bit 8. Saida: carry SET = esconder. Preserva
+; X/Y; usa nes_ho_b como rascunho (o chamador o reescreve depois). .as
+nho_hide_chk:
+        .as
+        pha
+        lda @nes_oam_hmask
+        beq nhc_no
+        lda nes_ho_msb
+        beq nhc_lo
+        lda @nes_oam_hmask
+        lsr
+        lsr
+        lsr
+        lsr
+        bra nhc_m
+nhc_lo:
+        lda @nes_oam_hmask
+        and #$0f
+nhc_m:
+        sta nes_ho_b
+        pla
+        pha
+        and #$c0                    ; (tile >> 6) passos de shift na mascara
+        beq nhc_t
+nhc_sh:
+        lsr nes_ho_b
+        sec
+        sbc #$40
+        bne nhc_sh
+nhc_t:
+        pla
+        lda nes_ho_b
+        lsr                         ; bit 0 -> carry
+        rts
+nhc_no:
+        pla
+        clc
+        rts
+
 nes_convert_nametable:
         ; ============================================================
         ; v2.13 F-8 -- UMA FATIA do pass GLOBAL. carry SET = pass COMPLETO.
@@ -2585,6 +3617,8 @@ nes_convert_nametable:
         sta @nes_nt_gbud
         jsr ncr_setup_bgbase       ; sai .al -- fotografa o bgbase DESTA fatia
         rep #$30 : .al : .xl
+        ; largura na entrada = a dos branches (diretiva, sem bytes)
+        .al
 ncn_loop:
         lda @nes_nt_gcur
         cmp #NES_NT_CELLS
@@ -2595,7 +3629,8 @@ ncn_loop:
         sep #$20 : .as
         lda nes_cr_bankmask
         and #$02
-        rep #$20 : .al             ; rep nao mexe em Z
+        ; rep nao mexe em Z
+        rep #$20 : .al
         bne ncn_b1_ok
         lda #NES_NT_CELLS          ; banco mascarado: pula tudo
         sta @nes_nt_gcur
@@ -2621,6 +3656,8 @@ ncn_b0_ok:
         sta @nes_nt_glim
         lda #$0000
         sta @nes_nt_gofs
+        ; largura na entrada = a dos branches (diretiva, sem bytes)
+        .al
 ncn_run:
         lda @nes_nt_gcur           ; gend = min(gcur + gbud, glim)
         clc
@@ -3034,7 +4071,7 @@ ncr_rs_done:
         ; ============================================================
         ; CAMINHO RAPIDO (missao de perf): grupo COMPLETO E ALINHADO, que e'
         ; o caso quase universal -- o pass global comeca em multiplo de 32 e
-        ; o incremental de attr (nab_range4) entrega blocos de 4 alinhados.
+        ; o incremental de attr (nab_blk4) entrega blocos de 4 alinhados.
         ; Ele salva as DUAS coisas caras do caminho geral: o calculo de
         ; gend/gmid (~35 cyc) e os testes de fim de mini-laco por celula
         ; (cpy/bcs/bra = 8 dos 35 cyc de cada celula). Alem disso le as
@@ -3314,6 +4351,10 @@ nfc_t2_nocg:
         rep #$10 : .xl
         ldx #!nes_fb_regs1
 nfc_fin:
+        lda @nes_dec_gen          ; v3.13: geracao do frame -> +16 (genok);
+        inc                       ; so' frame COMMITADO conta
+        sta @nes_dec_gen
+        sta @$7f0010,x
         lda @nes_split_pend       ; hdma do frame -> fb_regs[t]+12 (base
         sta @$7f000c,x            ; $7F0000 + X=!fb_regs + $0C)
         lda @nes_cspl_pend        ; v2.3: hdma de TILE-BASE do frame -> +13
@@ -3408,6 +4449,8 @@ nes_chr_handle_state:
         ldy #$0004
         lda [nes_parse_ptr],y
         cmp #CMD_CHR_STATE8
+        beq nhs_ignored
+        cmp #CMD_M5_STATE            ; MMC5: o $17 manda (o $12 e' a sentinela constante)
         beq nhs_ignored
         lda @nes_chrw_active
         bne nhs_ignored
@@ -4654,7 +5697,10 @@ ncsec_done:
 nes_chrw_rd:                     ; -> A(.al) = id residente da janela X/2
         sep #$20 : .as
         lda @nes_chrw_reg
-        bne ncwrd_r1
+        cmp #$02
+        beq ncwrd_r2
+        cmp #$01
+        beq ncwrd_r1
         rep #$20 : .al
         lda @nes_chrw_r0,x
         rts
@@ -4662,17 +5708,28 @@ ncwrd_r1:
         rep #$20 : .al
         lda @nes_chrw_r1,x
         rts
+ncwrd_r2:
+        rep #$20 : .al
+        lda @nes_chrw_r2,x
+        rts
 
 nes_chrw_rdpl:                   ; -> A(.al) = planos carregados (byte baixo)
         sep #$20 : .as
         lda @nes_chrw_reg
-        bne ncwrp_r1
+        cmp #$02
+        beq ncwrp_r2
+        cmp #$01
+        beq ncwrp_r1
         rep #$20 : .al
         lda @nes_chrw_pl0,x
         rts
 ncwrp_r1:
         rep #$20 : .al
         lda @nes_chrw_pl1,x
+        rts
+ncwrp_r2:
+        rep #$20 : .al
+        lda @nes_chrw_pl2,x
         rts
 
 nes_chrw_wr:                     ; r[k] = @nes_chrw_tmp ; pl[k] = 0
@@ -4683,7 +5740,10 @@ nes_chrw_wr:                     ; r[k] = @nes_chrw_tmp ; pl[k] = 0
         ; nao tem seria tela errada PERMANENTE.
         sep #$20 : .as
         lda @nes_chrw_reg
-        bne ncwwr_r1
+        cmp #$02
+        beq ncwwr_r2
+        cmp #$01
+        beq ncwwr_r1
         rep #$20 : .al
         lda @nes_chrw_tmp
         sta @nes_chrw_r0,x
@@ -4699,11 +5759,22 @@ ncwwr_r1:
         sta @nes_chrw_pl1,x
         sep #$20 : .as
         rts
+ncwwr_r2:
+        rep #$20 : .al
+        lda @nes_chrw_tmp
+        sta @nes_chrw_r2,x
+        lda #$0000
+        sta @nes_chrw_pl2,x
+        sep #$20 : .as
+        rts
 
 nes_chrw_drd:                    ; (NMI) -> A(.al) = id residente, reg=dreg
         sep #$20 : .as
         lda @nes_chrw_dreg
-        bne ncwdr_r1
+        cmp #$02
+        beq ncwdr_r2
+        cmp #$01
+        beq ncwdr_r1
         rep #$20 : .al
         lda @nes_chrw_r0,x
         rts
@@ -4711,11 +5782,19 @@ ncwdr_r1:
         rep #$20 : .al
         lda @nes_chrw_r1,x
         rts
+ncwdr_r2:
+        rep #$20 : .al
+        lda @nes_chrw_r2,x
+        rts
 
 nes_chrw_dsetpl:                 ; (NMI) pl[k] = A(.as), reg = dreg
+        sep #$20 : .as            ; (declara: o texto anterior termina em .al)
         xba                       ; guarda os planos em B (sem tocar memoria)
         lda @nes_chrw_dreg
-        bne ncwsp_r1
+        cmp #$02
+        beq ncwsp_r2
+        cmp #$01
+        beq ncwsp_r1
         xba
         rep #$20 : .al
         and #$00ff
@@ -4723,10 +5802,19 @@ nes_chrw_dsetpl:                 ; (NMI) pl[k] = A(.as), reg = dreg
         sep #$20 : .as
         rts
 ncwsp_r1:
+        sep #$20 : .as
         xba
         rep #$20 : .al
         and #$00ff
         sta @nes_chrw_pl1,x
+        sep #$20 : .as
+        rts
+ncwsp_r2:
+        sep #$20 : .as
+        xba
+        rep #$20 : .al
+        and #$00ff
+        sta @nes_chrw_pl2,x
         sep #$20 : .as
         rts
 
@@ -4768,6 +5856,29 @@ ncwno_lo:
         rts
 
 ; ------------------------------------------------------------
+; nes_chrw_dneedof -- (NMI, v3.13) planos a carregar na janela X da regiao
+; @nes_chrw_dreg: o need do frame, so' o plano de FUNDO fora da regiao
+; corrente. A regiao 2 sempre foi so' de fundo (v3.11); a nao-corrente serve
+; so' faixas secundarias, e o OBSEL (sprites) segue a corrente. X intacto.
+; ------------------------------------------------------------
+nes_chrw_dneedof:
+        sep #$20 : .as
+        jsr nes_chrw_needof
+        pha
+        lda @nes_m5_active           ; MMC5: os planos todos, como antes
+        bne ncwdn_cur
+        lda @nes_chrw_dreg
+        cmp @nes_chr_cur_slot
+        beq ncwdn_cur
+        pla
+        and #NES_CHRW_PLANE_BG
+        rts
+ncwdn_cur:
+        sep #$20 : .as
+        pla
+        rts
+
+; ------------------------------------------------------------
 ; nes_chrw_needs -- deriva need0/need1 do PPUCTRL do frame (bits 3/4/5).
 ; ------------------------------------------------------------
 nes_chrw_needs:
@@ -4797,7 +5908,7 @@ ncwn_obj:
         lda @nes_chrw_need1
         ora #NES_CHRW_PLANE_OBJ
         sta @nes_chrw_need1
-        rts
+        bra ncwn_dn
 ncwn_8x8:
         lda @nes_regs_ppuctrl
         and #NES_CHRW_CTRL_SPR
@@ -4805,11 +5916,17 @@ ncwn_8x8:
         lda @nes_chrw_need0
         ora #NES_CHRW_PLANE_OBJ
         sta @nes_chrw_need0
-        rts
+        bra ncwn_dn
 ncwn_spr1:
         lda @nes_chrw_need1
         ora #NES_CHRW_PLANE_OBJ
         sta @nes_chrw_need1
+ncwn_dn:
+        sep #$20 : .as               ; v3.13: copia do MAIN para o diff (ver
+        lda @nes_chrw_need0          ; nes_chrw_diffbg); a NMI le so' need0/1
+        sta @nes_chrw_dn0
+        lda @nes_chrw_need1
+        sta @nes_chrw_dn1
         rts
 
 ; ------------------------------------------------------------
@@ -4834,11 +5951,19 @@ ncwb_free:
 nes_chrw_mpend:
         sep #$20 : .as
         lda @nes_chrw_reg
-        bne ncwmp_r1
+        cmp #$02
+        beq ncwmp_r2
+        cmp #$01
+        beq ncwmp_r1
         lda @nes_chrw_pend0
         rts
 ncwmp_r1:
+        sep #$20 : .as
         lda @nes_chrw_pend1
+        rts
+ncwmp_r2:
+        sep #$20 : .as
+        lda @nes_chrw_pend2
         rts
 
 ; ------------------------------------------------------------
@@ -4847,11 +5972,26 @@ ncwmp_r1:
 nes_chrw_nba:
         sep #$20 : .as
         lda @nes_chrw_reg
-        bne ncwnb_r1
+        cmp #$02
+        beq ncwnb_r2
+        cmp #$01
+        beq ncwnb_r1
         lda #NES_CHR_BG12NBA_SLOT0
         rts
 ncwnb_r1:
+        sep #$20 : .as
         lda #NES_CHR_BG12NBA_SLOT1
+        rts
+ncwnb_r2:
+        sep #$20 : .as
+        lda @nes_chrw_t3ok
+        cmp #$02
+        beq ncwnb_r2lo
+        lda #NES_CHR_BG12NBA_T3      ; b4 = 1: o vao, char base $0000
+        rts
+ncwnb_r2lo:
+        sep #$20 : .as
+        lda #NES_CHR_BG12NBA_SWAP    ; b4 = 0: metade baixa da SWAP
         rts
 
 ; ------------------------------------------------------------
@@ -4881,6 +6021,7 @@ nes_chrw_ldcmp_band:
 ncwlb_loop:
         lda [nes_parse_ptr],y
         and #$00ff
+        ora @nes_m5_objsh,x          ; MMC5: id de OBJ empacotado (0 nos demais mappers)
         sta @nes_chrw_cmp,x
         iny
         inx
@@ -4939,10 +6080,10 @@ ncwd_l0:
         bne ncwd_n0
         cpx #$0008                 ; needof inline (metade 0-3 x 4-7)
         bcc ncwd_nl0
-        lda @nes_chrw_need1
+        lda @nes_chrw_dn1
         bra ncwd_ns0
 ncwd_nl0:
-        lda @nes_chrw_need0
+        lda @nes_chrw_dn0
 ncwd_ns0:
         sta @nes_chrw_tmp2
         lda @nes_chrw_pl0,x
@@ -4963,6 +6104,12 @@ ncwd_n0:
         bcc ncwd_l0
         rts
 ncwd_reg1:                         ; GEMEO EXATO do laco acima com r1/pl1
+        sep #$20 : .as
+        cmp #$02                     ; A = @nes_chrw_reg (o bne que trouxe ate' aqui)
+        bne ncwd_reg1b
+        jmp ncwd_reg2
+ncwd_reg1b:
+        sep #$20 : .as
         lda @nes_chrw_pend1
         sta @nes_chrw_dpm
         ldx #$0000
@@ -4977,10 +6124,10 @@ ncwd_l1:
         bne ncwd_n1
         cpx #$0008
         bcc ncwd_nl1
-        lda @nes_chrw_need1
+        lda @nes_chrw_dn1
         bra ncwd_ns1
 ncwd_nl1:
-        lda @nes_chrw_need0
+        lda @nes_chrw_dn0
 ncwd_ns1:
         sta @nes_chrw_tmp2
         lda @nes_chrw_pl1,x
@@ -4999,6 +6146,50 @@ ncwd_n1:
         inx
         cpx #$0010
         bcc ncwd_l1
+        rts
+ncwd_reg2:                         ; v3.11: regiao TERCIARIA -- so' o plano BG, so'
+        sep #$20 : .as             ; as janelas da metade que o BG le
+        lda @nes_chrw_pend2
+        sta @nes_chrw_dpm
+        ldx #$0000
+ncwd_l2:
+        sep #$20 : .as
+        cpx #$0008                 ; so' a metade que o BG le (a outra nao
+        bcc ncwd_h2lo              ; tem lugar na regiao 2)
+        lda @nes_chrw_need1
+        bra ncwd_h2
+ncwd_h2lo:
+        sep #$20 : .as
+        lda @nes_chrw_need0
+ncwd_h2:
+        sep #$20 : .as
+        and #NES_CHRW_PLANE_BG
+        beq ncwd_n2
+        rep #$20 : .al
+        lda @nes_chrw_r2,x
+        cmp @nes_chrw_cmp,x
+        sep #$20 : .as
+        bne ncwd_d2
+        lda @nes_chrw_bittab,x
+        and @nes_chrw_dpm
+        bne ncwd_n2                  ; pendente com o id certo: nao re-arma
+        lda @nes_chrw_pl2,x
+        and #NES_CHRW_PLANE_BG
+        bne ncwd_n2
+ncwd_d2:
+        sep #$20 : .as
+        lda @nes_chrw_bittab,x
+        ora @nes_chrw_dmask
+        sta @nes_chrw_dmask
+        lda @nes_chrw_dcnt
+        inc
+        sta @nes_chrw_dcnt
+ncwd_n2:
+        sep #$20 : .as
+        inx
+        inx
+        cpx #$0010
+        bcc ncwd_l2
         rts
 
 ; ------------------------------------------------------------
@@ -5041,19 +6232,31 @@ ncwa_loop:
         sta @nes_chrw_jk
 ncwa_nojob:
         jsr nes_chrw_needof
+        jsr nes_chrw_armneed         ; v3.13: so' o fundo, na secundaria
         beq ncwa_next
         jsr nes_chrw_bitof
         pha
+        sep #$20 : .as
         lda @nes_chrw_reg
-        bne ncwa_p1
+        cmp #$02
+        beq ncwa_p2
+        cmp #$01
+        beq ncwa_p1
         pla
         ora @nes_chrw_pend0
         sta @nes_chrw_pend0
         bra ncwa_count
 ncwa_p1:
+        sep #$20 : .as
         pla
         ora @nes_chrw_pend1
         sta @nes_chrw_pend1
+        bra ncwa_count
+ncwa_p2:
+        sep #$20 : .as
+        pla
+        ora @nes_chrw_pend2
+        sta @nes_chrw_pend2
 ncwa_count:
         phx
         rep #$20 : .al
@@ -5062,11 +6265,34 @@ ncwa_count:
         sta @nes_chrw_arms
         sep #$20 : .as
         plx
+        jsr nes_chrw_agset           ; v3.13: o frame que armou (ver genok)
 ncwa_next:
         inx
         inx
         cpx #$0010
         bcc ncwa_loop
+        rts
+
+; ------------------------------------------------------------
+; nes_chrw_armneed -- (MAIN, v3.13) A(.as) = need da janela, so' o plano de
+; FUNDO quando @nes_chrw_armbg (o arm da residencia secundaria): uma janela que
+; so' sprite le registra o id novo e NAO entra na fila -- a NMI carregaria nada
+; nela (nes_chrw_dneedof) e o job vazio deixaria a regiao "ocupada", o que poe a
+; faixa em fallback. Flags N/Z = A (o chamador testa com beq).
+; ------------------------------------------------------------
+nes_chrw_armneed:
+        sep #$20 : .as
+        pha
+        lda @nes_m5_active
+        bne ncwan_all
+        lda @nes_chrw_armbg
+        beq ncwan_all
+        pla
+        and #NES_CHRW_PLANE_BG
+        rts
+ncwan_all:
+        sep #$20 : .as
+        pla
         rts
 
 ; ------------------------------------------------------------
@@ -5142,7 +6368,33 @@ ncwrc_miss:
         lda @nes_chrw_ccur           ; (nunca empilha 2 frames pretos)
         cmp #NES_CHRW_INPLACE_MAX+1
         bcc ncwrc_inplace
+        ; --- v3.13: transicao de tela e' FUNDO mudando. Medido no SMB3: o banco
+        ;     da pose do Mario grande (janela 4) troca sozinho e, no mesmo frame
+        ;     do passo da animacao dos blocos "?" (janelas 2-3), dava 3 janelas
+        ;     = regra 4 = quadro PRETO no meio da fase; e logo depois da entrada
+        ;     da fase o jogo troca 3 bancos de sprite de uma vez (inimigos), outro
+        ;     quadro preto no meio do fade. Com ate' INPLACE_MAX janelas de FUNDO
+        ;     divergindo, o resto (sprite) carrega in-place: a OAM esconde os
+        ;     sprites das janelas que ainda nao chegaram (nho_hmask). ---
+        lda @nes_chr_cur_slot
+        sta @nes_chrw_reg
+        lda #$00
+        sta @nes_chrw_dball
+        jsr nes_chrw_diffbg          ; janelas de FUNDO divergentes na corrente
+        lda @nes_chrw_dcnt
+        cmp #NES_CHRW_INPLACE_MAX+1
+        bcc ncwrc_inplace            ; o resto e' sprite: in-place, e os
+                                      ; sprites dessas janelas ficam escondidos
+                                      ; ate' elas carregarem (nho_hmask)
+ncwrc_r4:
+        sep #$20 : .as
+        lda @nes_chr_cur_slot        ; reg/dmask de volta = os da OUTRA
+        eor #$01
+        sta @nes_chrw_reg
+        jsr nes_chrw_diff
         ; ---- regra 4: transicao (reg ja = outra, dmask ja e' o dela) ----
+        jsr nes_chrw_victim          ; v3.13: carry SET = a vitima e' a CORRENTE
+        bcs ncwrc_vcur
         jsr nes_chrw_busy
         bcs ncwrc_skip
         jsr nes_chrw_arm
@@ -5169,6 +6421,206 @@ ncwrc_inplace:
         lda @nes_chrw_ccur
         sta @nes_chrw_dcnt
         jmp nes_chrw_arm             ; rts la'
+ncwrc_vcur:
+        ; ---- regra 4 com a vitima = CORRENTE (v3.13). A OUTRA regiao ja'
+        ;     serve a faixa secundaria; a corrente esta' ociosa (o cbusy
+        ;     mandou para o in-place antes de chegar aqui) e o que ela guarda
+        ;     nenhuma faixa deste frame usa. reg/dmask/dcnt = os da corrente
+        ;     (nes_chrw_victim). O forced-blank cobre a tela inteira, entao
+        ;     carregar na regiao exibida e' tao limpo quanto na outra. ----
+        sep #$20 : .as
+        jsr nes_chrw_arm
+        lda #$01
+        sta @nes_chrw_full
+        sta @nes_chrw_ev           ; efeito colateral: invalida o fast-skip
+        rep #$20 : .al
+        lda @nes_chrw_fulls
+        inc
+        sta @nes_chrw_fulls
+        lda @nes_chrw_vict
+        inc
+        sta @nes_chrw_vict
+        sep #$20 : .as
+        rts                          ; nes_chr_cur_slot nao muda
+
+; ------------------------------------------------------------
+; nes_chrw_victim -- (MAIN, v3.13) regra 4: QUAL regiao recebe a composicao
+; nova. Ate' a v3.12 era sempre a OUTRA -- e a outra e', quase sempre, a que
+; guarda a composicao da faixa SECUNDARIA (a barra de status do SMB3). Medido
+; no Ciclone e no console: entrando na 1-1 a barra (bancos 5c-5f, os MESMOS do
+; mapa) era despejada para a fase entrar, e voltava em fatias de 3 KB sob a
+; animacao continua dos blocos "?" = ~80 frames de lixo; e cada troca de
+; bancos de sprite (inimigo novo, Mario grande) repetia o despejo no meio da
+; fase. Aqui: com a secundaria valida neste frame (@nes_chrw_secok, so' o
+; $15), conta quantas janelas DELA faltam em cada regiao (so' o plano de
+; fundo -- a secundaria nunca e' fonte de sprite: o OBSEL segue a corrente) e
+; despeja a mais LONGE dela. Empate fica na OUTRA (o comportamento de antes).
+; Entra .as com reg = OUTRA, dmask/dcnt = diff dela contra a primaria e
+; mcur/ccur = diff da corrente. Saida: carry SET = vitima e' a CORRENTE (reg,
+; dmask, dcnt = os dela); carry CLEAR = vitima e' a OUTRA (estado igual ao da
+; entrada). cmp, j e ya voltam como entraram.
+; ------------------------------------------------------------
+nes_chrw_victim:
+        sep #$20 : .as
+        rep #$10 : .xl
+        lda @nes_m5_active
+        bne ncwv_no
+        lda @nes_chrw_secok
+        bne ncwv_go
+ncwv_no:
+        sep #$20 : .as
+        clc
+        rts
+ncwv_go:
+        rep #$30 : .al : .xl
+        ldx #$0000
+ncwv_sv:
+        lda @nes_chrw_cmp,x
+        sta @nes_chrw_pcmp,x
+        inx
+        inx
+        cpx #$0010
+        bcc ncwv_sv
+        lda @nes_chrw_ya
+        pha
+        lda @nes_chrw_j
+        pha
+        lda @nes_chrw_bests
+        sta @nes_chrw_j
+        jsr nes_chrw_offj
+        clc
+        adc #$0001
+        sta @nes_chrw_ya
+        sep #$20 : .as
+        jsr nes_chrw_ldcmp_band
+        lda #$01
+        sta @nes_chrw_dball
+        jsr nes_chrw_diffbg          ; reg = OUTRA
+        lda @nes_chrw_dcnt
+        sta @nes_chrw_vco
+        lda @nes_chr_cur_slot
+        sta @nes_chrw_reg
+        jsr nes_chrw_diffbg
+        lda @nes_chrw_dcnt
+        sta @nes_chrw_vcc
+        rep #$30 : .al : .xl
+        pla
+        sta @nes_chrw_j
+        pla
+        sta @nes_chrw_ya
+        ldx #$0000
+ncwv_rs:
+        lda @nes_chrw_pcmp,x
+        sta @nes_chrw_cmp,x
+        inx
+        inx
+        cpx #$0010
+        bcc ncwv_rs
+        sep #$20 : .as
+        lda @nes_chrw_vco
+        cmp @nes_chrw_vcc
+        bcc ncwv_cur                 ; a OUTRA esta' mais perto da secundaria
+        lda @nes_chr_cur_slot        ; vitima = OUTRA: refaz o diff dela contra
+        eor #$01                     ; a primaria (o de cima o sobrescreveu)
+        sta @nes_chrw_reg
+        jsr nes_chrw_diff
+        clc
+        rts
+ncwv_cur:
+        sep #$20 : .as
+        lda @nes_chr_cur_slot
+        sta @nes_chrw_reg
+        lda @nes_chrw_mcur
+        sta @nes_chrw_dmask
+        lda @nes_chrw_ccur
+        sta @nes_chrw_dcnt
+        sec
+        rts
+
+; ------------------------------------------------------------
+; nes_chrw_diffbg -- (MAIN, v3.13) o nes_chrw_diff de quem so' EXIBE o fundo:
+; compara nes_chrw_cmp com a regiao @nes_chrw_reg exigindo, nas janelas que o BG
+; le neste frame, so' o plano de FUNDO carregado. O id das OUTRAS janelas depende
+; de @nes_chrw_dball: 1 = tem de bater tambem (a pergunta "esta regiao serve esta
+; faixa?": o need sai de UMA amostra de PPUCTRL por frame, e jogo que troca a
+; metade do BG no meio do quadro -- o titulo do Castlevania III -- le janelas que
+; a amostra nao marca; exigir os 8 ids e' o que o diff completo sempre fez);
+; 0 = nao contam (a contagem de janelas de FUNDO da regra 4).
+;   Quem usa: a residencia secundaria, a escolha da vitima da regra 4 e o
+; resolve de cada faixa. Uma faixa so' troca o BG12NBA ($210B); os sprites saem
+; do OBSEL, que segue a regiao CORRENTE o frame inteiro -- entao a pergunta
+; "esta regiao serve esta faixa?" e' so' sobre o fundo. Com o diff completo uma
+; regiao secundaria carregada so' com o fundo (nes_chrw_dneedof) nunca casaria.
+; O diff completo continua sendo o da primaria (regras 1-4), que exibe sprites.
+; Mesma regra do diff para janela PENDENTE com o id certo (nao diverge: a carga
+; ja' esta' na fila). A regiao 2 ja' e' so' de fundo: vai direto pro diff.
+; Saida: @nes_chrw_dmask + @nes_chrw_dcnt. Entra/sai .as/.xl.
+; ------------------------------------------------------------
+nes_chrw_diffbg:
+        sep #$20 : .as
+        rep #$10 : .xl
+        lda @nes_m5_active           ; MMC5: politica de antes (ids de BG e OBJ
+        bne ncwdb_full               ; empacotados; titulo do CV3 medido)
+        lda @nes_chrw_reg
+        cmp #$02
+        bne ncwdb_go
+ncwdb_full:
+        jmp nes_chrw_diff
+ncwdb_go:
+        ; o diff otimizado com o need do MAIN reduzido ao plano de fundo: janela
+        ; que o BG le exige so' o fundo; janela que ninguem mais le (need 0)
+        ; diverge so' pelo id -- exatamente o modo dball=1.
+        sep #$20 : .as
+        lda @nes_chrw_dn0
+        pha
+        and #NES_CHRW_PLANE_BG
+        sta @nes_chrw_dn0
+        lda @nes_chrw_dn1
+        pha
+        and #NES_CHRW_PLANE_BG
+        sta @nes_chrw_dn1
+        jsr nes_chrw_diff
+        sep #$20 : .as
+        pla
+        sta @nes_chrw_dn1
+        pla
+        sta @nes_chrw_dn0
+        lda @nes_chrw_dball
+        bne ncwdb_out
+        ; dball=0: so' as janelas que o BG le contam
+        lda #$00
+        sta @nes_chrw_tmp2
+        lda @nes_chrw_need0
+        and #NES_CHRW_PLANE_BG
+        beq ncwdb_m1
+        lda #$0f
+        sta @nes_chrw_tmp2
+ncwdb_m1:
+        sep #$20 : .as
+        lda @nes_chrw_need1
+        and #NES_CHRW_PLANE_BG
+        beq ncwdb_m2
+        lda @nes_chrw_tmp2
+        ora #$f0
+        sta @nes_chrw_tmp2
+ncwdb_m2:
+        sep #$20 : .as
+        lda @nes_chrw_dmask
+        and @nes_chrw_tmp2
+        sta @nes_chrw_dmask
+        ldx #$0000                   ; recontagem (8 bits)
+ncwdb_pc:
+        lsr
+        bcc ncwdb_pz
+        inx
+ncwdb_pz:
+        cmp #$00
+        bne ncwdb_pc
+        txa
+        sta @nes_chrw_dcnt
+ncwdb_out:
+        sep #$20 : .as
+        rts
 
 ; ------------------------------------------------------------
 ; nes_chrw_secondary -- residencia da 2a composicao (a de 2a maior cobertura)
@@ -5201,7 +6653,16 @@ nes_chrw_secondary:
         ;     corrente, entao a secundaria so' pega a vez quando sobra. ---
         jsr nes_chrw_busy
         bcs ncwsec_done
-        jsr nes_chrw_diff
+        ; --- v3.13: a secundaria so' precisa do plano de FUNDO. O OBSEL segue
+        ;     a regiao corrente (nes_chr_apply_tilebase), entao o OBJ desta
+        ;     regiao nunca chega a tela; com sprites 8x16 (SMB3) carregar o
+        ;     OBJ triplicava a carga (3 KB por janela em vez de 1 KB) e as
+        ;     janelas so' de sprite entravam na fila sem servir a ninguem. Se
+        ;     esta regiao virar a corrente (regra 2), o diff da primaria cobra
+        ;     o OBJ que falta e ele carrega como qualquer janela divergente. ---
+        lda #$01
+        sta @nes_chrw_dball
+        jsr nes_chrw_diffbg
         lda @nes_chrw_dmask
         beq ncwsec_done
         lda #$01
@@ -5215,10 +6676,141 @@ nes_chrw_secondary:
         sep #$20 : .as
         lda #$01
         sta @nes_chrw_ev           ; efeito colateral: invalida o fast-skip
-        rep #$20 : .al
+        sta @nes_chrw_armbg          ; so' o fundo entra na fila (ver o arm)
+        jsr nes_chrw_arm
         sep #$20 : .as
-        jmp nes_chrw_arm             ; rts la'
+        lda #$00
+        sta @nes_chrw_armbg
 ncwsec_done:
+        sep #$20 : .as
+        rts
+
+; ------------------------------------------------------------
+; nes_chrw_tertiary -- v3.11: residencia da TERCEIRA composicao de um frame
+; com $15, na regiao 2 (o vao $0800-$0FFF, so' o plano BG das janelas 4-7; ver
+; NES_CHR_BG12NBA_T3). Caso que motivou: Dragon Ball - Daimaou Fukkatsu
+; (Bandai FCG) troca os bancos de BG duas vezes por frame -- cenario em cima,
+; caixa de dialogo no meio, barra de cartas embaixo -- e com so' duas regioes a
+; faixa do meio caia no fallback (BG12NBA da corrente) e saia com os tiles do
+; cenario/das cartas. CONDICOES: CHR-ROM (em CHR-RAM o $41 e' o dono da VRAM e
+; a fonte da PSRAM esta' zerada), fora do MMC5 (ids empacotados), sem
+; transicao em curso, e o BG lendo SO' a metade alta (PPUCTRL b4 = 1): o
+; indice da tilemap e' 256+t e o char base $0000 poe esses tiles no vao. A
+; faixa escolhida e' o representante de classe de maior cobertura que nao e' a
+; primaria nem a secundaria. NUNCA arma com a regiao 2 ainda carregando (como
+; a secundaria). Liga @nes_chrw_t3ok para o nes_chrw_resolve deste frame.
+; ------------------------------------------------------------
+nes_chrw_tertiary:
+        sep #$20 : .as
+        rep #$10 : .xl
+        lda @nes_chr_ram_mode
+        bne ncwt_out
+        lda @nes_m5_active
+        bne ncwt_out
+        lda @nes_chrw_full
+        bne ncwt_out
+        ; --- ONDE a regiao 2 mora depende da metade que o BG le:
+        ;     b4 = 1 (indice 256+t): o vao $0800-$0FFF com char base $0000
+        ;       (BG12NBA = $00) -- sempre livre;
+        ;     b4 = 0 (indice t): a metade BAIXA da SWAP, $3000-$37FF (BG12NBA
+        ;       = $03), so' enquanto a SWAP nunca foi armada nesta sessao
+        ;       (o arm dela invalida a metade baixa da regiao 2: ncsa_start). ---
+        lda @nes_chrw_need1
+        and #NES_CHRW_PLANE_BG
+        beq ncwt_lo
+        lda #$01
+        sta @nes_chrw_t3ok
+        bra ncwt_pick
+ncwt_lo:
+        sep #$20 : .as
+        lda @nes_chrw_need0
+        and #NES_CHRW_PLANE_BG
+        beq ncwt_out
+        lda @nes_swap_armed
+        bne ncwt_out
+        lda @nes_swap_mode
+        bne ncwt_out
+        lda #$02
+        sta @nes_chrw_t3ok
+ncwt_pick:
+        rep #$30 : .al : .xl
+        lda #$ffff
+        sta @nes_chrw_t3bst
+        lda #$0000
+        sta @nes_chrw_i
+ncwt_scan:
+        rep #$30 : .al : .xl
+        lda @nes_chrw_i
+        asl
+        tax
+        lda @nes_chrw_cls,x
+        cmp @nes_chrw_i
+        bne ncwt_next                ; nao e' o representante da classe
+        lda @nes_chrw_bestp
+        sta @nes_chrw_j
+        jsr nes_chrw_bandeq
+        lda @nes_chrw_eq
+        beq ncwt_next                ; = primaria
+        rep #$20 : .al
+        lda @nes_chrw_bests
+        sta @nes_chrw_j
+        jsr nes_chrw_bandeq
+        lda @nes_chrw_eq
+        beq ncwt_next                ; = secundaria
+        rep #$30 : .al : .xl
+        lda @nes_chrw_t3bst
+        cmp #$ffff
+        beq ncwt_take
+        asl
+        tax
+        lda @nes_chrw_tot,x
+        sta @nes_chrw_tmp
+        lda @nes_chrw_i
+        asl
+        tax
+        lda @nes_chrw_tot,x
+        cmp @nes_chrw_tmp
+        bcc ncwt_next
+        beq ncwt_next
+ncwt_take:
+        rep #$30 : .al : .xl
+        lda @nes_chrw_i
+        sta @nes_chrw_t3bst
+ncwt_next:
+        rep #$30 : .al : .xl
+        lda @nes_chrw_i
+        inc
+        sta @nes_chrw_i
+        cmp @nes_chrw_cnt2w
+        bcs ncwt_done
+        brl ncwt_scan
+ncwt_done:
+        rep #$20 : .al
+        lda @nes_chrw_t3bst
+        cmp #$ffff
+        beq ncwt_out
+        sta @nes_chrw_j
+        jsr nes_chrw_offj
+        clc
+        adc #$0001
+        sta @nes_chrw_ya
+        sep #$20 : .as
+        jsr nes_chrw_ldcmp_band
+        lda #$02
+        sta @nes_chrw_reg
+        jsr nes_chrw_busy
+        bcs ncwt_out
+        jsr nes_chrw_diff
+        lda @nes_chrw_dmask
+        beq ncwt_out
+        rep #$20 : .al
+        lda @nes_chrw_t3arm
+        inc
+        sta @nes_chrw_t3arm
+        sep #$20 : .as
+        jmp nes_chrw_arm             ; rts la' (pend2 + ev = 1)
+ncwt_out:
+        sep #$20 : .as
         rts
 
 ; ------------------------------------------------------------
@@ -5232,26 +6824,50 @@ ncwsec_done:
 ; ------------------------------------------------------------
 nes_chrw_resolve:
         sep #$20 : .as
+        lda #$01
+        sta @nes_chrw_dball
         lda @nes_chr_cur_slot
         sta @nes_chrw_reg
-        jsr nes_chrw_diff
+        jsr nes_chrw_diffbg          ; v3.13: a faixa so' exibe o fundo
         lda @nes_chrw_dmask
         bne ncwrs_notcur
         jmp nes_chrw_nba
 ncwrs_notcur:
+        sep #$20 : .as
         lda @nes_chr_cur_slot
         eor #$01
         sta @nes_chrw_reg
-        jsr nes_chrw_diff
+        jsr nes_chrw_diffbg
         lda @nes_chrw_dmask
         bne ncwrs_fallback
         jsr nes_chrw_busy
         bcs ncwrs_fallback
         jmp nes_chrw_nba
 ncwrs_fallback:
+        ; --- v3.11: a regiao TERCIARIA (vao $0800-$0FFF, so' BG das janelas
+        ;     4-7). So' vale num frame em que o nes_chrw_tertiary a liberou
+        ;     (t3ok) e com ela inteira carregada -- mesma regra da outra. ---
+        sep #$20 : .as
+        lda @nes_chrw_t3ok
+        beq ncwrs_fb2
+        lda #$02
+        sta @nes_chrw_reg
+        jsr nes_chrw_diff
+        lda @nes_chrw_dmask
+        bne ncwrs_fb2
+        jsr nes_chrw_busy
+        bcs ncwrs_fb2
+        rep #$20 : .al
+        lda @nes_chrw_t3use
+        inc
+        sta @nes_chrw_t3use
+        sep #$20 : .as
+        jmp nes_chrw_nba             ; reg = 2 -> $00
+ncwrs_fb2:
         rep #$20 : .al
         sep #$20 : .as
         lda #$01
+        sta @nes_chrw_fbnow        ; v3.13: este frame tem faixa em fallback
         sta @nes_chrw_ev           ; efeito colateral: invalida o fast-skip
         rep #$20 : .al
         lda @nes_chrw_fallb
@@ -5280,6 +6896,7 @@ ncws_cp:
         rep #$20 : .al
         lda [nes_parse_ptr],y
         and #$00ff
+        ora @nes_m5_objsh,x          ; MMC5: id de OBJ empacotado (0 nos demais mappers)
         sta @nes_chrw_want,x
         sep #$20 : .as
         inx
@@ -5322,6 +6939,8 @@ ncws_notram:
                                       ; repetido PULA com faixa apontando pra
                                       ; regiao de banco errado, e congela
                                       ; enquanto o payload se repetir.
+        lda #$00
+        sta @nes_chrw_fbnow          ; v3.13: frame sem faixas, sem fallback
         jsr nes_chrw_ldcmp_want
         jsr nes_chrw_reconcile
 ncws_defer:
@@ -5531,6 +7150,7 @@ nes_chrw_handle_splits:
         rep #$10 : .xl
         lda #$00
         sta @nes_chrw_secarm
+        sta @nes_chrw_t3ok           ; v3.11: so' o nes_chrw_tertiary a liga
         ldy #$0001
         lda [nes_parse_ptr],y
         and #$0f
@@ -5547,6 +7167,7 @@ nes_chrw_handle_splits:
         lda #$00
         sta @nes_chrw_cnt
         sta @nes_chrw_qok            ; este ramo mexe em prev_cnt: cache fora
+        sta @nes_chrw_fbnow          ; v3.13: sem faixas, sem fallback
         jsr nes_chrw_ldcmp_want
         jsr nes_chrw_reconcile
         brl ncwhs_size
@@ -5604,6 +7225,7 @@ ncwhs_cnt_ok:
         beq ncwhs_pre0
         lda @nes_chrw_pend0
         ora @nes_chrw_pend1
+        ora @nes_chrw_pend2
         bne ncwhs_qmiss
         lda @nes_regs_ppuctrl
         and #NES_CHRW_CTRL_MASK    ; SO' os bits que o nes_chrw_needs le --
@@ -5893,7 +7515,21 @@ ncwhs_bs_done:
         sta @nes_chrw_ya
         sep #$20 : .as
         jsr nes_chrw_ldcmp_band
+        ; v3.13: a regra 4 consulta a secundaria (nes_chrw_victim) -- so' aqui
+        ; ela e' valida; os outros chamadores do reconcile acham secok = 0
+        rep #$20 : .al
+        lda @nes_chrw_bests
+        cmp #$ffff
+        sep #$20 : .as
+        beq ncwhs_nosec
+        lda #$01
+        sta @nes_chrw_secok
+ncwhs_nosec:
+        sep #$20 : .as
         jsr nes_chrw_reconcile
+        sep #$20 : .as
+        lda #$00
+        sta @nes_chrw_secok
         ; ---------- residencia SECUNDARIA ----------
         rep #$20 : .al
         lda @nes_chrw_bests
@@ -5910,9 +7546,13 @@ ncwhs_bs_done:
         sep #$20 : .as
         jsr nes_chrw_ldcmp_band
         jsr nes_chrw_secondary
+        jsr nes_chrw_tertiary        ; v3.11: 3a composicao no vao $0800
 
         ; ---------- (5) resolucao por faixa + BUILD ----------
 ncwhs_resolve:
+        sep #$20 : .as
+        lda #$00
+        sta @nes_chrw_fbnow          ; v3.13: o resolve abaixo o religa
         rep #$20 : .al
         lda #$0000
         sta @nes_chrw_j
@@ -6004,6 +7644,7 @@ ncwhs_buf_ok:
         bne ncwhs_qbad
         lda @nes_chrw_pend0          ; carga EM VOO: entre este frame e o
         ora @nes_chrw_pend1          ; proximo a NMI (nes_chrw_dclear) escreve
+        ora @nes_chrw_pend2
         bne ncwhs_qbad               ; pl[] e apaga pend, entao o snapshot NAO
                                       ; descreve o frame seguinte. E' a mesma
                                       ; invariante que o SKIP ja' testava --
@@ -6046,6 +7687,7 @@ nes_chrw_dma_bg:
         rep #$10 : .xl
         rep #$20 : .al
         lda @nes_chrw_dwin
+        and #$00ff                   ; MMC5: id de BG = byte baixo da palavra empacotada
         sta nes_cd_src
         sep #$20 : .as
         ldy #NES_CHRW_SHIFT_BG
@@ -6082,6 +7724,19 @@ ncwdb_c2:
         lda #NES_CHR_SLOT1_BG_WORD
         sta nes_cd_dst
         sep #$20 : .as
+        lda @nes_chrw_dreg
+        cmp #$02
+        bne ncwdb_r0
+        rep #$20 : .al
+        lda #NES_CHR_T3_BG_WORD      ; v3.11: k = 4..7 -> o vao $0800-$0FFF
+        sta nes_cd_dst
+        lda @nes_chrw_dk
+        cmp #$0004
+        bcs ncwdb_r2hi
+        lda #NES_CHR_SWAP_BG_WORD    ;        k = 0..3 -> $3000-$37FF
+        sta nes_cd_dst
+ncwdb_r2hi:
+        sep #$20 : .as
 ncwdb_r0:
         rep #$20 : .al
         lda @nes_chrw_dk             ; dst += k * 512 words (1024 B de BG)
@@ -6103,8 +7758,18 @@ ncwdb_r0:
 nes_chrw_dma_obj:
         sep #$20 : .as
         rep #$10 : .xl
+        lda @nes_m5_active
+        bne ncwdo_m5
         rep #$20 : .al
         lda @nes_chrw_dwin
+        and #$00ff
+        bra ncwdo_src
+ncwdo_m5:
+        rep #$20 : .al
+        lda @nes_chrw_dwin           ; MMC5: id de OBJ = byte ALTO da palavra empacotada
+        xba
+        and #$00ff
+ncwdo_src:
         sta nes_cd_src
         sep #$20 : .as
         ldy #NES_CHRW_SHIFT_OBJ
@@ -6168,6 +7833,14 @@ ncwdo_r0:
 ; ------------------------------------------------------------
 nes_chrw_dma_step:
         sep #$20 : .as
+        lda @nes_chrw_dreg           ; v3.11: a regiao 2 nao tem OBJ (defensivo:
+        cmp #$02                     ; o pick ja' mascarou o jpl)
+        bne ncwds_any
+        lda @nes_chrw_dpl
+        and #NES_CHRW_PLANE_BG
+        sta @nes_chrw_dpl
+ncwds_any:
+        sep #$20 : .as
         lda @nes_chrw_dpl
         and #NES_CHRW_PLANE_BG
         beq ncwds_obj
@@ -6194,15 +7867,25 @@ nes_chrw_dclear:
         eor #$ff
         pha
         lda @nes_chrw_dreg
-        bne ncwdc_r1
+        cmp #$02
+        beq ncwdc_r2
+        cmp #$01
+        beq ncwdc_r1
         pla
         and @nes_chrw_pend0
         sta @nes_chrw_pend0
         bra ncwdc_cnt
 ncwdc_r1:
+        sep #$20 : .as
         pla
         and @nes_chrw_pend1
         sta @nes_chrw_pend1
+        bra ncwdc_cnt
+ncwdc_r2:
+        sep #$20 : .as
+        pla
+        and @nes_chrw_pend2
+        sta @nes_chrw_pend2
 ncwdc_cnt:
         phx
         rep #$20 : .al
@@ -6228,11 +7911,19 @@ ncwdc_out:
 nes_chrw_dpend:
         sep #$20 : .as
         lda @nes_chrw_dreg
-        bne ncwdp_r1
+        cmp #$02
+        beq ncwdp_r2
+        cmp #$01
+        beq ncwdp_r1
         lda @nes_chrw_pend0
         rts
 ncwdp_r1:
+        sep #$20 : .as
         lda @nes_chrw_pend1
+        rts
+ncwdp_r2:
+        sep #$20 : .as
+        lda @nes_chrw_pend2
         rts
 
 ; ------------------------------------------------------------
@@ -6261,7 +7952,7 @@ ncwdr_loop:
         jsr nes_chrw_dpend
         and @nes_chrw_dtmp
         beq ncwdr_next
-        jsr nes_chrw_needof
+        jsr nes_chrw_dneedof
         sta @nes_chrw_dpl
         bne ncwdr_run
         jsr nes_chrw_dclear          ; need==0: nada a carregar, so' conclui
@@ -6275,6 +7966,9 @@ ncwdr_run:
         sta @nes_chrw_dwin
         sep #$20 : .as
 ncwdr_grow:
+        sep #$20 : .as
+        lda @nes_m5_active
+        bne ncwdr_go                 ; MMC5: ids de BG e de OBJ independentes -- nao coalesce
         rep #$30 : .al : .xl
         lda @nes_chrw_dk
         clc
@@ -6290,7 +7984,7 @@ ncwdr_grow:
         jsr nes_chrw_dpend
         and @nes_chrw_dtmp
         beq ncwdr_go                 ; candidata nao pendente
-        jsr nes_chrw_needof
+        jsr nes_chrw_dneedof
         cmp @nes_chrw_dpl
         bne ncwdr_go                 ; planos diferentes (fronteira de metade)
         jsr nes_chrw_drd
@@ -6415,13 +8109,20 @@ ncwpi_new:
         jsr nes_chrw_scan
         bcc ncwpi_found
 ncwpi_cur:
+        sep #$20 : .as
         lda @nes_chr_cur_slot
         sta @nes_chrw_dreg
+        jsr nes_chrw_scanobj         ; v3.13: janela de sprite primeiro
+        bcc ncwpi_found
         jsr nes_chrw_scan
         bcc ncwpi_found
         lda @nes_chr_cur_slot
         eor #$01
         sta @nes_chrw_dreg
+        jsr nes_chrw_scan
+        bcc ncwpi_found
+        lda #$02                     ; v3.11: a regiao 2 por ultimo (prioridade
+        sta @nes_chrw_dreg           ; minima: so' pega vblank que sobrou)
         jsr nes_chrw_scan
         bcc ncwpi_found
         lda #$ff
@@ -6458,7 +8159,8 @@ ncwpi_starve0:
         lda #$00
         sta @nes_chrw_starve
 ncwpi_needs:
-        jsr nes_chrw_needof
+        sep #$20 : .as
+        jsr nes_chrw_dneedof         ; regiao 2 e a nao-corrente: so' o BG
         sta @nes_chrw_jpl
         rep #$20 : .al
         lda #$0000
@@ -6468,9 +8170,248 @@ ncwpi_out:
         rts
 
 ; ------------------------------------------------------------
+; nes_chrw_early_obj -- (NMI, v3.13) no TOPO do apply, antes dos servicos de
+; CHR: desce INTEIRAS as janelas SO-OBJ pendentes da regiao corrente (a troca
+; de banco de sprite -- a pose do Mario no SMB3 troca a janela 4 inteira), cada
+; uma num DMA de 2 KB (~12 linhas). A OAM deste frame ja' aponta para os tiles
+; do banco novo, entao ela so' sobe se TODAS couberam. Se sobrou janela (V alto
+; demais), @nes_oam_hold = 1: a OAM do quadro anterior fica e o passo de CHR
+; nao roda neste vblank -- nada mexe na janela que a OAM retida le, e ela
+; continua com o banco velho, coerente. No maximo NES_OAM_HOLD_MAX quadros
+; seguidos; depois a OAM nova sobe de qualquer jeito (o passo normal fecha).
+; ------------------------------------------------------------
+nes_chrw_early_obj:
+        sep #$20 : .as
+        rep #$10 : .xl
+        lda @nes_m5_active           ; MMC5: politica de antes (ver diffbg)
+        bne ncweo_out
+        lda @nes_chrw_active
+        beq ncweo_out
+        lda @nes_chr_ram_mode
+        bne ncweo_out
+        lda @nes_chrw_full
+        bne ncweo_none
+        lda #$00
+        sta @nes_chrw_eobjn
+ncweo_loop:
+        sep #$20 : .as
+        rep #$10 : .xl
+        lda @nes_chr_cur_slot
+        sta @nes_chrw_dreg
+        jsr nes_chrw_scanobj         ; X = di*2
+        bcs ncweo_none               ; nada (mais) pendente: OAM normal
+        lda @nes_chrw_eobjn
+        cmp #$04
+        bcs ncweo_late               ; teto do laco (dclear sempre progride)
+        ; --- a janela INTEIRA cabe ate' o fim do vblank com a OAM depois? ---
+        sep #$20 : .as
+        lda $213f
+        lda $2137
+        lda $213d
+        cmp #NES_CHRW_VTAB_LO
+        bcc ncweo_late               ; V < 225 (display) ou V >= 256
+        cmp #NES_CHRW_EOBJ_VMAX+1
+        bcs ncweo_late
+        ; job em voo nesta mesma janela: a carga inteira a fecha, e o job
+        ; deixa de existir (senao o passo seguiria regravando a mesma janela)
+        lda @nes_chrw_jk
+        cmp @nes_chrw_di
+        bne ncweo_load
+        lda @nes_chrw_jreg
+        cmp @nes_chr_cur_slot
+        bne ncweo_load
+        lda #$ff
+        sta @nes_chrw_jk
+ncweo_load:
+        rep #$30 : .al : .xl
+        lda @nes_chrw_di
+        and #$00ff
+        sta @nes_chrw_dk
+        asl
+        tax
+        sep #$20 : .as
+        lda #NES_CHRW_PLANE_OBJ
+        sta @nes_chrw_dpl
+        jsr nes_chrw_drd             ; A(.al) = id da janela
+        rep #$20 : .al
+        sta @nes_chrw_dwin
+        lda #$0000
+        sta @nes_chrw_dcur
+        lda #NES_CHRW_BG_BYTES       ; janela inteira (o OBJ dobra: 2 KB)
+        sta @nes_chrw_dlen
+        sep #$20 : .as
+        jsr nes_chrw_dma_obj
+        rep #$30 : .al : .xl
+        lda @nes_chrw_dk
+        asl
+        tax
+        sep #$20 : .as
+        jsr nes_chrw_dclear
+        sep #$20 : .as
+        lda @nes_chrw_eobjn
+        inc
+        sta @nes_chrw_eobjn
+        bra ncweo_loop
+ncweo_late:
+        sep #$20 : .as
+        lda @nes_oam_holdn
+        cmp #NES_OAM_HOLD_MAX
+        bcs ncweo_give               ; ja' segurou demais: a OAM nova sobe
+        inc
+        sta @nes_oam_holdn
+        lda #$01
+        sta @nes_oam_hold
+        rts
+ncweo_none:
+ncweo_give:
+        sep #$20 : .as
+        lda #$00
+        sta @nes_oam_holdn
+ncweo_out:
+        rts
+
+; ------------------------------------------------------------
+; nes_chrw_scanobj -- (NMI, v3.13) como o nes_chrw_scan, mas so' acha janela
+; pendente que SO' os sprites leem (dneedof == OBJ). Na regiao corrente ela vai
+; na frente: uma troca de banco de sprite (a pose do Mario) aparece na tela no
+; mesmo quadro do OAM que a usa, e cada vblank de atraso mostra a pose com os
+; tiles do banco velho; a animacao do BG (os blocos "?") espera um quadro.
+; carry CLEAR = achou (indice em @nes_chrw_di, X = di*2).
+; ------------------------------------------------------------
+nes_chrw_scanobj:
+        sep #$20 : .as
+        rep #$10 : .xl
+        ; rejeicao rapida (v3.13): so' as metades que o need marca SO' com OBJ
+        ; podem ter janela SO-OBJ, e so' fora da regiao 2. Sem pendencia ali,
+        ; nada a varrer -- a varredura completa custa ~3 linhas na NMI.
+        lda #$00
+        sta @nes_chrw_dtmp
+        lda @nes_chrw_need0
+        cmp #NES_CHRW_PLANE_OBJ
+        bne ncwso_q1
+        lda #$0f
+        sta @nes_chrw_dtmp
+ncwso_q1:
+        sep #$20 : .as
+        lda @nes_chrw_need1
+        cmp #NES_CHRW_PLANE_OBJ
+        bne ncwso_q2
+        lda @nes_chrw_dtmp
+        ora #$f0
+        sta @nes_chrw_dtmp
+ncwso_q2:
+        sep #$20 : .as
+        jsr nes_chrw_dpend
+        and @nes_chrw_dtmp
+        bne ncwso_go
+        sec
+        rts
+ncwso_go:
+        sep #$20 : .as
+        rep #$20 : .al
+        lda #$0000
+        sta @nes_chrw_di
+        sep #$20 : .as
+ncwso_loop:
+        rep #$30 : .al : .xl
+        lda @nes_chrw_di
+        asl
+        tax
+        sep #$20 : .as
+        jsr nes_chrw_bitof
+        sta @nes_chrw_dtmp
+        jsr nes_chrw_dpend
+        and @nes_chrw_dtmp
+        beq ncwso_next
+        jsr nes_chrw_genok           ; v3.13: armada por um frame ainda nao
+        bcs ncwso_next               ; exibido: espera
+        jsr nes_chrw_dneedof
+        cmp #NES_CHRW_PLANE_OBJ
+        beq ncwso_hit
+ncwso_next:
+        rep #$20 : .al
+        lda @nes_chrw_di
+        inc
+        sta @nes_chrw_di
+        cmp #$0008
+        sep #$20 : .as
+        bcc ncwso_loop
+        sec
+        rts
+ncwso_hit:
+        sep #$20 : .as
+        clc
+        rts
+
+; ------------------------------------------------------------
 ; nes_chrw_scan -- (NMI) primeira janela pendente da regiao @nes_chrw_dreg.
 ; carry CLEAR = achou (indice em @nes_chrw_di, X = di*2).
 ; ------------------------------------------------------------
+; ------------------------------------------------------------
+; nes_chrw_agset (MAIN) / nes_chrw_genok (NMI) -- v3.13: a carga de uma janela
+; so' acontece no vblank que exibe o frame que a armou (ou um posterior). O
+; decode corre ate' dois frames na frente do que esta' na tela (o commit de um
+; frame e' PULADO quando o anterior ainda espera o vblank), mas a VRAM de CHR nao
+; e' por frame: carregar ja' a janela do frame seguinte trocava o banco embaixo
+; da OAM do frame exibido -- no SMB3 o Mario saia em pedacos a cada troca de pose
+; (a pose nova com o banco velho, no NES, e' o frame de depois). Vale so' para
+; janela que SO' os sprites leem: janela com fundo segue carregando adiantada (a
+; fatia de fundo nao fecha num vblank, e o adiantamento e' o que a poe na tela a
+; tempo -- o fogo do titulo do Contra no Ciclone). A geracao
+; (@nes_dec_gen, +1 por commit) viaja no fb_regs+16 do frame commitado; a janela
+; guarda a geracao que o frame que a armou tera (um commit pulado herda a do
+; proximo commit, que tambem ja' a pede).
+; agset: entra .as/.xl, X = k*2 da janela na regiao @nes_chrw_reg; preserva X.
+; genok: entra .as/.xl, X = k*2 na regiao @nes_chrw_dreg; carry CLEAR = pode
+; carregar. Preserva X.
+; ------------------------------------------------------------
+nes_chrw_agset:
+        sep #$20 : .as
+        phx
+        lda @nes_chrw_reg
+        jsr ncwg_idx
+        lda @nes_dec_gen             ; a geracao que ESTE frame tera no commit
+        inc
+        sta @nes_chrw_agw,x
+        plx
+        rts
+
+nes_chrw_genok:
+        sep #$20 : .as
+        phx
+        lda @nes_chrw_dreg
+        jsr ncwg_idx
+        lda @nes_chrw_agw,x
+        ldx nes_av_fbr               ; geracao do frame exibido (fb_regs+16)
+        sec
+        sbc @$7f0010,x
+        plx                          ; (plx muda N/Z: o cmp os refaz de A)
+        cmp #$00
+        beq ncwgo_ok                 ; o proprio frame exibido
+        bmi ncwgo_ok                 ; frame anterior
+        sec                          ; frame ainda nao exibido
+        rts
+ncwgo_ok:
+        clc
+        rts
+
+; A(.as) = regiao, X = k*2 -> X = regiao*8 + k (16 bits). .as/.xl
+ncwg_idx:
+        .as
+        asl
+        asl
+        asl
+        sta @nes_chrw_agtmp
+        txa
+        lsr
+        clc
+        adc @nes_chrw_agtmp
+        rep #$20 : .al
+        and #$00ff
+        tax
+        sep #$20 : .as
+        rts
+
 nes_chrw_scan:
         sep #$20 : .as
         rep #$10 : .xl
@@ -6488,7 +8429,13 @@ ncwsc_loop:
         sta @nes_chrw_dtmp
         jsr nes_chrw_dpend
         and @nes_chrw_dtmp
-        bne ncwsc_hit
+        beq ncwsc_next
+        jsr nes_chrw_dneedof         ; v3.13: janela SO' de sprite, armada
+        cmp #NES_CHRW_PLANE_OBJ      ; por um frame ainda nao exibido, espera
+        bne ncwsc_hit                ; (genok). Janela com fundo segue como
+        jsr nes_chrw_genok           ; antes: a animacao do BG (o fogo do
+        bcc ncwsc_hit                ; titulo do Contra) carrega adiantada
+ncwsc_next:
         rep #$20 : .al
         lda @nes_chrw_di
         inc
@@ -6523,6 +8470,7 @@ nes_chrw_service:
         bne ncwsv_out
         lda @nes_chrw_pend0
         ora @nes_chrw_pend1
+        ora @nes_chrw_pend2          ; v3.11 (senao o jk viraria $ff todo vblank)
         bne ncwsv_work
         lda #$00
         sta @nes_chrw_full           ; nada a fazer: consome o pedido de full
@@ -6593,6 +8541,7 @@ ncwss_go:
         bne ncwss_out
         lda @nes_chrw_pend0
         ora @nes_chrw_pend1
+        ora @nes_chrw_pend2
         beq ncwss_out
         lda @nes_chrw_full
         bne ncwss_out                ; full pendente: ele roda no ponto CEDO
@@ -6663,6 +8612,32 @@ ncwss_vnomax:
         lda @nes_chrw_jcur
         sta @nes_chrw_dcur
         sep #$20 : .as
+        ; --- V DE NOVO, AGORA. O V do topo foi lido ANTES do nes_chrw_pick, e o
+        ;     pick varre ate' tres regioes x 8 janelas (bitof/dpend por janela):
+        ;     num job novo isso passa de 10 linhas.  Medido no SMB3 (emulado,
+        ;     1-1 correndo): V do topo 232, o passo de janela cheia (1024 B de
+        ;     BG + 2048 de OBJ, ~19,5 linhas pela tabela) terminava em V 263-264
+        ;     -- a cauda do DMA de OBJ caia no display ativo, a PPU a descarta
+        ;     e o dclear marca a janela como carregada (o nes_dbg_wovr contava
+        ;     ~1 a cada 5 frames, sempre nas janelas de animacao).  O tamanho
+        ;     do passo sai do V lido AQUI, depois de todo o trabalho de CPU que
+        ;     antecede o DMA; fora da faixa tabelada o passo fica para o
+        ;     proximo vblank (cursor e pendencia intactos). ---
+        lda $213f                    ; reseta o flip-flop hi/lo do latch
+        lda $2137                    ; latcha H/V
+        lda $213d                    ; V[7:0]
+        sec
+        sbc #NES_CHRW_VTAB_LO
+        bcc ncwss_vlate              ; V<225 (display) ou V>=256 (le 0..5)
+        cmp #NES_CHRW_VTAB_N
+        bcs ncwss_vlate
+        sta @nes_chrw_vidx
+        bra ncwss_vok
+ncwss_vlate:
+        sep #$20 : .as
+        jmp ncwss_bump               ; sem passo neste vblank
+ncwss_vok:
+        sep #$20 : .as
         ; --- chunk do passo, em BYTES DE BG. O discriminante e' "este passo
         ;     toca o OBJ?", NAO "quantos planos?": o nes_chrw_dma_obj DOBRA o
         ;     dlen (1 tile = 16 B em 2bpp, 32 B em 4bpp), entao SO-OBJ com
@@ -6691,7 +8666,13 @@ ncwss_vnomax:
         lda @nes_chrw_dpl
         cmp #NES_CHRW_PLANE_BG
         beq ncwss_bgonly             ; SO-BG: 1 DMA de 8 cyc/byte
+        cmp #NES_CHRW_PLANE_OBJ
+        beq ncwss_objonly            ; SO-OBJ: sem o DMA de BG (v3.13)
         lda @nes_chrw_vtab_obj,x
+        bra ncwss_chunk
+ncwss_objonly:
+        sep #$20 : .as
+        lda @nes_chrw_vtab_o1,x
         bra ncwss_chunk
 ncwss_bgonly:
         lda @nes_chrw_vtab_bg,x
@@ -6841,24 +8822,49 @@ ncwss_bump:
 ; ------------------------------------------------------------
 ; v2.11 -- TABELAS DE PASSO POR V (unidade = 256 B, teto 1024 = a janela
 ; inteira). Indice = V - NES_CHRW_VTAB_LO (225), 31 entradas (V 225..255).
-; Derivacao (nes_equates NES_CHRW_VTAB_*):
-;   reserva = 1 DMA + NES_TM_SCRUB_MIN(512 B) + 1 linha = 6.480 cyc
-;   OBJ (2 planos, pior caso): L = ((261-V)*1364 - 6480 - 2040) / 24
-;   BG  (1 DMA de 8 cyc/byte): L = ((261-V)*1364 - 6480 - 1020) /  8
+; v3.12: o V e' o relido DEPOIS do pick (ncwss_vok) e o custo e' o MEDIDO,
+; nao o da ancora de 1020 cyc/transferencia + 8 cyc/byte (que deixava o passo
+; terminar 6-7 linhas DEPOIS do previsto: cauda do DMA no display ativo, janela
+; marcada como carregada com o fim velho -- b_chrwin_replay_smb2/_smb3usa).
+; Medido no renderer real (harness bsnes, sondas de V antes do passo, entre o
+; BG e o OBJ e no fim), em linhas, por L bytes de BG:
+;   L=512: BG 6, OBJ 10   L=768: BG 8, OBJ 13   L=1024: BG 10, OBJ 16-17
+;   => BG  = 2728 + 10,66*L cyc   (shift de 10 bits + endereco 24 bits + DMA)
+;      OBJ = 4774 + 17,3*L  cyc   (shift de 11 bits + 2L bytes)
+;   reserva depois do passo = 1 DMA + NES_TM_SCRUB_MIN (512 B) = 5.116 cyc,
+;   + 1 linha do V relido ate' o DMA + 1 linha de margem:
+;   OBJ (2 planos): L = ((261-V)*1364 - 15346) / 28
+;   BG  (so-BG):    L = ((261-V)*1364 - 10572) / 10,66
 ; Valores = floor(L/256), saturado em 4. Recomputar AMBAS se qualquer
-; termo do orcamento mudar (tamanho da OAM, piso do scrub, fim do vblank).
+; termo do orcamento mudar (tamanho da OAM, piso do scrub, fim do vblank) --
+; e re-medir se o codigo do passo (nes_chrw_dma_step) mudar.
 ; ------------------------------------------------------------
 nes_chrw_vtab_obj:
-        ;   V=225..236 -> janela inteira; 237..241 -> 768; 242..245 -> 512;
-        ;   246..250 -> 256; 251+ -> nao cabe nem o menor passo
-        .byt 4,4,4,4,4,4,4,4,4,4,4,4
+        ;   V=225..228 -> janela inteira; 229..233 -> 768; 234..239 -> 512;
+        ;   240..244 -> 256; 245+ -> nao cabe nem o menor passo
+        .byt 4,4,4,4
         .byt 3,3,3,3,3
-        .byt 2,2,2,2
+        .byt 2,2,2,2,2,2
         .byt 1,1,1,1,1
-        .byt 0,0,0,0,0
+        .byt 0,0,0,0,0,0,0,0,0,0,0
 nes_chrw_vtab_bg:
-        .byt 4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4
-        .byt 3,2,2,1,1,0
+        ;   V=225..245 -> janela inteira; 246..247 -> 768; 248..249 -> 512;
+        ;   250..251 -> 256; 252+ -> nada
+        .byt 4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4
+        .byt 3,3,2,2,1,1,0,0,0,0
+nes_chrw_vtab_o1:
+        ; v3.13 -- SO-OBJ (a janela que so' os sprites leem: o banco da pose do
+        ; Mario no SMB3). Mesma conta da 2 planos sem o termo do BG:
+        ;   L = ((261-V)*1364 - 5116 - 2728 - 4774) / 17,3
+        ;   V=225..238 -> janela inteira; 239..242 -> 768; 243..245 -> 512;
+        ;   246..248 -> 256; 249+ -> nada
+        ; Com a 2 planos (a de cima) a janela de sprite levava 2-4 vblanks e a
+        ; pose nova aparecia com os tiles do banco velho nesse meio-tempo.
+        .byt 4,4,4,4,4,4,4,4,4,4,4,4,4,4
+        .byt 3,3,3,3
+        .byt 2,2,2
+        .byt 1,1,1
+        .byt 0,0,0,0,0,0,0
 
 ; ------------------------------------------------------------
 ; nes_chr_shift -- srcbank:src = (nes_cd_src) << Y (24-bit). Contexto NMI.
@@ -7355,16 +9361,22 @@ nes_chr_swap_srcbank:
         rep #$20 : .al
         lda @nes_chr_r0_p0
         bra ncsb_set
+        ; largura na entrada = a dos branches (diretiva, sem bytes)
+        .as
 ncsb_r0h1:
         rep #$20 : .al
         lda @nes_chr_r0_p1
         bra ncsb_set
+        ; largura na entrada = a dos branches (diretiva, sem bytes)
+        .as
 ncsb_r1:
         lda @nes_swap_half
         bne ncsb_r1h1
         rep #$20 : .al
         lda @nes_chr_r1_p0
         bra ncsb_set
+        ; largura na entrada = a dos branches (diretiva, sem bytes)
+        .as
 ncsb_r1h1:
         rep #$20 : .al
         lda @nes_chr_r1_p1
@@ -7508,6 +9520,38 @@ ncsa_start:
         sta @nes_swap_armed
         lda #$02
         sta @nes_swap_mode
+        ; v3.11: a metade BAIXA da SWAP ($3000-$37FF) pode estar guardando as
+        ; janelas 0-3 da regiao 2 (nes_chrw_tertiary, b4 = 0). O loader da
+        ; SWAP vai escrever por cima: esquece essas janelas, cancela carga
+        ; delas em voo e derruba o cache do fast-skip, cuja tabela do ch3 pode
+        ; apontar para $03 numa faixa da regiao 2.
+        lda @nes_chrw_pend2
+        and #$f0
+        sta @nes_chrw_pend2
+        lda @nes_chrw_jreg
+        cmp #$02
+        bne ncsa_nojob
+        lda @nes_chrw_jk
+        cmp #$04
+        bcs ncsa_nojob
+        lda #$ff
+        sta @nes_chrw_jk
+ncsa_nojob:
+        sep #$20 : .as
+        lda #$00
+        sta @nes_chrw_qok
+        rep #$30 : .al : .xl
+        ldx #$0000
+ncsa_r2lo:
+        lda #NES_CHR_BANK_EMPTY
+        sta @nes_chrw_r2,x
+        lda #$0000
+        sta @nes_chrw_pl2,x
+        inx
+        inx
+        cpx #$0008
+        bcc ncsa_r2lo
+        sep #$20 : .as
 ncsa_done:
         rts
 
@@ -7602,11 +9646,30 @@ nes_chr_reblank_release:
         bcc ncrr_done                ; fora da janela segura: tenta no proximo
         cmp #251
         bcs ncrr_done
+        lda @nes_bgh_dim             ; v3.13: a abertura da tela ainda retida
+        beq ncrr_full                ; volta em brilho 0 (preto, sem forced
+        lda #$00                     ; blank)
+        bra ncrr_set
+ncrr_full:
         lda #$0f
+ncrr_set:
         sta $2100                    ; screen on, brilho maximo (em vblank)
         lda #$00
         sta @nes_chr_reblank
 ncrr_done:
+        rts
+
+; nav_bgh_undim -- (NMI, entra/sai .as) fim da retencao da abertura: o brilho
+; volta no proximo vblank pelo nes_chr_reblank_release (nunca no meio do quadro).
+nav_bgh_undim:
+        sep #$20 : .as
+        lda @nes_bgh_dim
+        beq nbu_out
+        lda #$00
+        sta @nes_bgh_dim
+        lda #$01
+        sta @nes_chr_reblank
+nbu_out:
         rts
 
 ; ============================================================
@@ -7848,6 +9911,8 @@ nchru_cl_ok:
         bne nchru_have
         sep #$20 : .as
         brl nchru_size               ; len 0 (ou truncado a 0)
+        ; largura na entrada = a dos branches (diretiva, sem bytes)
+        .al
 nchru_have:
         lda @nes_chrq_bacc           ; breadcrumb de banda (bytes/frame)
         clc
@@ -8909,6 +10974,8 @@ nes_chrfd_service:
         sep #$20 : .as               ; sep/rep nao mexem em N/Z/C
         bcc ncfs_exit                ; hi < lo (sentinela) = faixa VAZIA
         beq ncfs_exit                ; faixa vazia
+        ; largura na entrada = a dos branches (diretiva, sem bytes)
+        .as
 ncfs_hold:
         lda @nes_chrfd_hold
         inc
@@ -9130,17 +11197,30 @@ nav_chk_late:
         lda $2137
         lda $213d                  ; V[7:0]
         sta nes_cd_v               ; v2.0a: gate do slice de CHR (nes_chr_dma_slice_service)
+#ifdef NES_PERF
+        sta nes_pf_nv             ; telemetria (nes_perf): V de 9 bits -- lo ja' lido,
+        lda $213d                  ; hi = 2a leitura; o flip-flop do $213D e' reposto
+        and #$01                   ; pelo $213F do proximo latch
+        sta nes_pf_nv+1
+        lda nes_cd_v               ; devolve o V[7:0] aos cmp abaixo
+#endif
         cmp #225
         bcc nav_late               ; <225: display ativo ou V>=256 -> tarde
         cmp #233
         bcc nav_ok                 ; 225..232: cabe
 nav_late:
+#ifdef NES_PERF
+        jsr nes_pf_late            ; telemetria: apply PULADO por NMI tardia
+#endif
         brl nav_tail               ; tarde: mantem frame anterior na tela;
                                     ; pending FICA -> aplica no proximo vblank.
                                     ; A fila de CHR-RAM passa pela cauda e o
                                     ; proprio gate de V dela decide (V fora da
                                     ; janela => adia sozinha)
 nav_ok:
+#ifdef NES_PERF
+        jsr nes_pf_entry           ; telemetria: latencia de entrada da NMI
+#endif
         lda @nes_fb_pending
 nav_have:
         sta @nes_fb_active         ; este buffer entra em exibicao agora
@@ -9174,6 +11254,7 @@ nav_src_ok:
         ;     Slice: gateado por V (so' fatia se
         ;     slice+baseline caibam ate' 262 -> tilemap/OAM nunca sacrificados).
         ;     No-op quando nenhum DMA pendente (o caso comum, incl. os HITs). ---
+        jsr nes_chrw_early_obj       ; v3.13: janelas de sprite ANTES de tudo
         jsr nes_chr_dma_full_service
         jsr nes_chr_dma_slice_service
         jsr nes_chr_dma_swap_service   ; v3.3: espelho de b4 (SS4.2)
@@ -9247,6 +11328,17 @@ nav_src_ok:
 nav_no_pal:                        ; o caminho da CGRAM ja' foi medido SAO
                                    ; (applies andando, sempre dentro do vblank)
 
+        ; --- v3.13: as janelas de sprite do frame ja' desceram no topo do
+        ;     apply (nes_chrw_early_obj, antes dos servicos de CHR). Se nao
+        ;     couberam, a OAM do quadro anterior fica, inteira, com o banco
+        ;     velho ainda na janela -- nunca a OAM nova sobre banco velho. ---
+        sep #$20 : .as
+        rep #$10 : .xl
+        lda @nes_oam_hold
+        beq nav_oam_go
+        jmp nav_oam_done
+nav_oam_go:
+        .as : .xl
         ; --- OAM: e' o PRIMEIRO conteudo do apply (v2.7a). INVARIANTE DE
         ;     ORDEM, nao gosto: um DMA que estoura o fim do vblank tem dois
         ;     desfechos MUITO diferentes -- VRAM/CGRAM apenas PERDE as
@@ -9334,6 +11426,8 @@ nav_oam_hi_go:
         stx $4305
         lda #$01
         sta $420b                  ; high table (32B de zeros)
+nav_oam_done:
+        .as : .xl
 
         ; --- v2.11: PASSO de carga de janela de CHR (mapper 4). Roda AQUI, e
         ;     nao antes da CGRAM/OAM como ate' a v2.10, por DOIS motivos:
@@ -9345,7 +11439,15 @@ nav_oam_hi_go:
         ;         que so' e' conhecido aqui. Ele e a tilemap logo abaixo
         ;         dividem a mesma cauda: o passo reserva o piso do scrub e a
         ;         tilemap re-le o V depois dele. ---
-        jsr nes_chrw_slice_service
+        lda @nes_oam_hold            ; v3.13: com a OAM retida o passo nao roda:
+        bne nav_step_skip            ; ele carregaria em parte a janela que a
+        jsr nes_chrw_slice_service   ; OAM retida ainda le com o banco velho
+        bra nav_step_done
+nav_step_skip:
+        .as
+        lda #$00                     ; a retencao vale um apply
+        sta @nes_oam_hold
+nav_step_done:
 
         ; --- tilemap (v2.9b): FAIXA SUJA + SCRUB ROTATIVO, os dois
         ;     limitados pelo MESMO orcamento de vblank ($2118/$2119, modo 1
@@ -9391,6 +11493,36 @@ nav_tm_novtmax:
         pla
         cmp #225
         bcc nav_tm_done            ; display ativo (ou V>=256): nao arrisca
+        ; --- v3.13 ABERTURA DA TELA com a faixa em voo (ver nav_tm_bgon): o BG
+        ;     vai ficar oculto mesmo, entao este quadro sai em forced-blank e a
+        ;     faixa desce INTEIRA agora, sem o teto do V. Medido no Ciclone: no
+        ;     titulo -> mapa do SMB3 a faixa a ~1100 B/vblank levava mais que os
+        ;     NES_BGH_MAX vblanks da retencao e o mapa abria pela metade. O
+        ;     release e' o de sempre (nes_chr_reblank, no vblank seguinte). ---
+        pha
+        lda @nes_bgh_vis
+        bne nav_tm_norm
+        ldx nes_av_fbr
+        lda @$7f0005,x             ; ppumask do frame: o BG volta?
+        and #$08
+        beq nav_tm_norm
+        rep #$20 : .al
+        lda @nes_tm_hi
+        cmp @nes_tm_lo
+        sep #$20 : .as
+        bcc nav_tm_norm            ; faixa vazia
+        beq nav_tm_norm
+        pla
+        lda #$80
+        sta $2100                  ; forced blank (estamos em vblank)
+        lda #$01
+        sta @nes_chr_reblank       ; release no vblank seguinte
+        rep #$20 : .al
+        lda #4096
+        bra nav_tm_cap_ok
+nav_tm_norm:
+        sep #$20 : .as
+        pla
         rep #$20 : .al
         and #$00ff
         eor #$ffff
@@ -9512,35 +11644,38 @@ nav_tm_done:
         ;     produtor -- ver protocolo em nes_data.a65). Dois ramos com
         ;     enderecos IMEDIATOS (nada de ponteiro em memoria: contexto
         ;     NMI, e a licao do DBR do fb_commit vale como principio). ---
-        ldx nes_av_fbr             ; hdma do frame commitado (fb_regs+12)
-        lda @$7f000c,x
+        ; v3.13: DOIS buffers vivos (nes_hdma_live / nes_hdma_liveb). A copia vai para o
+        ; que o HDMA nao esta' lendo e o A1T passa a apontar para ele: o A1T so'
+        ; e' lido na inicializacao da linha 0, entao escrito depois dela vale no
+        ; quadro seguinte, sempre inteiro. Com a cauda do apply passando do fim do
+        ; vblank, copiar por cima da tabela em uso rasgava a faixa (a barra do SMB3
+        ; deslocada num quadro).
+        sep #$20 : .as
+        rep #$10 : .xl
+        ldx nes_av_fbr
+        lda @$7f000c,x            ; 1 = tab0 / 2 = tab1
+        ldx #!nes_hdma_tab0                 ; X = fonte
         cmp #$02
-        beq nav_hcopy1
-        rep #$30 : .al : .xl
-        ldx #$0000
-nav_hc0_loop:
-        lda @nes_hdma_tab0,x
-        sta @nes_hdma_live,x
-        inx
-        inx
-        cpx #28
-        bcc nav_hc0_loop
+        bne nav_h2_s
+        ldx #!nes_hdma_tab1
+nav_h2_s:
+        ldy #!nes_hdma_live               ; Y = o buffer livre
+        lda @nes_hlive_sel
+        eor #$01                   ; (este quadro usa o outro)
+        and #$01
+        sta @nes_hlive_sel
+        beq nav_h2_d
+        ldy #!nes_hdma_liveb
+nav_h2_d:
+        phy
+        rep #$20 : .al
+        lda #27
+        phb
+        .byt $54, $7f, $7f         ; mvn $7f,$7f: X fonte, Y destino, A+1 bytes
+        plb                        ; (o MVN deixa o DBR no banco destino)
+        pla
+        sta $4322                  ; A1T = o buffer recem-escrito
         sep #$20 : .as
-        bra nav_hdma_arm
-nav_hcopy1:
-        rep #$30 : .al : .xl
-        ldx #$0000
-nav_hc1_loop:
-        lda @nes_hdma_tab1,x
-        sta @nes_hdma_live,x
-        inx
-        inx
-        cpx #28
-        bcc nav_hc1_loop
-        sep #$20 : .as
-nav_hdma_arm:
-        ldx #!nes_hdma_live
-        stx $4322                  ; A1T2 = tabela LIVE
         lda #^nes_hdma_live
         sta $4324                  ; banco da tabela ($7F)
         lda nes_av_hmask
@@ -9568,35 +11703,38 @@ nav_hdma_done:
         sta $4330                  ; mode 0: 1 reg / 1 byte por bloco
         lda #$0b
         sta $4331                  ; B-bus = $210B (BG12NBA)
+        ; v3.13: DOIS buffers vivos (nes_chdma_live / nes_chdma_liveb). A copia vai para o
+        ; que o HDMA nao esta' lendo e o A1T passa a apontar para ele: o A1T so'
+        ; e' lido na inicializacao da linha 0, entao escrito depois dela vale no
+        ; quadro seguinte, sempre inteiro. Com a cauda do apply passando do fim do
+        ; vblank, copiar por cima da tabela em uso rasgava a faixa (a barra do SMB3
+        ; deslocada num quadro).
+        sep #$20 : .as
+        rep #$10 : .xl
         ldx nes_av_fbr
-        lda @$7f000d,x
+        lda @$7f000d,x            ; 1 = tab0 / 2 = tab1
+        ldx #!nes_chdma_tab0                 ; X = fonte
         cmp #$02
-        beq nav_ccopy1
-        rep #$30 : .al : .xl
-        ldx #$0000
-nav_cc0_loop:
-        lda @nes_chdma_tab0,x
-        sta @nes_chdma_live,x
-        inx
-        inx
-        cpx #16
-        bcc nav_cc0_loop
+        bne nav_h3_s
+        ldx #!nes_chdma_tab1
+nav_h3_s:
+        ldy #!nes_chdma_live               ; Y = o buffer livre
+        lda @nes_clive_sel
+        eor #$01                   ; (este quadro usa o outro)
+        and #$01
+        sta @nes_clive_sel
+        beq nav_h3_d
+        ldy #!nes_chdma_liveb
+nav_h3_d:
+        phy
+        rep #$20 : .al
+        lda #15
+        phb
+        .byt $54, $7f, $7f         ; mvn $7f,$7f: X fonte, Y destino, A+1 bytes
+        plb                        ; (o MVN deixa o DBR no banco destino)
+        pla
+        sta $4332                  ; A1T = o buffer recem-escrito
         sep #$20 : .as
-        bra nav_chdma_arm
-nav_ccopy1:
-        rep #$30 : .al : .xl
-        ldx #$0000
-nav_cc1_loop:
-        lda @nes_chdma_tab1,x
-        sta @nes_chdma_live,x
-        inx
-        inx
-        cpx #16
-        bcc nav_cc1_loop
-        sep #$20 : .as
-nav_chdma_arm:
-        ldx #!nes_chdma_live
-        stx $4332                  ; A1T3 = tabela LIVE
         lda #^nes_chdma_live
         sta $4334                  ; banco da tabela ($7F)
         lda nes_av_hmask
@@ -9621,36 +11759,38 @@ nav_chdma_done:
         sta $4350                  ; mode 0: 1 reg / 1 byte por bloco
         lda #$07
         sta $4351                  ; B-bus = $2107 (BG1SC)
-        ldx nes_av_fbr
-        lda @$7f000f,x
-        cmp #$02
-        beq nav_ncopy1
-        rep #$30 : .al : .xl
-        ldx #$0000
-nav_nc0_loop:
-        lda @nes_ndma_tab0,x
-        sta @nes_ndma_live,x
-        inx
-        inx
-        cpx #16
-        bcc nav_nc0_loop
+        ; v3.13: DOIS buffers vivos (nes_ndma_live / nes_ndma_liveb). A copia vai para o
+        ; que o HDMA nao esta' lendo e o A1T passa a apontar para ele: o A1T so'
+        ; e' lido na inicializacao da linha 0, entao escrito depois dela vale no
+        ; quadro seguinte, sempre inteiro. Com a cauda do apply passando do fim do
+        ; vblank, copiar por cima da tabela em uso rasgava a faixa (a barra do SMB3
+        ; deslocada num quadro).
         sep #$20 : .as
-        bra nav_ndma_arm
-nav_ncopy1:
-        rep #$30 : .al : .xl
-        ldx #$0000
-nav_nc1_loop:
-        lda @nes_ndma_tab1,x
-        sta @nes_ndma_live,x
-        inx
-        inx
-        cpx #16
-        bcc nav_nc1_loop
-        sep #$20 : .as
-nav_ndma_arm:
         rep #$10 : .xl
-        ldx #!nes_ndma_live
-        stx $4352                  ; A1T5 = tabela LIVE
+        ldx nes_av_fbr
+        lda @$7f000f,x            ; 1 = tab0 / 2 = tab1
+        ldx #!nes_ndma_tab0                 ; X = fonte
+        cmp #$02
+        bne nav_h5_s
+        ldx #!nes_ndma_tab1
+nav_h5_s:
+        ldy #!nes_ndma_live               ; Y = o buffer livre
+        lda @nes_nlive_sel
+        eor #$01                   ; (este quadro usa o outro)
+        and #$01
+        sta @nes_nlive_sel
+        beq nav_h5_d
+        ldy #!nes_ndma_liveb
+nav_h5_d:
+        phy
+        rep #$20 : .al
+        lda #15
+        phb
+        .byt $54, $7f, $7f         ; mvn $7f,$7f: X fonte, Y destino, A+1 bytes
+        plb                        ; (o MVN deixa o DBR no banco destino)
+        pla
+        sta $4352                  ; A1T = o buffer recem-escrito
+        sep #$20 : .as
         lda #^nes_ndma_live
         sta $4354                  ; banco da tabela ($7F)
         lda nes_av_hmask
@@ -9705,6 +11845,11 @@ nav_ndma_done:
         sta @nes_nav_vofs_tmp
         sep #$20 : .as
 nav_hofs_ready:
+        lda $4212                  ; v3.13: no display, nao cruzar a linha 0
+        bmi nav_hofs_wr            ; (ver nav_ofs_v0wait)
+        jsr nav_ofs_v0wait
+nav_hofs_wr:
+        sep #$20 : .as
         lda @nes_nav_vofs_tmp
         sta $210d
         lda @nes_nav_vofs_tmp+1
@@ -9760,10 +11905,7 @@ nav_vofs_ok:
         sta @nes_nav_vofs_tmp
         sta @nes_vg_v1             ; v2.10: VOFS da regiao 1 da costura
         sep #$20 : .as
-        lda @nes_nav_vofs_tmp
-        sta $210e
-        lda @nes_nav_vofs_tmp+1
-        sta $210e
+        ; (v3.13: o BG1VOFS sai em nav_vg_done, depois do canal 4 decidido)
 
         ; --- v2.10: costura das rows mortas 30/31 (canal 4) + a UNICA
         ;     escrita de $420C do frame, agora com a mascara dos QUATRO
@@ -9782,6 +11924,16 @@ nav_vofs_ok:
 nav_vg_legacy:
         jsr nav_vgap_build
 nav_vg_done:
+        sep #$20 : .as
+        lda $4212                  ; v3.13: BG1VOFS com a mesma guarda
+        bmi nav_vofs_wr
+        jsr nav_ofs_v0wait
+nav_vofs_wr:
+        sep #$20 : .as
+        lda @nes_nav_vofs_tmp
+        sta $210e
+        lda @nes_nav_vofs_tmp+1
+        sta $210e
         lda nes_av_hmask
         sta $420c                  ; UMA escrita: ch2, ch3, ch4 e ch5
 
@@ -9851,11 +12003,115 @@ nav_lc_wsel:
         ldx nes_av_fbr
         lda @$7f0005,x             ; ppumask do frame
         and #$08                   ; bit3: BG visivel
-        beq nav_tm_nobg
+        beq nav_tm_bgoff
+        ; --- v3.13 ABERTURA DA TELA: o BG volta a aparecer (estava oculto no
+        ;     quadro anterior) com a faixa suja da tilemap ainda em voo. O jogo
+        ;     reescreveu a nametable com o rendering desligado (titulo -> mapa
+        ;     do SMB3, entrada de fase), e a faixa desce a ~1100 B por vblank:
+        ;     mostrar agora abre a tela sobre linhas da tela ANTERIOR desenhadas
+        ;     com o CHR novo (o quadro de lixo medido no console). O mesmo vale
+        ;     para uma faixa do $15 sem a composicao dela residente em regiao
+        ;     nenhuma (fallback: a barra do SMB3 nos primeiros quadros da fase e
+        ;     do mapa). Segura so' o BG (o backdrop e' o que o NES mostra com o
+        ;     BG desligado) ate' as duas coisas acabarem, com teto de NES_BGH_MAX
+        ;     vblanks. ---
+        lda @nes_bgh_vis
+        bne nav_tm_bgon
+        lda @nes_bgh_cnt
+        cmp #NES_BGH_MAX
+        bcs nav_tm_bgon              ; teto: abre de qualquer jeito
+        lda @nes_bgh_cnt             ; o 1o quadro da abertura e' sempre
+        bne nav_tm_bgh1              ; segurado: o jogo ainda escreve celulas
+                                      ; no quadro em que liga o BG, e elas so'
+                                      ; chegam no pacote seguinte (medido: 2
+                                      ; tiles no canto do mapa do SMB3)
+        rep #$20 : .al
+        lda @nes_nt_gcur             ; guarda onde a conversao global esta'
+        sta @nes_bgh_gl
+        sep #$20 : .as
+        bra nav_tm_bghold
+nav_tm_bgh1:
+        sep #$20 : .as
+        lda @nes_chrw_fbnow          ; faixa do quadro sem a composicao dela
+        bne nav_tm_bghold            ; residente (a barra do SMB3 na abertura)
+        ; a reescrita da CIRAM inteira (titulo -> mapa, entrada de fase) vai
+        ; para a conversao GLOBAL fatiada (nes_nt_gcur, ~256 celulas por
+        ; quadro), e a faixa fica vazia entre uma fatia e outra: segura ate' a
+        ; passada que estava em voo na abertura terminar (o cursor zera ou
+        ; volta para tras). Passadas seguintes nao seguram ($ffff = feita).
+        rep #$20 : .al
+        lda @nes_nt_gcur
+        beq nav_tm_bgpass
+        cmp @nes_bgh_gl
+        bcc nav_tm_bgpass            ; voltou: a passada anterior terminou
+        sta @nes_bgh_gl
+        sep #$20 : .as
+        bra nav_tm_bghold
+nav_tm_bgpass:
+        rep #$20 : .al
+        lda #$ffff
+        sta @nes_bgh_gl
+        rep #$20 : .al
+        lda @nes_tm_hi
+        cmp @nes_tm_lo
+        sep #$20 : .as               ; sep/rep nao mexem em N/Z/C
+        bcc nav_tm_bgready           ; hi < lo (sentinela) = faixa vazia
+        beq nav_tm_bgready
+nav_tm_bghold:
+        sep #$20 : .as
+        lda @nes_bgh_cnt             ; 1o quadro da abertura: zera a contagem
+        bne nav_tm_bgh2
+        sta @nes_bgh_settle
+nav_tm_bgh2:
+        lda @nes_bgh_settle          ; ja' esteve pronta: a contagem segue
+        beq nav_tm_bgwait            ; (a faixa ainda recebe celulas soltas
+        inc                          ; da barra) e o release espera o proximo
+        sta @nes_bgh_settle          ; quadro pronto
+nav_tm_bgwait:
+        sep #$20 : .as
+        lda @nes_bgh_cnt
+        inc
+        sta @nes_bgh_cnt
+        ; a retencao sai em PRETO (brilho 0), nao no backdrop: o despejo da
+        ; faixa e a carga de CHR da abertura usam forced blank, e alternar
+        ; backdrop e preto piscava (16,0,16 no console). Com forced blank em
+        ; curso o release (nes_chr_reblank_release) ja' volta em brilho 0.
+        lda #$01
+        sta @nes_bgh_dim
+        lda @nes_chr_reblank
+        bne nav_tm_nobg
+        lda #$00
+        sta $2100
+        bra nav_tm_nobg              ; BG continua oculto neste quadro
+nav_tm_bgready:
+        ; tela pronta: segura mais NES_BGH_SETTLE quadros. No console a borda
+        ; da barra do SMB3 saia uma linha abaixo nos 2-4 primeiros quadros
+        ; depois da abertura em parte das entradas (nao reproduz no Ciclone).
+        sep #$20 : .as
+        lda @nes_bgh_settle
+        inc
+        sta @nes_bgh_settle
+        cmp #NES_BGH_SETTLE+1
+        bcc nav_tm_bgwait
+nav_tm_bgon:
+        sep #$20 : .as
+        lda #$01
+        sta @nes_bgh_vis
+        lda #$00
+        sta @nes_bgh_cnt
+        jsr nav_bgh_undim
         lda nes_av_tm
         ora #$01                   ; TM bit0 = BG1
         sta nes_av_tm
+        bra nav_tm_nobg
+nav_tm_bgoff:
+        sep #$20 : .as
+        lda #$00
+        sta @nes_bgh_vis
+        sta @nes_bgh_cnt
+        jsr nav_bgh_undim
 nav_tm_nobg:
+        sep #$20 : .as
         ldx nes_av_fbr
         lda @$7f0005,x
         and #$10                   ; bit4: OBJ visivel (ja na posicao do
@@ -10004,6 +12260,7 @@ nav_s3_s3pub:
         ; --- rodizio no canal de 1 byte (v3.9: k0 older, k1 badrun, k2 badop,
         ;     k3 stale -- os instrumentos do transporte; a Sonda 3 (s0..s3) segue
         ;     em nes_dbg_s0..s3 na WRAM, so' saiu do canal) ---
+#ifndef NES_PERF
         lda @nes_dbg_k
         inc
         sta @nes_dbg_k
@@ -10027,6 +12284,7 @@ nav_dbg_k2:
                                    ; faltava no campo -- ver nes_dev_poll_frame)
 nav_dbg_kpub:
         sta NES_DBG_REND
+#endif
 
         ; --- v1.5.1: frame consumido -- libera o buffer p/ o produtor.
         ;     active continua marcando este buffer como "em exibicao". ---
@@ -10044,6 +12302,32 @@ nav_tail:
         jsr nes_chrq_service
 
         plp
+        rts
+
+; ------------------------------------------------------------
+; nav_ofs_v0wait -- (NMI, v3.13) chamada pela cauda do apply antes do par de
+; writes do BG1HOFS/BG1VOFS quando o $4212 diz que o vblank ja' acabou. Os
+; registradores de scroll dividem UM latch de escrita e montam o valor de DOIS
+; writes; o HDMA escreve o par dele no hblank da linha 0. Quando a cauda passa
+; do fim do vblank (medido no Ciclone: ela comeca entre V 253 e 261 e dura ~10
+; linhas), o par da CPU podia cruzar essa escrita -- o 2o byte da CPU entra com
+; o latch do HDMA e o 1o bloco fica com o scroll errado ate' o bloco seguinte:
+; o playfield do SMB3 ~6 linhas abaixo ate' a linha 127 num quadro (console;
+; reproduzido no Ciclone forcando o par a cruzar a linha 0). Em V 0 espera a
+; linha 1 (no maximo uma linha); no vblank o par termina muito antes da linha 0
+; e nem chega aqui (o teste de integracao do host_nes_perf mede o custo: a
+; cauda nao pode engordar). Fora do vblank V < 256, entao o byte baixo basta.
+; Entra/sai .as.
+; ------------------------------------------------------------
+nav_ofs_v0wait:
+        sep #$20 : .as
+        lda $213f                  ; reseta o flip-flop
+        lda $2137
+        lda $213d                  ; V[7:0]
+        pha
+        lda $213d                  ; V[8] (deixa o flip-flop no lugar)
+        pla
+        beq nav_ofs_v0wait         ; V 0: espera a linha 1
         rts
 
 ; ============================================================
@@ -10122,7 +12406,7 @@ nvg_straddle:
                                    ; pelo texto, nao pelo fluxo (gotcha da
                                    ; casa -- sem isto o 'and #$03ff' abaixo
                                    ; nao monta)
-        ldx #$0000                 ; X = cursor de escrita em nes_vg_tab
+        jsr nvg_pick               ; X = cursor de escrita (o buffer livre)
                                    ; (vive nos dois nvg_emit*; LDX nao tem
                                    ; modo long, entao o cursor NAO pode ser
                                    ; relido de $7F a cada bloco)
@@ -10148,20 +12432,7 @@ nvg_straddle:
         sep #$20 : .as
         lda #$00
         sta @nes_vg_tab,x
-        ; --- arma o canal 4 ---
-        lda #$02
-        sta $4340                  ; mode 2: 1 reg / write-twice
-        lda #$0e
-        sta $4341                  ; B-bus = $210E (BG1VOFS)
-        rep #$10 : .xl
-        ldx #!nes_vg_tab
-        stx $4342                  ; A1T4 = tabela
-        lda #^nes_vg_tab
-        sta $4344                  ; banco da tabela ($7F)
-        lda nes_av_hmask
-        ora #$10                   ; canal 4 entra na mascara
-        sta nes_av_hmask
-        rts
+        jmp nvg_arm4               ; arma o canal 4 com o buffer escrito
 
 ; ------------------------------------------------------------
 ; nav_vgap_live -- (NMI) v3.1: o frame commitado trouxe tabela de VOFS POR
@@ -10174,41 +12445,104 @@ nvg_straddle:
 ; ------------------------------------------------------------
 nav_vgap_live:
         sep #$20 : .as
-        cmp #$02
-        beq nav_vgl_1
-        rep #$30 : .al : .xl
-        ldx #$0000
-nav_vgl_0loop:
+        pha
+        jsr nvg_pick               ; X = destino (0 = nes_vg_tab, senao B)
+        sep #$20 : .as
+        pla
+        rep #$20 : .al
+        and #$00ff
+        cpx #$0000
+        bne nav_vgl_b
+        cmp #$0002
+        beq nav_vgl_1a
+nav_vgl_0a:
         lda @nes_vgap_tab0,x
         sta @nes_vg_tab,x
         inx
         inx
         cpx #28
-        bcc nav_vgl_0loop
-        sep #$20 : .as
+        bcc nav_vgl_0a
         bra nav_vgl_arm
-nav_vgl_1:
-        rep #$30 : .al : .xl
-        ldx #$0000
-nav_vgl_1loop:
+nav_vgl_1a:
+        .al : .xl
         lda @nes_vgap_tab1,x
         sta @nes_vg_tab,x
         inx
         inx
         cpx #28
-        bcc nav_vgl_1loop
-        sep #$20 : .as
+        bcc nav_vgl_1a
+        bra nav_vgl_arm
+nav_vgl_b:
+        .al : .xl
+        ldx #$0000
+        cmp #$0002
+        beq nav_vgl_1b
+nav_vgl_0b:
+        lda @nes_vgap_tab0,x
+        sta @nes_vg_tabb,x
+        inx
+        inx
+        cpx #28
+        bcc nav_vgl_0b
+        bra nav_vgl_arm
+nav_vgl_1b:
+        .al : .xl
+        lda @nes_vgap_tab1,x
+        sta @nes_vg_tabb,x
+        inx
+        inx
+        cpx #28
+        bcc nav_vgl_1b
 nav_vgl_arm:
+        sep #$20 : .as
+        jmp nvg_arm4
+
+; ------------------------------------------------------------
+; nvg_pick / nvg_arm4 -- (NMI, v3.13) a tabela do canal 4 tem DOIS buffers
+; (nes_vg_tab e nes_vg_tabb) e a cauda do apply escreve sempre no que o HDMA
+; NAO esta' lendo. Antes ela reescrevia a unica tabela LIVE: quando a cauda
+; passava do fim do vblank (comeca entre V 253 e 261 e dura ~10 linhas), o
+; HDMA ja' tinha carregado o 1o bloco da tabela velha e lia o resto da nova.
+; O A1T4 so' e' lido na inicializacao da linha 0: escrito antes dela vale
+; neste quadro, depois dela no seguinte, sempre inteiro.
+; nvg_pick: entra qualquer largura, sai .al/.xl com X = deslocamento do buffer
+; livre a partir de nes_vg_tab (guardado em nes_vg_woff).
+; nvg_arm4: entra .as/.xl, arma o canal 4 com esse buffer e troca o livre.
+; ------------------------------------------------------------
+nvg_pick:
+        rep #$30 : .al : .xl
+        ldx #$0000
+        lda @nes_vg_sel
+        and #$0001
+        beq nvgp_out
+        lda #!nes_vg_tabb
+        sec
+        sbc #!nes_vg_tab
+        tax
+nvgp_out:
+        txa
+        sta @nes_vg_woff
+        rts
+
+nvg_arm4:
+        sep #$20 : .as
         lda #$02
         sta $4340                  ; mode 2: 1 reg / write-twice ($210E e'
                                    ; write-twice, igual ao $210D do ch2)
         lda #$0e
         sta $4341                  ; B-bus = $210E (BG1VOFS)
-        rep #$10 : .xl
-        ldx #!nes_vg_tab
-        stx $4342                  ; A1T4 = tabela LIVE
+        rep #$30 : .al : .xl
+        lda @nes_vg_woff
+        clc
+        adc #!nes_vg_tab
+        sta $4342                  ; A1T4 = o buffer recem-escrito
+        sep #$20 : .as
         lda #^nes_vg_tab
         sta $4344                  ; banco da tabela ($7F)
+        lda @nes_vg_sel
+        eor #$01
+        and #$01
+        sta @nes_vg_sel
         lda nes_av_hmask
         ora #$10                   ; canal 4 entra na mascara
         sta nes_av_hmask
@@ -10251,4 +12585,733 @@ nvg_emit3:
         sta @nes_vg_tab,x
         inx
         rep #$20 : .al
+        rts
+
+; ============================================================
+; ==== MMC5 (core variante NES_MMC5): CMD_M5_STATE $17 + CMD_M5_EVENTS $18 ====
+;
+; O MMC5 enxerga o CHR por DUAS visoes ao mesmo tempo: a busca de BG sai do
+; conjunto B ($5128-$512B, 4 janelas repetidas em $0000/$1000) e a de sprite
+; 8x16 do conjunto A ($5120-$5127, 8 janelas) -- o vetor unico de 8 ids do
+; $14/$15 do MMC3 nao descreve isso. O core variante publica o estado CRU
+; (registradores + modo + flags) no $17 e, durante o display, as escritas de
+; registrador no $18; ESTE codigo resolve as visoes (tabela da wiki, espelho do
+; `chrsel` do mmu_mmc5.v e de bridge_sim `m5_views`) e as entrega ao
+; reconciliador de janelas EXISTENTE (nes_chrw_*), sem alterar nenhuma de suas
+; decisoes:
+;
+;   * BG, por FAIXA: a visao de BG de cada faixa vira uma composicao de 8 ids
+;     num $14 + $15 SINTETICOS (nes_m5_syn, mesmo formato do fio) e o
+;     nes_chrw_handle_state / nes_chrw_handle_splits rodam sobre eles com o
+;     ponteiro do parser redirecionado. Deadband, cobertura, residencia
+;     primaria/secundaria, fast-skip e HDMA do $210B ficam IDENTICOS.
+;   * OBJ, por FRAME: o OBSEL e' estatico, entao so' UMA visao de OBJ pode estar
+;     residente -- a da faixa PRIMARIA (maior duracao, empate = a mais antiga).
+;     Ela viaja EMPACOTADA na palavra de residencia: r[k] = bg | (obj << 8). O
+;     nes_m5_objsh (obj<<8) e' OR-ado pelo ncws_cp e pelo ldcmp_band em toda
+;     composicao -- ZERO fora do MMC5, entao os outros mappers nao mudam um
+;     byte --, o diff continua comparando UMA palavra (id de BG OU de OBJ
+;     diferente = janela divergente) e o DMA separa os dois (dma_bg usa o byte
+;     baixo, dma_obj o alto no modo MMC5). O drain nao coalesce janelas no MMC5
+;     (ids de BG e de OBJ independentes).
+; ============================================================
+
+; ------------------------------------------------------------
+; nes_m5_activate -- primeiro $17: liga o modo janela/MMC5 e reescreve a
+; identidade de BOOT da regiao 0 no formato empacotado (a VRAM ja' tem BG e OBJ
+; = id k na janela k, entao a palavra tem de ser k | (k << 8)).
+; ------------------------------------------------------------
+nes_m5_activate:
+        sep #$20 : .as
+        rep #$10 : .xl
+        lda #$01
+        sta @nes_m5_active
+        sta @nes_chrw_active         ; modo janela ligado (sticky)
+        sta @nes_chr_active          ; tile-base sai dos defaults de boot
+        rep #$20 : .al
+        ldx #$0000
+nm5a_loop:
+        txa
+        lsr                          ; k
+        sta @nes_m5_t
+        xba                          ; k << 8 (o byte baixo vira 0)
+        ora @nes_m5_t
+        sta @nes_chrw_r0,x           ; regiao 0 = identidade empacotada
+        inx
+        inx
+        cpx #$0010
+        bcc nm5a_loop
+        sep #$20 : .as
+        rts
+
+; ------------------------------------------------------------
+; nes_m5_id -- A(.al) = id de 1KB (ANTES da mascara de tamanho) da janela k que
+; a PPU enxerga pelo conjunto @nes_m5_sel (0 = A, 1 = B) no modo @nes_m5_mode.
+; X(.xl) = k*2. Preserva X. Tabela da nesdev wiki (MMC5):
+;   modo 3 (1KB): A: ra[k]                       B: rb[k&3]
+;   modo 2 (2KB): A: ra[(k&6)|1]<<1 | k&1        B: (k&2 ? rb[3] : rb[1])<<1 | k&1
+;   modo 1 (4KB): A: (k&4 ? ra[7] : ra[3])<<2 | k&3   B: rb[3]<<2 | k&3
+;   modo 0 (8KB): A: (ra[7]&$7F)<<3 | k          B: (rb[3]&$7F)<<3 | k
+; ------------------------------------------------------------
+nes_m5_id:
+        rep #$30 : .al : .xl
+        lda @nes_m5_mode
+        and #$0003
+        beq nm5id_m0
+        cmp #$0002
+        bcc nm5id_m1
+        beq nm5id_m2
+        ; ---- modo 3
+        lda @nes_m5_sel
+        and #$0001
+        bne nm5id_3b
+        lda @nes_m5_ra,x
+        rts
+nm5id_3b:
+        phx
+        txa
+        and #$0006                   ; (k&3)*2
+        tax
+        lda @nes_m5_rb,x
+        plx
+        rts
+nm5id_m2:
+        lda @nes_m5_sel
+        and #$0001
+        bne nm5id_2b
+        phx
+        txa
+        and #$000c                   ; (k&6)*2
+        ora #$0002                   ; (k&6)|1 -> +1 word
+        tax
+        lda @nes_m5_ra,x
+        plx
+        bra nm5id_2c
+nm5id_2b:
+        txa
+        and #$0004                   ; k bit 1 (X bit 2)
+        beq nm5id_2b1
+        lda @nes_m5_rb+6             ; rb[3]
+        bra nm5id_2c
+nm5id_2b1:
+        lda @nes_m5_rb+2             ; rb[1]
+nm5id_2c:
+        asl
+        sta @nes_m5_t
+        txa
+        and #$0002                   ; k&1 (X bit 1)
+        lsr
+        ora @nes_m5_t
+        rts
+nm5id_m1:
+        lda @nes_m5_sel
+        and #$0001
+        bne nm5id_1b
+        txa
+        and #$0008                   ; k bit 2 (X bit 3)
+        beq nm5id_1a3
+        lda @nes_m5_ra+14            ; ra[7]
+        bra nm5id_1c
+nm5id_1a3:
+        lda @nes_m5_ra+6             ; ra[3]
+        bra nm5id_1c
+nm5id_1b:
+        lda @nes_m5_rb+6             ; rb[3]
+nm5id_1c:
+        asl
+        asl
+        sta @nes_m5_t
+        txa
+        and #$0006                   ; (k&3)*2
+        lsr
+        ora @nes_m5_t
+        rts
+nm5id_m0:
+        lda @nes_m5_sel
+        and #$0001
+        bne nm5id_0b
+        lda @nes_m5_ra+14
+        bra nm5id_0c
+nm5id_0b:
+        lda @nes_m5_rb+6
+nm5id_0c:
+        and #$007f
+        asl
+        asl
+        asl
+        sta @nes_m5_t
+        txa
+        lsr                          ; k
+        ora @nes_m5_t
+        rts
+
+; ------------------------------------------------------------
+; nes_m5_views -- do estado corrente (ra/rb/modo/last/spr16) para as visoes
+; nes_m5_bgv / nes_m5_objv (8 words, ids ja' MASCARADOS pelo tamanho da CHR).
+; 8x16 (PPU renderizando): BG = conjunto B, OBJ = conjunto A; 8x8: o conjunto
+; escrito por ULTIMO serve a tudo.
+; ------------------------------------------------------------
+nes_m5_views:
+        rep #$30 : .al : .xl
+        lda @nes_m5_spr16
+        and #$0001
+        beq nm5v_8x8
+        lda #$0001
+        sta @nes_m5_bgsel
+        lda #$0000
+        sta @nes_m5_objsel
+        bra nm5v_go
+nm5v_8x8:
+        lda @nes_m5_last
+        and #$0001
+        sta @nes_m5_bgsel
+        sta @nes_m5_objsel
+nm5v_go:
+        ldx #$0000
+nm5v_loop:
+        lda @nes_m5_bgsel
+        sta @nes_m5_sel
+        jsr nes_m5_id
+        and @nes_m5_wmask
+        sta @nes_m5_bgv,x
+        lda @nes_m5_objsel
+        sta @nes_m5_sel
+        jsr nes_m5_id
+        and @nes_m5_wmask
+        sta @nes_m5_objv,x
+        inx
+        inx
+        cpx #$0010
+        bcc nm5v_loop
+        rts
+
+; ------------------------------------------------------------
+; nes_m5_flush -- fecha a faixa corrente: grava o BG dela em nes_m5_bandbg[cb] e,
+; se a duracao (dur = A(.as), calculada pelo chamador) for MAIOR que a maior ja'
+; vista, a torna a PRIMARIA (nes_m5_pobj <- nes_m5_curobj). Preserva nada.
+; ------------------------------------------------------------
+nes_m5_flush:
+        sep #$20 : .as
+        rep #$10 : .xl
+        cmp @nes_m5_pdur
+        bcc nm5f_nopri
+        beq nm5f_nopri               ; empate: a faixa MAIS ANTIGA continua primaria
+        sta @nes_m5_pdur
+        rep #$20 : .al
+        ldx #$0000
+nm5f_pc:
+        lda @nes_m5_curobj,x
+        sta @nes_m5_pobj,x
+        inx
+        inx
+        cpx #$0010
+        bcc nm5f_pc
+        sep #$20 : .as
+nm5f_nopri:
+        lda @nes_m5_cb
+        rep #$20 : .al
+        and #$0003
+        beq nm5f_b0
+        cmp #$0002
+        bcc nm5f_b1
+        beq nm5f_b2
+        ldx #$0000
+nm5f_b3:
+        lda @nes_m5_curbg,x
+        sta @nes_m5_bandbg+48,x
+        inx
+        inx
+        cpx #$0010
+        bcc nm5f_b3
+        sep #$20 : .as
+        rts
+nm5f_b0:
+        ldx #$0000
+nm5f_b0l:
+        lda @nes_m5_curbg,x
+        sta @nes_m5_bandbg,x
+        inx
+        inx
+        cpx #$0010
+        bcc nm5f_b0l
+        sep #$20 : .as
+        rts
+nm5f_b1:
+        ldx #$0000
+nm5f_b1l:
+        lda @nes_m5_curbg,x
+        sta @nes_m5_bandbg+16,x
+        inx
+        inx
+        cpx #$0010
+        bcc nm5f_b1l
+        sep #$20 : .as
+        rts
+nm5f_b2:
+        ldx #$0000
+nm5f_b2l:
+        lda @nes_m5_curbg,x
+        sta @nes_m5_bandbg+32,x
+        inx
+        inx
+        cpx #$0010
+        bcc nm5f_b2l
+        sep #$20 : .as
+        rts
+
+; ------------------------------------------------------------
+; nes_m5_setcur -- curbg/curobj <- bgv/objv (a faixa corrente passa a valer a visao
+; recem-calculada).
+; ------------------------------------------------------------
+nes_m5_setcur:
+        rep #$30 : .al : .xl
+        ldx #$0000
+nm5sc_l:
+        lda @nes_m5_bgv,x
+        sta @nes_m5_curbg,x
+        lda @nes_m5_objv,x
+        sta @nes_m5_curobj,x
+        inx
+        inx
+        cpx #$0010
+        bcc nm5sc_l
+        sep #$20 : .as
+        rts
+
+; ------------------------------------------------------------
+; nes_m5_bgsame -- carry CLEAR = bgv == curbg (a visao de BG nao mudou).
+; ------------------------------------------------------------
+nes_m5_bgsame:
+        rep #$30 : .al : .xl
+        ldx #$0000
+nm5bs_l:
+        lda @nes_m5_bgv,x
+        cmp @nes_m5_curbg,x
+        bne nm5bs_diff
+        inx
+        inx
+        cpx #$0010
+        bcc nm5bs_l
+        sep #$20 : .as
+        clc
+        rts
+nm5bs_diff:
+        sep #$20 : .as
+        sec
+        rts
+
+; ------------------------------------------------------------
+; nes_m5_apply_event -- aplica o evento (esl/eidx/eval) ao estado corrente e
+; decide a faixa. Regras (as da captura de janelas do MMC3, ver nes_chrw_*):
+;   * so' a mudanca da visao de BG cria/estende faixa; uma mudanca so' de OBJ
+;     apenas atualiza a visao de OBJ da faixa corrente;
+;   * mudanca a <= 1 scanline da ULTIMA mudanca COALESCE na faixa corrente (a
+;     faixa guarda a scanline original; e' o que absorve a rajada de writes
+;     de um handler de IRQ);
+;   * a 5a faixa nao existe (K=4 do contrato): a mudanca sobrescreve a ultima.
+; ------------------------------------------------------------
+nes_m5_apply_event:
+        sep #$20 : .as
+        rep #$10 : .xl
+        lda @nes_m5_eidx
+        cmp #$08
+        bcs nm5e_notA
+        rep #$20 : .al
+        and #$00ff
+        asl
+        tax
+        lda @nes_m5_eval
+        and #$00ff
+        sta @nes_m5_ra,x
+        sep #$20 : .as
+        lda #$00
+        sta @nes_m5_last
+        bra nm5e_views
+nm5e_notA:
+        cmp #$0c
+        bcs nm5e_notB
+        sec
+        sbc #$08
+        rep #$20 : .al
+        and #$00ff
+        asl
+        tax
+        lda @nes_m5_eval
+        and #$00ff
+        sta @nes_m5_rb,x
+        sep #$20 : .as
+        lda #$01
+        sta @nes_m5_last
+        bra nm5e_views
+nm5e_notB:
+        cmp #$10
+        bne nm5e_ign                 ; $5130 (idx 13) nao entra no banco no N1
+        lda @nes_m5_eval
+        and #$03
+        sta @nes_m5_mode
+nm5e_views:
+        jsr nes_m5_views
+        sep #$20 : .as
+        jsr nes_m5_bgsame
+        bcs nm5e_chg
+        ; BG igual: so' o OBJ da faixa corrente acompanha
+        rep #$30 : .al : .xl
+        ldx #$0000
+nm5e_ol:
+        lda @nes_m5_objv,x
+        sta @nes_m5_curobj,x
+        inx
+        inx
+        cpx #$0010
+        bcc nm5e_ol
+        sep #$20 : .as
+nm5e_ign:
+        rts
+nm5e_chg:
+        sep #$20 : .as
+        lda @nes_m5_esl
+        sec
+        sbc @nes_m5_lastsl
+        cmp #$02
+        bcc nm5e_coal                ; <= 1 scanline da ultima mudanca: coalesce
+        lda @nes_m5_nband
+        cmp #$04
+        bcs nm5e_coal                ; K=4: sobrescreve a ultima
+        ; --- FECHA a faixa corrente e abre a seguinte
+        lda @nes_m5_esl
+        rep #$20 : .al
+        and #$00ff
+        sta @nes_m5_t                ; sl da nova faixa
+        lda @nes_m5_cb
+        and #$00ff
+        asl
+        tax
+        lda @nes_m5_bandsl,x         ; sl da faixa que fecha
+        and #$00ff
+        eor #$ffff
+        sec
+        adc @nes_m5_t                ; dur = nova - inicio
+        sep #$20 : .as
+        jsr nes_m5_flush
+        lda @nes_m5_nband
+        inc
+        sta @nes_m5_nband
+        lda @nes_m5_cb
+        inc
+        sta @nes_m5_cb
+        rep #$20 : .al
+        lda @nes_m5_cb
+        and #$00ff
+        asl
+        tax
+        lda @nes_m5_t
+        sta @nes_m5_bandsl,x         ; inicio da nova faixa
+        sep #$20 : .as
+nm5e_coal:
+        lda @nes_m5_esl
+        sta @nes_m5_lastsl
+        jsr nes_m5_setcur
+        rts
+
+; ------------------------------------------------------------
+; nes_m5_handle -- CMD_M5_STATE $17 (parse, contexto MAIN), consumindo TAMBEM o
+; CMD_M5_EVENTS $18 que o segue. Devolve X = bytes consumidos (23 ou 25+3*cnt).
+; Nao deixa nada no parser: o nes_parse_ptr volta ao valor de entrada.
+; ------------------------------------------------------------
+nes_m5_handle:
+        sep #$20 : .as
+        rep #$10 : .xl
+        lda @nes_m5_active
+        bne nm5h_act
+        jsr nes_m5_activate
+nm5h_act:
+        ; ---- baseline -> estado corrente
+        ldy #$0001
+        lda [nes_parse_ptr],y        ; flags: b1 = spr16, b2 = ultimo conjunto
+        pha
+        lsr
+        and #$01
+        sta @nes_m5_spr16
+        pla
+        lsr
+        lsr
+        and #$01
+        sta @nes_m5_last
+        ldy #$0002
+        lda [nes_parse_ptr],y
+        and #$03
+        sta @nes_m5_mode
+        ldx #$0000
+        ldy #$0003                   ; A0..A7 (3..10) e B0..B3 (11..14)
+nm5h_cp:
+        rep #$20 : .al
+        lda [nes_parse_ptr],y
+        and #$00ff
+        sta @nes_m5_ra,x             ; ra e rb sao contiguos (12 words)
+        sep #$20 : .as
+        inx
+        inx
+        iny
+        cpx #$0018
+        bcc nm5h_cp
+        ldy #21                      ; mascara de tamanho da CHR (payload byte 20)
+        lda [nes_parse_ptr],y
+        and #$7f
+        rep #$20 : .al
+        and #$00ff
+        asl
+        asl
+        asl
+        ora #$0007
+        sta @nes_m5_wmask
+        sep #$20 : .as
+        ; ---- eventos
+        ldy #23
+        lda [nes_parse_ptr],y
+        cmp #CMD_M5_EVENTS
+        beq nm5h_hasev
+        lda #$00
+        sta @nes_m5_nev
+        sta @nes_m5_ovf
+        rep #$20 : .al
+        lda #23
+        sta @nes_m5_size
+        lda #$0000
+        sta @nes_m5_nevb
+        sep #$20 : .as
+        bra nm5h_bands
+nm5h_hasev:
+        ldy #24
+        lda [nes_parse_ptr],y
+        pha
+        and #$80
+        sta @nes_m5_ovf
+        pla
+        and #$0f
+        rep #$20 : .al
+        and #$00ff
+        sta @nes_m5_t
+        asl
+        clc
+        adc @nes_m5_t                ; 3*cnt
+        sta @nes_m5_nevb
+        clc
+        adc #25
+        sta @nes_m5_size             ; 23 ($17) + 2 + 3*cnt
+        lda @nes_m5_t
+        cmp #$0009
+        bcc nm5h_evok
+        lda #$0008                   ; defensivo: o RTL nunca passa de 8
+nm5h_evok:
+        sta @nes_m5_t
+        asl
+        clc
+        adc @nes_m5_t
+        sta @nes_m5_nevb             ; iteracao limitada a 8 eventos
+        sep #$20 : .as
+nm5h_bands:
+        ; ---- faixa 0 = baseline
+        jsr nes_m5_views
+        jsr nes_m5_setcur
+        sep #$20 : .as
+        lda #$01
+        sta @nes_m5_nband
+        lda #$00
+        sta @nes_m5_cb
+        sta @nes_m5_lastsl
+        sta @nes_m5_pdur
+        rep #$20 : .al
+        lda #$0000
+        sta @nes_m5_bandsl
+        sta @nes_m5_ei
+        sep #$20 : .as
+nm5h_evl:
+        rep #$20 : .al
+        lda @nes_m5_ei
+        cmp @nes_m5_nevb
+        bcs nm5h_evdone
+        clc
+        adc #25
+        tay
+        sep #$20 : .as
+        lda [nes_parse_ptr],y
+        sta @nes_m5_esl
+        iny
+        lda [nes_parse_ptr],y
+        sta @nes_m5_eidx
+        iny
+        lda [nes_parse_ptr],y
+        sta @nes_m5_eval
+        jsr nes_m5_apply_event
+        rep #$20 : .al
+        lda @nes_m5_ei
+        clc
+        adc #$0003
+        sta @nes_m5_ei
+        bra nm5h_evl
+nm5h_evdone:
+        sep #$20 : .as
+        ; ---- fecha a ultima faixa: dur = 240 - inicio
+        lda @nes_m5_cb
+        rep #$20 : .al
+        and #$00ff
+        asl
+        tax
+        lda @nes_m5_bandsl,x
+        and #$00ff
+        eor #$ffff
+        sec
+        adc #240
+        sep #$20 : .as
+        jsr nes_m5_flush
+        ; ---- OBJ da faixa primaria, empacotado (obj << 8)
+        rep #$30 : .al : .xl
+        ldx #$0000
+nm5h_sh:
+        lda @nes_m5_pobj,x
+        and #$00ff
+        xba
+        sta @nes_m5_objsh,x
+        inx
+        inx
+        cpx #$0010
+        bcc nm5h_sh
+        ; ---- $14 / $15 SINTETICOS em nes_m5_syn (mesmo formato do fio):
+        ;      [0]=$14 [1..8]=BG da faixa 0 [9]=flags 0 [10]=$15 (ou $F0 sem faixas)
+        ;      [11]=hdr(ovf|cnt) [12..]= cnt x [sl bg0..bg7] e um $F0 depois da ultima.
+        ;      Escreve pelo proprio nes_parse_ptr redirecionado: o [dp],y e' o unico
+        ;      modo indexado por Y que o 65816 oferece em endereco longo.
+        sep #$20 : .as
+        rep #$20 : .al
+        lda nes_parse_ptr
+        sta @nes_m5_sptr
+        sep #$20 : .as
+        lda nes_parse_bank
+        sta @nes_m5_sbank
+        rep #$20 : .al
+        lda #!nes_m5_syn
+        sta nes_parse_ptr
+        sep #$20 : .as
+        lda #^nes_m5_syn
+        sta nes_parse_bank
+        rep #$10 : .xl
+        ldy #$0000
+        lda #CMD_CHR_STATE8
+        sta [nes_parse_ptr],y
+        ldx #$0000
+        ldy #$0001
+nm5h_s14:
+        rep #$20 : .al
+        lda @nes_m5_bandbg,x
+        sep #$20 : .as
+        sta [nes_parse_ptr],y        ; BG da faixa 0 (byte baixo da palavra)
+        inx
+        inx
+        iny
+        cpy #$0009
+        bcc nm5h_s14
+        lda #$00
+        sta [nes_parse_ptr],y        ; [9] flags: sem CHR-RAM
+        iny                          ; Y = 10
+        lda @nes_m5_nband
+        cmp #$02
+        bcs nm5h_sp
+        lda #$f0                     ; sem $15: qualquer opcode que nao seja ele
+        sta [nes_parse_ptr],y
+        bra nm5h_run
+nm5h_sp:
+        lda #CMD_CHR_SPLITS8
+        sta [nes_parse_ptr],y
+        iny                          ; Y = 11
+        lda @nes_m5_ovf
+        ora @nes_m5_nband
+        sta [nes_parse_ptr],y        ; hdr = {ovf, cnt}
+        iny                          ; Y = 12
+        ldx #$0000                   ; X: palavra de bandbg (continua entre faixas)
+        rep #$20 : .al
+        lda #$0000
+        sta @nes_m5_t                ; t = faixa
+nm5h_bl:
+        rep #$20 : .al
+        lda @nes_m5_t
+        asl
+        phx
+        tax
+        lda @nes_m5_bandsl,x         ; sl da faixa t
+        plx
+        sep #$20 : .as
+        sta [nes_parse_ptr],y
+        iny
+        lda #$00
+        sta @nes_m5_pad              ; contador de janelas
+nm5h_bw:
+        rep #$20 : .al
+        lda @nes_m5_bandbg,x
+        sep #$20 : .as
+        sta [nes_parse_ptr],y
+        inx
+        inx
+        iny
+        lda @nes_m5_pad
+        inc
+        sta @nes_m5_pad
+        cmp #$08
+        bcc nm5h_bw
+        rep #$20 : .al
+        lda @nes_m5_t
+        inc
+        sta @nes_m5_t
+        sep #$20 : .as
+        cmp @nes_m5_nband
+        bcc nm5h_bl
+        lda #$f0
+        sta [nes_parse_ptr],y        ; byte do arredondamento do qlen: opcode estavel
+nm5h_run:
+        ; ---- roda o reconciliador EXISTENTE sobre o fluxo sintetico
+        jsr nes_chrw_handle_state    ; ptr -> $14 sintetico; espia [10]
+        sep #$20 : .as
+        lda @nes_m5_nband
+        cmp #$02
+        bcc nm5h_done
+        rep #$20 : .al
+        lda nes_parse_ptr
+        clc
+        adc #$000a                   ; ptr -> $15 sintetico
+        sta nes_parse_ptr
+        sep #$20 : .as
+        jsr nes_chrw_handle_splits
+nm5h_done:
+        sep #$20 : .as
+        rep #$20 : .al
+        lda @nes_m5_sptr
+        sta nes_parse_ptr
+        sep #$20 : .as
+        lda @nes_m5_sbank
+        sta nes_parse_bank
+        rep #$30 : .al : .xl
+        lda @nes_m5_size
+        tax
+        sep #$20 : .as
+        rts
+
+; ------------------------------------------------------------
+; nes_m5_skip_events -- CMD_M5_EVENTS $18 SEM um $17 antes (frame anomalo): so'
+; devolve o tamanho (2 + 3*cnt) em X, para o parser nao perder o alinhamento.
+; ------------------------------------------------------------
+nes_m5_skip_events:
+        sep #$20 : .as
+        rep #$10 : .xl
+        ldy #$0001
+        lda [nes_parse_ptr],y
+        and #$0f
+        rep #$20 : .al
+        and #$00ff
+        sta @nes_m5_t
+        asl
+        clc
+        adc @nes_m5_t
+        clc
+        adc #$0002
+        tax
+        sep #$20 : .as
         rts

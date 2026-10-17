@@ -90,7 +90,8 @@
 //     => MINIMUM 13 CLK2 CYCLES between consecutive ce pulses (typical 15-16;
 //        average exactly 15.646 when memory never out-stalls the window). The
 //        multicycle values in main.sdc (setup 4) leave a 3x+ margin under this
-//        floor -- if this pacer is ever changed, re-derive BOTH numbers.
+//        floor -- if this pacer is ever changed, re-derive BOTH numbers, and the
+//        >= 4 CLK2 ce spacing the OAM M9K of SpriteRAM (ppu.v) relies on.
 //
 // Address map (ANALYSIS SS2.4, SS7.4 item 3) -- identical to the vendored
 // GameLoader's convention, so no offset needs to be re-derived by the loader:
@@ -260,9 +261,12 @@ module nes_wrap(
   wire        ppu_tap_pal_we;
   wire [4:0]  ppu_tap_pal_idx;
   wire [5:0]  ppu_tap_pal_val;
-  wire        ppu_tap_oam_we;
-  wire [7:0]  ppu_tap_oam_addr;
-  wire [7:0]  ppu_tap_oam_val;
+  // OAM port B: the array lives in the PPU (one M9K); the bridge snapshots it
+  // through this port instead of keeping a tap-fed copy of its own.
+  wire [8:0]  oamb_a_w;
+  wire        oamb_we_w;
+  wire [7:0]  oamb_d_w;
+  wire [7:0]  oamb_q_w;
   wire [14:0] ppu_tap_loopy_t;
   wire [2:0]  ppu_tap_fine_x;
   wire        ppu_tap_loopy_w; // $2005/$2006 write toggle (0 = pair complete)
@@ -300,6 +304,16 @@ module nes_wrap(
   // Declared EXPLICITLY (Quartus Warning 10236: an implicit net here would be a
   // silent 1-bit GND and NOTHING would ever reseed).
   wire        tick_accept_w;
+`ifdef NES_MMC5
+  // MMC5 video-bridge state (registered inside NES:core by nes_m5_capture).
+  // Declared EXPLICITLY (Quartus Warning 10236: an implicit net would be a
+  // silent 1-bit GND and the commands would ship zeros).
+  wire         m5_en_w;
+  wire [175:0] m5_base_w;
+  wire [167:0] m5_ev_w;
+  wire [3:0]   m5_cnt_w;
+  wire         m5_ovf_w;
+`endif
 
   NES core(
     .clk(CLK),
@@ -329,9 +343,6 @@ module nes_wrap(
     .ppu_tap_pal_we(ppu_tap_pal_we),
     .ppu_tap_pal_idx(ppu_tap_pal_idx),
     .ppu_tap_pal_val(ppu_tap_pal_val),
-    .ppu_tap_oam_we(ppu_tap_oam_we),
-    .ppu_tap_oam_addr(ppu_tap_oam_addr),
-    .ppu_tap_oam_val(ppu_tap_oam_val),
     .ppu_tap_loopy_t(ppu_tap_loopy_t),
     .ppu_tap_fine_x(ppu_tap_fine_x),
     .ppu_tap_loopy_w(ppu_tap_loopy_w),
@@ -339,6 +350,7 @@ module nes_wrap(
     .ppu_tap_ppumask(ppu_tap_ppumask),
     .ppu_tap_loopy_v(ppu_tap_loopy_v),
     .ppu_tap_loopy_v_we(ppu_tap_loopy_v_we),
+    .oamb_a(oamb_a_w), .oamb_we(oamb_we_w), .oamb_d(oamb_d_w), .oamb_q(oamb_q_w),
     .tapA_we(tapA_we_w),
     .tapA_addr(tapA_addr_w),
     .tapA_data(tapA_data_w),
@@ -352,6 +364,9 @@ module nes_wrap(
     .chr_snap_win_en(chr_snap_win_en_w),
     .nt_snap_arr(nt_snap_arr_w),
     .nt_snap_code(nt_snap_code_w)
+`ifdef NES_MMC5
+    , .m5_en(m5_en_w), .m5_base(m5_base_w), .m5_ev(m5_ev_w), .m5_cnt(m5_cnt_w), .m5_ovf(m5_ovf_w)
+`endif
   );
 
   // ---------------------------------------------------------------------------
@@ -818,7 +833,7 @@ module nes_wrap(
   wire [11:0] spl_fx_flat;
   nes_split_capture spl_cap(
     .CLK(CLK), .RST(RST), .ce(ce_pulse_r), .frame_tick(tick_accept_w),
-    .scanline(scanline_dbg), .loopy_t(ppu_tap_loopy_t), .fine_x(ppu_tap_fine_x),
+    .scanline(scanline_dbg), .cycle(cycle_dbg), .loopy_t(ppu_tap_loopy_t), .fine_x(ppu_tap_fine_x),
     .ppumask(ppu_tap_ppumask), .w(ppu_tap_loopy_w),
     .loopy_v(ppu_tap_loopy_v), .loopy_v_we(ppu_tap_loopy_v_we),
     .spl_cnt_o(spl_cnt), .spl_ovf_o(spl_ovf),
@@ -838,11 +853,15 @@ module nes_wrap(
   // Output nets declared EXPLICITLY: an implicit net here would synthesize as a
   // silent 1-bit GND (Quartus Warning 10236) and the whole command would ship
   // zeros.
+`ifndef NES_MMC5
   wire [2:0]  cspl_cnt;
   wire        cspl_ovf;
   wire        cspl_poison;
   wire [31:0] cspl_sl_flat;
   wire [63:0] cspl_bank_flat;   // v2.9: 4 x {s1, s0}
+`ifdef NES_NO_CSPL
+  assign cspl_cnt=3'd0, cspl_ovf=1'b0, cspl_poison=1'b0, cspl_sl_flat=32'd0, cspl_bank_flat=64'd0;
+`else
   nes_chrsplit_capture cspl_cap(
     .CLK(CLK), .RST(RST), .ce(ce_pulse_r), .frame_tick(tick_accept_w),
     .scanline(scanline_dbg),
@@ -852,6 +871,8 @@ module nes_wrap(
     .cspl_cnt_o(cspl_cnt), .cspl_ovf_o(cspl_ovf), .cspl_poison_o(cspl_poison),
     .cspl_sl_flat(cspl_sl_flat), .cspl_bank_flat(cspl_bank_flat)
   );
+`endif
+`endif // NES_MMC5
 
   // -------- CHR window-vector raster capture (v2.5, CMD_CHR_SPLITS8) -------
   // The mapper-4 twin of cspl_cap above, over the EIGHT 1KB window vector the
@@ -862,10 +883,14 @@ module nes_wrap(
   // constant sentinel -- both inert by construction, no gating needed here.
   // Output nets declared EXPLICITLY (Quartus Warning 10236 -- an implicit net
   // would be a silent 1-bit GND and the command would ship zeros).
+`ifndef NES_MMC5
   wire [2:0]   cwin_cnt;
   wire         cwin_ovf;
   wire [31:0]  cwin_sl_flat;
   wire [255:0] cwin_win_flat;
+`ifdef NES_NO_WIN8
+  assign cwin_cnt=3'd0, cwin_ovf=1'b0, cwin_sl_flat=32'd0, cwin_win_flat=256'd0;
+`else
   nes_chrwin_capture cwin_cap(
     .CLK(CLK), .RST(RST), .ce(ce_pulse_r), .frame_tick(tick_accept_w),
     .scanline(scanline_dbg),
@@ -874,6 +899,8 @@ module nes_wrap(
     .cwin_cnt_o(cwin_cnt), .cwin_ovf_o(cwin_ovf),
     .cwin_sl_flat(cwin_sl_flat), .cwin_win_flat(cwin_win_flat)
   );
+`endif
+`endif // NES_MMC5
 
   // -------- PPU raster capture (Fase 3, CMD_PPU_SPLITS 0x16) ---------------
   // The third sibling of spl_cap/cspl_cap/cwin_cap, over the two PPU
@@ -921,7 +948,7 @@ module nes_wrap(
     dbg_seq_r  <= NESBOX_FRAME_SEQ[7:0];
   end
 
-  nes_bridge bridge(
+  nes_bridge #(.EXT_OAM(1)) bridge(
     .clk(CLK), .rst(RST),
     .tick_accept(tick_accept_w),
     // joypad reload qualifier: sr1/sr2 may only move on a core tick, so the
@@ -939,7 +966,8 @@ module nes_wrap(
     // ppu.v) -- re-gating with ce_pulse_r would kill them (they arrive one
     // cycle after the ce).
     .pal_we(ppu_tap_pal_we), .pal_idx(ppu_tap_pal_idx), .pal_data(ppu_tap_pal_val),
-    .oam_we(ppu_tap_oam_we), .oam_addr(ppu_tap_oam_addr), .oam_data(ppu_tap_oam_val),
+    .oam_we(1'b0), .oam_addr(8'd0), .oam_data(8'd0),   // EXT_OAM: no tap-fed copy
+    .oamb_a(oamb_a_w), .oamb_we(oamb_we_w), .oamb_d(oamb_d_w), .oamb_q(oamb_q_w),
     .oam_freeze(oam_freeze_r),   // v1.4b: mid-display (scanline 120) OAM snapshot
     .frame_tick(frame_tick_r),
     .snap_frame(nes_frame_ctr),
@@ -967,9 +995,11 @@ module nes_wrap(
     .snap_spl_sl(spl_sl_flat), .snap_spl_t(spl_t_flat), .snap_spl_fx(spl_fx_flat),
     // v2.3 CHR raster-split: K=4 (scanline, slot0 bank) entries captured above
     // (cspl_*); the bridge emits CMD_CHR_SPLITS only when cnt>=2 && !poison.
+`ifndef NES_MMC5
     .snap_cspl_cnt(cspl_cnt), .snap_cspl_ovf(cspl_ovf),
     .snap_cspl_poison(cspl_poison),
     .snap_cspl_sl(cspl_sl_flat), .snap_cspl_bank(cspl_bank_flat),
+`endif
     // v2.5 mapper-4 CHR window vector: the per-frame state (CMD_CHR_STATE8, gated
     // by the mmu's own "this mapper publishes windows" bit) plus the K=4 raster
     // entries from cwin_cap (CMD_CHR_SPLITS8, emitted when cnt>=2).
@@ -983,8 +1013,14 @@ module nes_wrap(
     .snap_ntcode(nt_snap_code_w),
     .snap_chr_win_en(chr_snap_win_en_w), .snap_chr_win(chr_snap_win_w),
     .snap_chr_win_flags(chr_snap_win_flags_w),
+`ifndef NES_MMC5
     .snap_cwin_cnt(cwin_cnt), .snap_cwin_ovf(cwin_ovf),
     .snap_cwin_sl(cwin_sl_flat), .snap_cwin_win(cwin_win_flat),
+`endif
+`ifdef NES_MMC5
+    .snap_m5_en(m5_en_w), .snap_m5_base(m5_base_w), .snap_m5_ev(m5_ev_w),
+    .snap_m5_cnt(m5_cnt_w), .snap_m5_ovf(m5_ovf_w),
+`endif
     .frame_seq_o(NESBOX_FRAME_SEQ), .frame_len_o(NESBOX_FRAME_LEN),
     .status_o(NESBOX_STATUS), .frame_done_o(),
     .frame_ack_i(NESBOX_FRAME_ACK), .buf_sel_i(NESBOX_BUF_SEL),

@@ -47,7 +47,7 @@
 #define NES_PSRAM_CHR_ADDR   (0x200000L)  /* CHR-ROM/RAM, <=1MB, formato NES NATIVO (core-owned) */
 #define NES_PSRAM_CIRAM_ADDR (0x300000L)  /* 2KB nametable RAM (core-owned, MCU never writes it) */
 #define NES_PSRAM_WRAM_ADDR  (0x380000L)  /* 2KB CPU work RAM (core-owned) */
-#define NES_PSRAM_CARTRAM_ADDR (0x3C0000L) /* 8KB PRG-RAM window (core-owned; no save support yet) */
+#define NES_PSRAM_CARTRAM_ADDR (0x3C0000L) /* 8KB PRG-RAM window (core-owned; battery saves: nesave.c) */
 
 /* CHR pre-convertida p/ SNES no load (Fase 1c) -- ver src/nes_chr.h pro
    contrato byte-a-byte da conversao e NES-CORE-CONTRACT.md Sec. 10.5 pro
@@ -141,7 +141,7 @@
    The 22 config-bus reads are NOT atomic vs the running core -- the snapshot
    is only self-consistent when the CPU is stuck (the use case; multi-byte
    fields can tear while running).  0x400100 sits past the NESL breadcrumb
-   (0x400000, 52 B) inside the MCU-owned window; the core's 22-bit decode
+   (0x400000, 53 B) inside the MCU-owned window; the core's 22-bit decode
    (0x000000-0x3FFFFF) can never touch it.
    PHASE GATE (USB reader beware): the PSRAM write is gated on
    band_frames != 0 -- publishing during the renderer's boot window (its CHR
@@ -186,7 +186,7 @@ typedef struct __attribute__ ((__packed__)) _nes_romprops {
   uint8_t  chr_size_class;   /* 3-bit bank-count class -> mapper_flags[13:11] */
   uint8_t  mirror_vertical;  /* iNES flags6 bit0 -> mapper_flags[14] */
   uint8_t  four_screen;      /* iNES flags6 bit3 -- NOT implemented by the pruned mmu.v -> NOIMPL */
-  uint8_t  has_battery;      /* iNES flags6 bit1 -- informational only, no PRG-RAM save support yet */
+  uint8_t  has_battery;      /* iNES flags6 bit1 -- persisted by nesave.c (PRG-RAM window -> <stem>.srm) */
   uint8_t  has_trainer;      /* iNES flags6 bit2 -- 512B trainer skipped before PRG when set */
   uint8_t  has_chr_ram;      /* chr_8k_banks == 0 -> mapper_flags[15] */
   uint8_t  is_nes20;         /* NES 2.0 header (flags7 bits 3:2 == 10b); sizes still read as classic iNES */
@@ -208,7 +208,18 @@ typedef struct __attribute__ ((__packed__)) _nes_romprops {
   uint16_t mapper_flags16;
   uint8_t  error;            /* MENU_ERR_NOIMPL on unsupported mapper / four-screen, else MENU_ERR_OK */
   const uint8_t *error_param;
+#ifndef CONFIG_MK2
+  /* Timing the header declares: NES_REGION_NTSC (also "multi-region" and "not stated"),
+     NES_REGION_PAL or NES_REGION_DENDY.  INFORMATIONAL: the core has the NTSC pacer only, so a
+     PAL or Dendy image runs with NTSC timing (about 20 % fast, audio 7.7 % sharp).  It is
+     recorded in the NESL breadcrumb and in nesdbg.log, and never refuses the load. */
+  uint8_t  region;
+#endif
 } nes_romprops_t;
+
+#define NES_REGION_NTSC   0
+#define NES_REGION_PAL    1
+#define NES_REGION_DENDY  2
 
 void nes_id(nes_romprops_t*, uint8_t *filename);
 uint8_t nes_update_file(uint8_t **filename_ref);

@@ -121,13 +121,11 @@ initial begin
   SD_DMA_END_MID_BLOCK = 0;
 end
 
-wire [31:0] snes_sysclk_freq;
-
-clk_test snes_clk_test (
-    .clk(clk),
-    .sysclk(snes_sysclk),
-    .snes_sysclk_freq(snes_sysclk_freq)
-);
+// SNES master-clock counter (clk_test) is NOT instantiated in this core: its only
+// reader is the menu's System Information screen (sysinfo.c), and the menu always
+// runs on the base core, never on this one.  Command 0xFE keeps answering with the
+// counter's own power-up value ("no measurement yet"), so a stray read is harmless.
+wire [31:0] snes_sysclk_freq = 32'hFFFFFFFF;
 
 reg [3:0] MAPPER_BUF;
 reg [23:0] ADDR_OUT_BUF;

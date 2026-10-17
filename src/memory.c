@@ -59,6 +59,7 @@ memory.c: RAM operations
 #include "gbc.h"
 #include "module.h"
 #include "nes.h"
+#include "nesave.h"
 #include "sms.h"
 #include "atari.h"
 #include "patch.h"
@@ -631,6 +632,15 @@ static uint8_t spc7110_rtc_have_core;
 static void load_saveram(const load_ctx_t *c) {
   uint8_t  *filename = c->filename;
   uint32_t  rammask  = c->rammask;
+#ifndef CONFIG_MK2                  /* no NES core on the Mk.II: that build stays byte-identical */
+  if(nes_romprops.has_nes) {
+    /* the PRG-RAM battery lives in the core's own PSRAM window, not in SRAM_SAVE_ADDR
+       (romprops.sramsize_bytes is 0 for a .nes); nes_load_prg already cleared it */
+    nesave_attach(filename, nes_romprops.has_battery, nes_romprops.is_nes20,
+                  nes_romprops.header.flags10);
+    return;
+  }
+#endif
   if(romprops.has_sufami) {
     /* Slot A is cleared over the WHOLE mapped window, scratch included, or the ST
        BIOS inherits the previous game's leftovers and hangs. */
@@ -980,8 +990,8 @@ static void load_setup_masks(load_ctx_t *c) {
     /* reset the filename to match the NES file (recentes/saves usam o .nes) */
     c->filename = c->nes_filename;
 
-    /* sem SaveRAM na Fase 0 (PRG-RAM com bateria fica pra fase futura);
-       ROM_MASK nao e' consumido pelo nes_wrap (o mapper_flags carrega as
+    /* sem SaveRAM do SNES: a PRG-RAM com bateria mora na janela do proprio core
+       (load_saveram -> nesave_attach); ROM_MASK nao e' consumido pelo nes_wrap (o mapper_flags carrega as
        classes de tamanho), setado por higiene pro tamanho do PRG. */
     romprops.ramsize_bytes  = 0;
     romprops.srambase       = 0;
@@ -1626,6 +1636,9 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
      SPC7110 RTC) must stop before the core changes under it, and a menu module's screen
      is gone. */
   module_drop();
+#ifndef CONFIG_MK2
+  nesave_detach();                    /* the previous game's battery must not follow this load */
+#endif
 
   /* NB: menu SFX teardown (menu_sfx_shutdown) is deferred all the way down to just
      before the FPGA reconfig, past the prerequisite check AND past the 0x55 that
@@ -1714,7 +1727,9 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
      logic, so FX3 carts get the same treatment; classic GSU keeps MSU-1. */
   if(!romprops.has_spc7110 && !romprops.has_fx3)
 #endif
-  if(msu1_check(c.filename)) {
+  /* The NES core has no MSU-1 data buffer (MSU_DATA is off in sd2snes_nes/config.vh):
+     a .msu next to a .nes must not send the game to msu1_loop with a dead MSU-1. */
+  if(!nes_romprops.has_nes && msu1_check(c.filename)) {
     romprops.fpga_features |= FEAT_MSU1;
     romprops.has_msu1 = 1;
   }
@@ -2169,6 +2184,22 @@ static int slot_sidecar_write(const char *src, uint8_t srm, uint8_t ss) {
   file_close();
   file_res = 0;
   return bw == 2;
+}
+
+/* Slot-aware .srm path for the load that is starting.  Unlike migrate_and_load_srm this
+   never renames a <rom>.srm out of the ROM's folder (that path rewrites `filename` in
+   place, which would drop the nes/ namespace from every later save). */
+int srm_path_for_load(char *buf, size_t buflen, uint8_t *filename) {
+  srm_slot_load(filename);
+  return append_srm_name(buf, buflen, filename, srm_slot);
+}
+
+/* Same name for the write side (the live slot, as save_srm uses it), with the folder created.
+   Lets a caller write the file with its own bounded FPGA reads instead of save_sram's. */
+int srm_path_for_save(char *buf, size_t buflen, uint8_t *filename) {
+  if(append_srm_name(buf, buflen, filename, srm_slot) < 0) return -1;
+  path_asset_mkdir(buf);                    /* create only AFTER the name exists */
+  return 0;
 }
 
 void srm_slot_load(uint8_t *filename) {

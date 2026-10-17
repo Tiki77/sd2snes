@@ -24,6 +24,7 @@ module nes_split_capture(
   input         ce,              // core tick (nes_wrap ce_pulse_r)
   input         frame_tick,      // frame close (nes_wrap frame_tick_r)
   input  [8:0]  scanline,        // core scanline
+  input  [8:0]  cycle,           // core PPU dot (0..340) -- see FORCED BLANK below
   input  [14:0] loopy_t,         // ppu_tap_loopy_t (scroll intent)
   // ppu_tap_loopy_v: the CPU-SIDE shadow of loopy_V, and its write strobe.
   input  [14:0] loopy_v,
@@ -65,6 +66,44 @@ module nes_split_capture(
   reg [7:0]  va_line;   // line inside the nametable at the anchor (== the sy byte)
   reg        va_nt;     // nametable Y (loopy bit 11) at the anchor
   reg [7:0]  va_sl;     // scanline the anchor was taken at
+  // ---- FORCED BLANK MID-DISPLAY (Super Mario Bros. 3 in-level status bar) ----
+  // The PPU only moves v while rendering is ON (the coarse-X steps and the
+  // vertical increment at dot 251 here, 256 on the real chip).  SMB3's level IRQ
+  // turns rendering OFF at line 193, writes the status-bar address with a $2006
+  // pair ($2006=0B,00: nametable $2800, coarse Y 24, fine Y 0) and turns
+  // rendering back on around line 193/194.  The capture ignored every write made
+  // with rendering off (the rendering gate below is about T-only writes, which
+  // are invisible), so the status bar was published with the vertical of the
+  // PREVIOUS pair ($2006=00,00 a line earlier, vertical 0) and the renderer drew
+  // the top of the other nametable where the status bar belongs.
+  //
+  // A write of v with rendering off IS visible: the PPU resumes from that v when
+  // rendering comes back.  So it is adopted (v_shadow + anchor), and while
+  // rendering stays off the raster is FROZEN: va_sl follows the last line whose
+  // vertical-increment dot passed with rendering off (`va_frz`).  When rendering
+  // returns, the change detector sees the new v and the entry goes out at that
+  // frozen line.  The row AFTER it is the first one drawn from the written v,
+  // and an entry's line is the one the renderer draws AT its own scanline (+1 per
+  // line after it -- the convention every entry is calibrated to, pixel by pixel,
+  // against the emulator), so the frozen line carries the written line minus one:
+  // SMB3 publishes (193, 191) and line 194 shows 192, as on the console.
+  // Coalescing with an entry at most one line earlier REPLACES its scanline too
+  // (that entry only covered lines of the blank).  Lockstep with bridge_sim
+  // ppustate (_va_frz).
+  reg        va_frz;
+  // The forced-blank entry is placed at the FROZEN line F carrying the written
+  // line minus one, and the rendering resumes at F+1.  A change finalized on the
+  // next line -- SMB3 writes $2005=00,EF at 194, which clears the playfield's
+  // fine X -- coalesces into that entry (<= 1 line), and the coalesce publishes
+  // the raster AT ITS OWN line (F+1) while the entry keeps F: the status bar
+  // came out one line up in every frame whose playfield fine X was not 0 (7 in
+  // 8 while scrolling; the console showed it as the bar jumping while running).
+  // So the vertical a forced-blank entry publishes is HELD for the changes that
+  // coalesce into it; a v write (new anchor) or any entry that is not a
+  // coalesce releases it.  Lockstep with bridge_sim ppustate (_blk_pub).
+  reg        blk_hold;
+  reg [7:0]  blk_pl;    // the held published line
+  reg        blk_pn;    // and its nametable Y
   // ---- THE EFFECTIVE T: vertical from V, horizontal from T --------------
   // A mid-frame split is fixed by whichever register the game actually wrote,
   // and the two halves come from DIFFERENT ones:
@@ -101,17 +140,17 @@ module nes_split_capture(
   // paired with the payload; the bridge latches on tick_accept, thousands of
   // cycles after the last display ce, so the extra cycle is invisible to it.
   reg        q_ce, q_ft, q_vwe, q_w, q_rend;
-  reg [8:0]  q_sl;
+  reg [8:0]  q_sl, q_cyc;
   reg [14:0] q_t, q_v;
   reg [2:0]  q_fx;
   always @(posedge CLK) begin
     if (RST) begin
       q_ce<=1'b0; q_ft<=1'b0; q_vwe<=1'b0; q_w<=1'b0; q_rend<=1'b0;
-      q_sl<=9'd0; q_t<=15'd0; q_v<=15'd0; q_fx<=3'd0;
+      q_sl<=9'd0; q_cyc<=9'd0; q_t<=15'd0; q_v<=15'd0; q_fx<=3'd0;
     end else begin
       q_ce<=ce; q_ft<=frame_tick; q_vwe<=loopy_v_we; q_w<=w;
       q_rend<=(ppumask[3] | ppumask[4]);
-      q_sl<=scanline; q_t<=loopy_t; q_v<=loopy_v; q_fx<=fine_x;
+      q_sl<=scanline; q_cyc<=cycle; q_t<=loopy_t; q_v<=loopy_v; q_fx<=fine_x;
     end
   end
 
@@ -136,15 +175,26 @@ module nes_split_capture(
   // reason v_eff is: the registered update is not visible to this cycle's
   // publish, and a $2006 split must go out with the vertical it just WROTE
   // (delta 0), not the raster line.  Caught by the $2006 control bench.
+  // FORCED BLANK: the first rendering ce after a v write made in a forced blank
+  // (and not itself a write) places its entry at the FROZEN line, not here.
+  wire        blank_chg  = va_frz & ~q_vwe;
+  wire [7:0]  blk_wr     = {q_v[9:5], q_v[14:12]};
+  wire [7:0]  blk_line   = (blk_wr == 8'd0) ? 8'd239 : blk_wr - 8'd1;
+  wire        blk_nt     = (blk_wr == 8'd0) ? ~q_v[11] : q_v[11];
+  wire [7:0]  spl_sl_now = blank_chg ? va_sl : q_sl[7:0];
   wire [7:0]  va_line_eff = q_vwe ? {q_v[9:5], q_v[14:12]} : va_line;
   wire        va_nt_eff   = q_vwe ? q_v[11]                : va_nt;
   wire [7:0]  va_sl_eff   = q_vwe ? q_sl[7:0]              : va_sl;
-  wire [8:0]  va_raw   = {1'b0, va_line_eff} + ({1'b0, q_sl[7:0]} - {1'b0, va_sl_eff});
+  wire [8:0]  va_raw   = {1'b0, va_line_eff} + ({1'b0, spl_sl_now} - {1'b0, va_sl_eff});
   wire        va_wrap  = (va_raw >= 9'd240);
   wire [8:0]  va_sub   = va_raw - 9'd240;
   wire [7:0]  pub_line = va_wrap ? va_sub[7:0] : va_raw[7:0];
   wire        pub_nt   = va_nt_eff ^ va_wrap;
   wire [14:0] pub_t    = {pub_line[2:0], pub_nt, q_t[10], pub_line[7:3], q_t[4:0]};
+  // coalescing into a forced-blank entry (not itself a v write nor a new blank
+  // entry): its vertical stays the one it was published with
+  wire        coal_hold = blk_hold & ~q_vwe & ~blank_chg;
+  wire [14:0] coal_t   = coal_hold ? {blk_pl[2:0], blk_pn, q_t[10], blk_pl[7:3], q_t[4:0]} : pub_t;
 
   wire spl_changed = (eff_t != spl_last_t) | (q_fx != spl_last_fx);
   // RENDERING GATE (ppumask BG|OBJ): a T/fine_x change while rendering is OFF is
@@ -156,11 +206,17 @@ module nes_split_capture(
   wire spl_do_change = spl_changed & ~q_w;
   // eviction cones (consumed ONLY in the cnt==4 overflow branch; reg-to-reg,
   // 8-bit subtract + compare tree, single-cycle at CLK2 with room to spare)
-  wire [7:0] spl_sl_now = q_sl[7:0];
   wire [7:0] spl_d1 = spl_sl[2] - spl_sl[1];
   wire [7:0] spl_d2 = spl_sl[3] - spl_sl[2];
   wire [7:0] spl_d3 = spl_sl_now - spl_sl[3];
   wire [7:0] spl_dn = 8'd240 - spl_sl_now;
+  // coalescence chain test.  The forced-blank entry can sit at or BEFORE the
+  // chain head (its line is frozen), so it is compared in 9 bits: at/behind the
+  // head = payload rewrite, one line after = the entry moves to that line.
+  wire [8:0] spl_dsl  = {1'b0, spl_sl_now} - {1'b0, spl_last_sl};
+  wire       spl_coal = blank_chg ? (spl_dsl[8] | (spl_dsl[7:0] <= 8'd1))
+                                  : ((spl_sl_now - spl_last_sl) <= 8'd1);
+  wire       spl_bmove = blank_chg & ~spl_dsl[8] & (spl_dsl[7:0] == 8'd1) & (spl_cnt > 3'd1);
   wire spl_ev1 = (spl_d1 <= spl_d2) && (spl_d1 <= spl_d3) && (spl_d1 <= spl_dn);
   wire spl_ev2 = !spl_ev1 && (spl_d2 <= spl_d3) && (spl_d2 <= spl_dn);
   wire spl_ev3 = !spl_ev1 && !spl_ev2 && (spl_d3 <= spl_dn);
@@ -248,7 +304,8 @@ module nes_split_capture(
       spl_cnt<=3'd1; spl_ovf<=1'b0; spl_frozen<=1'b0;
       spl_sl[0]<=8'd0; spl_t[0]<=15'd0; spl_fx[0]<=3'd0;
       v_shadow<=15'd0;
-      va_line<=8'd0; va_nt<=1'b0; va_sl<=8'd0;
+      va_line<=8'd0; va_nt<=1'b0; va_sl<=8'd0; va_frz<=1'b0;
+      blk_hold<=1'b0; blk_pl<=8'd0; blk_pn<=1'b0;
       spl_last_sl<=8'd0; spl_last_t<=15'd0; spl_last_fx<=3'd0;
       dp_v<=1'b0; dp_act<=3'd0; dp_idx<=3'd0;
       dp_sl<=8'd0; dp_t<=15'd0; dp_fx<=3'd0;
@@ -257,16 +314,41 @@ module nes_split_capture(
       spl_frozen<=1'b0; spl_ovf<=1'b0; spl_cnt<=3'd1;
       spl_sl[0]<=8'd0; spl_t[0]<=eff_t; spl_fx[0]<=q_fx;
       spl_last_sl<=8'd0; spl_last_t<=eff_t; spl_last_fx<=q_fx;
+      va_frz<=1'b0; blk_hold<=1'b0;
       if (q_vwe) begin
         v_shadow<=q_v;
         va_line<={q_v[9:5], q_v[14:12]}; va_nt<=q_v[11]; va_sl<=8'd0;
       end
+    end else if (q_ce && q_sl <= 9'd239 && !spl_render && spl_frozen) begin
+      // FORCED BLANK inside the display (see va_frz): v does not move.  A write
+      // of v is adopted with the raster frozen at the last line whose increment
+      // dot is behind it; while the blank lasts, every line whose increment dot
+      // passes moves the frozen line along.
+      if (q_vwe) begin
+        v_shadow<=q_v;
+        // the frozen line carries the written line MINUS ONE: the row after it
+        // is the first one drawn from the written v (see va_frz)
+        va_line<=blk_line; va_nt<=blk_nt;
+        va_sl<=(q_cyc >= 9'd251 || q_sl == 9'd0) ? q_sl[7:0] : q_sl[7:0] - 8'd1;
+        va_frz<=1'b1; blk_hold<=1'b0;
+      end else if (va_frz && q_cyc >= 9'd251) begin
+        va_sl<=q_sl[7:0];
+      end
     end else if (q_ce && q_sl <= 9'd239 && spl_render) begin
+      // rendering is back: the frozen raster runs again from its frozen line
+      // (blank_chg places THIS ce's entry, if any, at that line)
+      va_frz<=1'b0;
       // the CPU wrote V ($2006 pair or a $2007 access): adopt it, and
       // re-anchor the raster vertical at THIS scanline
       if (q_vwe) begin
         v_shadow<=q_v;
         va_line<={q_v[9:5], q_v[14:12]}; va_nt<=q_v[11]; va_sl<=q_sl[7:0];
+        blk_hold<=1'b0;
+      end
+      // a change at the forced-blank resume places a new forced-blank entry,
+      // whatever action carries it: its vertical is the one to hold
+      if (spl_do_change & blank_chg) begin
+        blk_hold<=1'b1; blk_pl<=pub_line; blk_pn<=pub_nt;
       end
       if (!spl_frozen) begin
         // entry 0 = display-start state (chain anchored at scanline 0)
@@ -282,17 +364,26 @@ module nes_split_capture(
         dp_v<=1'b1; dp_act<=ACT_WR; dp_idx<=3'd0;
         dp_sl<=8'd0; dp_t<=q_t; dp_fx<=q_fx;
         // ENDPARK
-        spl_cnt<=3'd1; spl_frozen<=1'b1;
+        spl_cnt<=3'd1; spl_frozen<=1'b1; blk_hold<=1'b0;
         spl_last_sl<=8'd0; spl_last_t<=eff_t; spl_last_fx<=q_fx;
+      end else if (spl_do_change & spl_bmove) begin
+        // forced-blank entry one line after the open entry: that entry only
+        // covered lines of the blank -- it MOVES to the frozen line
+        // PARK(bmove)
+        dp_v<=1'b1; dp_act<=ACT_WR; dp_idx<=spl_cnt-3'd1;
+        dp_sl<=spl_sl_now; dp_t<=pub_t; dp_fx<=q_fx;
+        // ENDPARK
+        spl_last_sl<=spl_sl_now;
+        spl_last_t<=eff_t; spl_last_fx<=q_fx;
       end else if (spl_do_change) begin
-        if ((spl_sl_now - spl_last_sl) <= 8'd1) begin
+        if (spl_coal) begin
           // coalesce (same/adjacent scanline): entry keeps its ORIGINAL
           // scanline; the chain advances so a pair may continue next line
           // PARK(coalesce)
           dp_v<=1'b1; dp_act<=ACT_COAL; dp_idx<=spl_cnt-3'd1;
-          dp_sl<=spl_sl_now; dp_t<=pub_t; dp_fx<=q_fx;
+          dp_sl<=spl_sl_now; dp_t<=coal_t; dp_fx<=q_fx;
           // ENDPARK
-          spl_last_sl<=spl_sl_now;
+          if (~spl_dsl[8]) spl_last_sl<=spl_sl_now;
           spl_last_t<=eff_t; spl_last_fx<=q_fx;
         end else if (spl_cnt >= 3'd4) begin
           spl_ovf<=1'b1;
@@ -304,6 +395,7 @@ module nes_split_capture(
             dp_sl<=spl_sl_now; dp_t<=pub_t; dp_fx<=q_fx;
             // ENDPARK
             spl_last_sl<=spl_sl_now; spl_last_t<=eff_t; spl_last_fx<=q_fx;
+            if (~blank_chg) blk_hold<=1'b0;     // a new entry of its own
           end
           // else: the new entry is the shortest strip -> dropped, chain frozen
         end else begin
@@ -313,6 +405,7 @@ module nes_split_capture(
           // ENDPARK
           spl_cnt<=spl_cnt+3'd1;
           spl_last_sl<=spl_sl_now; spl_last_t<=eff_t; spl_last_fx<=q_fx;
+          if (~blank_chg) blk_hold<=1'b0;       // a new entry of its own
         end
       end
     end

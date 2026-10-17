@@ -184,3 +184,6 @@ __pycache__
 *.sample
 # the CJK languages' game-text fonts (build.sh fetches them with the menu)
 bin/*.fnt
+
+# NES renderer: measurement build tree (make -C snes/nes perf)
+snes/nes/perf_build/

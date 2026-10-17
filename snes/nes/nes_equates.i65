@@ -127,6 +127,18 @@
                                * invert aqui seria derivar duas vezes, a licao
                                * "nao inferir no renderer" da spec SS13.8).
                                * Consumido por nes_chrw_handle_state. */
+#define CMD_M5_STATE     $17  /* MMC5 (core variante NES_MMC5): 23B, INCONDICIONAL, offset
+                               * FIXO 18 (o lugar do $14, que o variante nao emite): o ESTADO
+                               * do MMC5 no INICIO do display, 22 bytes de payload --
+                               * flags{b1=spr16,b2=last} modo(b1:0) A0..A7 B0..B3 ntmap fill..
+                               * mascara-de-CHR(byte 20). O renderer resolve as visoes de BG e
+                               * de OBJ (nes_m5_views) e alimenta o reconciliador de janelas
+                               * com um $14/$15 SINTETICO. Consumido por nes_m5_handle. */
+#define CMD_M5_EVENTS    $18  /* MMC5: 2+3c B -- hdr(1: b7=ovf, [3:0]=cnt 1..8) + cnt x
+                               * [scanline idx valor]: as escritas de registrador de CHR do MMC5
+                               * DURANTE o display (idx 0-7 = $5120-$5127, 8-11 = $5128-$512B,
+                               * 13 = $5130, 16 = $5101). Sempre IMEDIATAMENTE apos o $17 e
+                               * consumido junto com ele (nes_m5_handle). */
 #define CMD_CHR_SPLITS8  $15  /* v2.3w raster-split de CHR com vetor de janelas:
                                * 2+9c B -- hdr(1: b7=ovf, [3:0]=cnt 2..4) +
                                * cnt x [scanline(1) win[0..7](8)], SNAPSHOT
@@ -410,6 +422,16 @@
 
 #define NES_CHR_BG12NBA_SLOT0   $01
 #define NES_CHR_BG12NBA_SLOT1   $02
+/* v3.11 -- REGIAO TERCIARIA (so' plano BG, janelas 4-7). O vao de words
+ * $0800-$0FFF entre a tilemap e a regiao 0 e' livre e e' EXATAMENTE onde caem
+ * os tiles 256-511 de um char base $0000 (BG12NBA = $00). Entao, num frame em
+ * que o BG le a metade ALTA (PPUCTRL bit4 = 1 => indice da tilemap = 256+t),
+ * as janelas 4-7 de uma TERCEIRA composicao cabem ali e a faixa dela exibe com
+ * $210B = $00. Janelas 0-3 NUNCA vao para la' (cairiam em cima da tilemap):
+ * o diff da regiao 2 so' olha k = 4..7 e o OBJ dela nunca e' carregado (o
+ * OBSEL e' estatico; os sprites de toda faixa vem da regiao corrente). */
+#define NES_CHR_BG12NBA_T3      $00
+#define NES_CHR_T3_BG_WORD      $0000
 #define NES_CHR_OBSEL_SLOT0     $02
 #define NES_CHR_OBSEL_SLOT1     $03
 /* sentinela "slot vazio" (nunca um indice de banco valido) */
@@ -600,6 +622,12 @@
  * nes_chrw_dclear marca a janela como carregada assim mesmo => meia
  * janela corrompida PARA SEMPRE (F1/A13).  Por isso o passo e' derivado
  * do V, e nunca de uma constante otimista.
+ *
+ * v3.12: a ancora acima (1020 cyc/transferencia + 8 cyc/byte) SUBESTIMAVA o
+ * passo em 6-7 linhas (o shift de 10/11 bits e o endereco de 24 bits rodam em
+ * ROM lenta antes de cada DMA), e o V era lido antes do pick.  As tabelas hoje
+ * usam o custo MEDIDO no renderer real e o V relido logo antes do DMA -- ver o
+ * cabecalho de nes_chrw_vtab_obj em nes_render.a65.
  */
 #define NES_CHRW_VTAB_LO    225    /* 1o V tabelado (= NES_CHRQ_V_MIN) */
 #define NES_CHRW_VTAB_N     31     /* V 225..255 (V>=256 le como 0..5 em $213D e cai fora) */
@@ -765,4 +793,29 @@
  * FILA ficou FORA deste candidato -- a escalada dela ligaria forced-blank em
  * display ativo, que e' classe de artefato NOVA e nao tem gate). */
 #define NES_CHRW_DISC_MAX    1
+/* v3.13: teto de vblanks em que a abertura da tela (BG voltando a aparecer)
+ * segura a tela em forced blank esperando a faixa suja da tilemap esvaziar e a
+ * passada global da conversao (~256 celulas por quadro, 1920 celulas) terminar.
+ * O teto so' existe para nunca prender a tela apagada. */
+#define NES_BGH_MAX          24
+#define NES_BGH_SETTLE        4
+/* v3.13: V maximo para comecar a descer uma janela de sprite inteira (2 KB,
+ * ~12 linhas) antes da OAM; e quantos quadros seguidos a OAM pode ficar retida
+ * esperando as janelas (nes_chrw_early_obj). */
+#define NES_CHRW_EOBJ_VMAX  243
+#define NES_OAM_HOLD_MAX      2
 
+
+/* ------------------------------------------------------------------ */
+/* Telemetria de performance (nes_perf.a65, variaveis em nes_perf_vars.a65).
+ * DESLIGADA por padrao: a build de release nao monta nenhuma sonda e o
+ * canal $2BDF segue no rodizio k0..k3.  `make perf` (Makefile) copia a
+ * arvore, troca a linha-marcador abaixo por `#define NES_PERF` e gera
+ * misc/nes_snes_perf.bin -- o unico binario com a telemetria. */
+/* NES_PERF_SWITCH */
+/* Cada byte do relatorio fica NES_PF_HOLD NMIs no $2BDF; um ciclo tem
+ * NES_PF_SLOTS slots de 6 bits (36 B de relatorio * 8 / 6 = 48). */
+#define NES_PF_HOLD        3
+#define NES_PF_SLOTS       48
+/* byte 0 do relatorio: versao (nibble alto) | HOLD (nibble baixo) */
+#define NES_PF_HDR         $10+NES_PF_HOLD

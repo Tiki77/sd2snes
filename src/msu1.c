@@ -20,6 +20,7 @@
 #include "module.h"
 #include "psram_io.h"
 #include "sufami.h"
+#include "nesave.h"
 #include "qoa.h"
 
 FIL msudata;
@@ -63,6 +64,7 @@ static void save_during_msu_shortreset(void) {
     if(!file_res) saveinfo_stage(file_lfn);  /* keep the in-game SAVES tab block fresh */
     writeled(0);
   }
+  nesave_flush_inreset(file_lfn);
   snes_reset(0);
 }
 
@@ -107,6 +109,9 @@ static void msu_savecheck(int immediate) {
   if(!cfg_is_msu1_autosave_enabled() && !romprops.has_xc) {
     return;
   }
+  /* NES battery PRG-RAM (an MSU-1 pack next to a .nes sends the game here too). Below the
+     gate on purpose: a card write stalls the DAC, which is what the MSU-1 opt-in is for. */
+  nesave_tick(file_lfn);
   if(immediate || (getticks() > msu_last_sram_check + MS_TO_TICKS(1000))) {
     currentcrc = calc_sram_crc(SRAM_SAVE_ADDR + romprops.srambase, romprops.sramsize_bytes, 0);
     if(msu_last_crc != currentcrc) {

@@ -117,6 +117,9 @@ set_false_path  -from  [get_clocks {SPI_SCK}]  -to  [get_clocks {snes_pll|altpll
 # simulation: min 13 under PSRAM stress, min 15 nominal, avg 15.65). The one
 # upstream exception (ApuLookupTable's free-running tmp_a/tmp_b) was ce-gated
 # in apu.v specifically so the blanket constraint below is sound.
+# A SECOND, deliberate exception is rule 6 below: SpriteRAM's OAM M9K schedule
+# (ppu.v) runs in the 4 CLK2 after each ce, so ph/pw_*/oam_raw_r are free-running
+# and their paths are put back to ONE cycle explicitly.
 #
 # "ALMOST", and the exceptions matter enough to name: the sd2snes TAPS are
 # FREE-RUNNING. ppu.v's tap_* block (~l.785-803) and nes.v's tapA_we (~l.399-418)
@@ -278,6 +281,52 @@ set_false_path -from [get_registers {mcu_cmd:snes_mcu_cmd|nes_feat_out[*]}] -to 
 #        (STA pos-janela-CHR: 5 paths -0.296ns, todos nes_feat_out ->
 #        NES_ROM_DATAr[7].) Conferir 332049/332174 apos sintese, como acima.
 set_false_path -from [get_registers {mcu_cmd:snes_mcu_cmd|nes_feat_out[*]}] -to [get_registers {NES_ROM_DATAr[*]}]
+
+# --- 6. EXCEPTION TO THE FOUNDATION: the OAM M9K of SpriteRAM (ppu.v) ---
+#     SpriteRAM time-shares ONE true-dual-port M9K (nes_oamram) between the primary
+#     OAM, the frozen copy for the bridge and the secondary OAM.  Its port-A
+#     schedule runs in the 4 CLK2 that FOLLOW each ce edge, so a few registers in
+#     there are FREE-RUNNING on CLK2 -- they are NOT gated by ce, and the blanket
+#     "-setup 4" of rule 1 would over-claim for them:
+#       ph[*]               phase counter (0 idle, 1 write, 2 read OAM, 3 read secondary)
+#       pw_we/pw_a[*]/pw_d[*]  the $2004 write, captured at the ce edge, issued in ph 1
+#       oam_raw_r[*]        the OAM byte, captured in ph 3 from the M9K output
+#     Every path that LEAVES ph/pw_* (address/enable/data of the M9K, the capture
+#     enable of oam_raw_r) and the path M9K output -> oam_raw_r is a genuine ONE-cycle
+#     path (launch and capture are consecutive CLK2 edges), so they are put back to
+#     the plain single-cycle relationship (setup 1 / hold 0): the STA analyses them
+#     with the real period and a future re-synthesis that stretches one of them
+#     fails timing instead of silently passing on a 4-cycle budget.
+#     The M9K address/enable registers also get a TRUE bound for the paths that
+#     come from ce-gated registers (oam_ptr, sprtemp_ptr...): the M9K samples the
+#     oam_ptr address two edges after the ce that moved it (ph 2), so the honest
+#     claim there is setup 2 / hold 1, not 4.
+#     Everything else that touches this M9K keeps rule 1 (setup 4) ON PURPOSE and
+#     it is sound: the data written through port A at a ce edge (oam_bus, the
+#     secondary-OAM write) comes from ce-gated registers and a_q, which has been
+#     stable since ph 0 (4 CLK2 after the previous ce, >= 9 CLK2 before the next).
+#     Order matters: these come AFTER rule 1 and are narrower; check on the STA
+#     report that "Multicycle - Setup End" reads 1 on ph/pw_* paths (and 2 on the
+#     M9K address paths), and that the collections below are not empty (the error()
+#     makes a rename fail loudly instead of becoming a silent 332049).
+foreach pat {ph[*] pw_we pw_a[*] pw_d[*]} {
+  if {[get_collection_size [get_registers "*|SpriteRAM:sprite_ram|$pat"]] == 0} {
+    error "main.sdc rule 6: SpriteRAM|$pat matched nothing (renamed, or merged by the fitter?)"
+  }
+}
+set oam_free [get_registers {*|SpriteRAM:sprite_ram|ph[*] *|SpriteRAM:sprite_ram|pw_we *|SpriteRAM:sprite_ram|pw_a[*] *|SpriteRAM:sprite_ram|pw_d[*]}]
+set oam_rawr [get_registers {*|SpriteRAM:sprite_ram|oam_raw_r[*]}]
+set oam_ramo [get_registers {*|SpriteRAM:sprite_ram|nes_oamram:oamram|*|ram_block1a*~porta_*}]
+set oam_rama [get_registers {*|SpriteRAM:sprite_ram|nes_oamram:oamram|*|ram_block1a*~porta_address_reg0 *|SpriteRAM:sprite_ram|nes_oamram:oamram|*|ram_block1a*~porta_we_reg}]
+foreach {nm col} [list oam_rawr $oam_rawr oam_ramo $oam_ramo oam_rama $oam_rama] {
+  if {[get_collection_size $col] == 0} { error "main.sdc rule 6: collection $nm is EMPTY (SpriteRAM/nes_oamram renamed?)" }
+}
+set_multicycle_path -setup 2 -from [get_registers {*|NES:core|*}] -to $oam_rama
+set_multicycle_path -hold  1 -from [get_registers {*|NES:core|*}] -to $oam_rama
+set_multicycle_path -setup 1 -from $oam_free -to [get_registers {*|NES:core|*}]
+set_multicycle_path -hold  0 -from $oam_free -to [get_registers {*|NES:core|*}]
+set_multicycle_path -setup 1 -from $oam_ramo -to $oam_rawr
+set_multicycle_path -hold  0 -from $oam_ramo -to $oam_rawr
 
 # NOT constrained (kept full-speed on purpose):
 #   - ce_pulse_r -> NES (the clock-enable fan-out itself: consumed at the very

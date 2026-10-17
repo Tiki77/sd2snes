@@ -137,6 +137,9 @@ msu_databuf snes_msu_databuf (
   .q(msu_data)
 ); // Bus [7 : 0]
 `endif
+`else
+// no MSU-1 data buffer in this core: the data port reads as zero
+assign msu_data = 8'h00;
 `endif
 reg [7:0] data_out_r;
 assign reg_data_out = data_out_r;

@@ -25,6 +25,19 @@ O65 = nes_data.o65 nes_render.o65 nes_boot.o65 nes_transport_device.o65 nes_apu.
 IPS = nes_data_zp.ips nes_header.ips
 RAW = nes_snes_raw.sfc
 FINAL = ../../misc/nes_snes.bin
+
+# BUILD DE MEDICAO (telemetria de desempenho, nes_perf.a65).  `make perf` NAO
+# toca no binario de release: copia a arvore para perf_build/, liga o switch
+# NES_PERF so' na copia (nes_equates.i65) e gera misc/nes_snes_perf.{bin,map}.
+# O `make` normal (NES_PERF=0) nao compila nem linka nada da telemetria, e o
+# nes_snes.bin sai byte a byte igual ao de antes dela existir.
+NES_PERF ?= 0
+ifeq ($(NES_PERF),1)
+O65 := $(subst nes_snes.o65,nes_perf.o65 nes_snes.o65,$(O65))
+IPS += nes_perf_vars.ips
+endif
+PERF_DIR = perf_build
+PERF_SRC = Makefile gen_lorom.py gen_map.py gen_palette.py $(wildcard nes_*.a65 nes_*.i65)
 # Mapa de simbolos do binario final (ver gen_map.py). Sai ao lado do .bin: o gate
 # de host tests/host/run_nes_chr.sh EXECUTA os bytes reais num interpretador 65816
 # e precisa dos dois juntos. O mapa carimba o CRC do .bin, entao um par
@@ -90,9 +103,18 @@ nes_data.o65: nes_data.a65
 	@if grep -q "Error:" $(@:.log=).log; then \
 	  echo "*** snescom FAILED on $< (see $(@:.log=).log)"; rm -f $(@:.log=); exit 1; fi
 
+# `make perf`: ver o bloco BUILD DE MEDICAO no topo.
+perf:
+	rm -rf $(PERF_DIR) && mkdir $(PERF_DIR)
+	cp $(PERF_SRC) $(PERF_DIR)/
+	sed 's|^/\* NES_PERF_SWITCH \*/|\#define NES_PERF|' nes_equates.i65 > $(PERF_DIR)/nes_equates.i65
+	@grep -q '^#define NES_PERF$$' $(PERF_DIR)/nes_equates.i65 || { echo "*** NES_PERF_SWITCH ausente em nes_equates.i65"; exit 1; }
+	$(MAKE) -C $(PERF_DIR) NES_PERF=1 FINAL=../../../misc/nes_snes_perf.bin
+
 # O .bin sai JUNTO com o .map: sem o mapa o gate de host pula o bloco do renderer
 # e fica verde sem ter executado nada.
 clean:
+	rm -rf $(PERF_DIR)
 	rm -f *.o65 *.o65.log *.ips *.ips.log $(RAW) link.log $(FINAL) $(MAP)
 
-.PHONY: all clean
+.PHONY: all clean perf

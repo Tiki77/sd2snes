@@ -262,16 +262,53 @@ module SpriteRAM(input clk, input ce,
                  input [7:0] data_in,       // New value for oam or oam_ptr
                  output reg spr_overflow,   // Set to true if we had more than 8 objects on a scan line. Reset when exiting vblank.
                  output reg sprite0,        // True if sprite#0 is included on the scan line currently being painted.
-                 output [7:0] oam_ptr_out);  // sd2snes bridge tap: current OAM write pointer
-  reg [7:0] sprtemp[0:31];   // Sprite Temporary Memory. 32 bytes.
-  reg [7:0] oam[0:255];      // Sprite OAM. 256 bytes.
+                 // OAM lives in ONE M9K (nes_oamram, nes_bridge.v).  Port A is ours
+                 // (write on $2004, registered read at oam_ptr); port B is lent to
+                 // the video bridge (live->frozen copy + serializer).
+                 input [8:0] oamb_a, input oamb_we, input [7:0] oamb_d, output [7:0] oamb_q);
   reg [7:0] oam_ptr;         // Pointer into oam_ptr.
-  assign oam_ptr_out = oam_ptr;   // sd2snes bridge tap
   reg [2:0] p;               // Upper 3 bits of pointer into temp, the lower bits are oam_ptr[1:0].
   reg [1:0] state;           // Current state machine state
-  wire [7:0] oam_data = oam[oam_ptr];
-  // Compute the current address we read/write in sprtemp.
+  // ONE M9K holds the primary OAM, its frozen copy for the bridge and the 32-byte
+  // secondary OAM (sprtemp):  0..255 live, 256..511 frozen (port B, bridge only),
+  // 512..543 sprtemp.  Port A is time-shared inside each ce window (ce edges are
+  // >= 13 CLK2 apart in hardware; the contract here is >= 4), in this order:
+  //   ph 1  write the $2004 byte captured at the ce edge (pw_*)        [OAM write]
+  //   ph 2  read oam[oam_ptr]            -> a_q valid in ph 3          [OAM read]
+  //   ph 3  read sprtemp[sprtemp_ptr]; oam_raw_r <= a_q (the OAM byte)
+  //   ph 0  hold: address stays on sprtemp_ptr, a_q = sprtemp_data, and the
+  //         sprtemp write of the NEXT ce edge lands on exactly that address.
+  // Everything the old asynchronous arrays showed at a ce edge is therefore
+  // identical: oam_ptr/p/cycle only move on ce, and the data is settled 4 clocks
+  // later.  The array stores the RAW $2004 byte (the bridge snapshots it raw, the
+  // emitted video stream is byte-exact on it); the hardwired-zero attribute bits 2-4 (byte 2
+  // of each sprite) are masked on the READ side, equivalent to masking on write
+  // since the mask is idempotent.
+  // These are FREE-RUNNING on clk (not gated by ce) and main.sdc rule 6 times their
+  // paths as ONE-cycle paths BY NAME; `preserve` keeps the fitter from merging them
+  // into a ce-gated twin (it did: pw_d was folded into a register that the blanket
+  // "setup 4" of rule 1 covers, and the 1-cycle write into the M9K lost its bound).
+  (* preserve *) reg [2:0] ph = 3'd0;
+  (* preserve *) reg       pw_we = 1'b0;
+  (* preserve *) reg [7:0] pw_a = 8'd0;
+  (* preserve *) reg [7:0] pw_d = 8'd0;
+  (* preserve *) reg [7:0] oam_raw_r = 8'd0;
+  wire [7:0] a_q;
+  always @(posedge clk) begin
+    if (ce) begin
+      ph <= 3'd1; pw_we <= oam_load; pw_a <= oam_ptr; pw_d <= data_in;
+    end else if (ph != 3'd0) ph <= (ph == 3'd3) ? 3'd0 : ph + 3'd1;
+    if (ph == 3'd3) oam_raw_r <= a_q;
+  end
+  wire [7:0] oam_data = (oam_ptr[1:0] == 2'd2) ? (oam_raw_r & 8'hE3) : oam_raw_r;
   reg [4:0] sprtemp_ptr;
+  wire [9:0] a_addr = (ph == 3'd1) ? {2'b00, pw_a} : (ph == 3'd2) ? {2'b00, oam_ptr} : {5'b10000, sprtemp_ptr};
+  wire       a_we   = (ph == 3'd1) ? pw_we : (ce && !state[1] && ph == 3'd0);
+  wire [7:0] a_d    = (ph == 3'd1) ? pw_d : oam_bus;
+  nes_oamram oamram(.clk(clk),
+                    .a_we(a_we), .a_addr(a_addr), .a_d(a_d), .a_q(a_q),
+                    .b_we(oamb_we), .b_addr(oamb_a), .b_d(oamb_d), .b_q(oamb_q));
+  // Compute the current address we read/write in sprtemp.
   // Check if the current Y coordinate is inside.
   wire [8:0] spr_y_coord = scanline - {1'b0, oam_data};
   wire spr_is_inside = (spr_y_coord[8:4] == 0) && (obj_size || spr_y_coord[3] == 0);
@@ -280,7 +317,7 @@ module SpriteRAM(input clk, input ce,
   reg sprite0_curr;          // If sprite0 is included on the line being processed.
   reg oam_wrapped;           // [wire] if new_oam or new_p wrapped.
   
-  wire [7:0] sprtemp_data = sprtemp[sprtemp_ptr];
+  wire [7:0] sprtemp_data = a_q;   // registered read of the secondary OAM (see the port-A schedule)
   always @*  begin
     // Compute address to read/write in temp sprite ram
     casez({cycle[8], cycle[2]}) 
@@ -321,9 +358,7 @@ module SpriteRAM(input clk, input ce,
   end
   always @(posedge clk) if (ce) begin
      
-    // Some bits of the OAM are hardwired to zero.
-    if (oam_load)
-      oam[oam_ptr] <= (oam_ptr & 3) == 2 ? data_in & 8'hE3: data_in;
+    // (OAM byte write: nes_oamram port A, see above)
     if (cycle[0] && sprites_enabled || oam_load || oam_ptr_load) begin
       oam_ptr <= oam_ptr_load ? data_in : new_oam_ptr;
     end
@@ -337,8 +372,7 @@ module SpriteRAM(input clk, input ce,
 //      $write("Drawing sprite %d/%d. bus=%d oam_ptr=%X->%X oam_data=%X p=%d (%d %d %d)\n", scanline, cycle, oam_bus, oam_ptr, new_oam_ptr, oam_data, p,
 //         cycle[0] && sprites_enabled, oam_load, oam_ptr_load);
     
-    // Always writing to temp ram while we're in state 0 or 1.
-    if (!state[1]) sprtemp[sprtemp_ptr] <= oam_bus;
+    // (Always writing to temp ram while we're in state 0 or 1: port A, see above.)
     // Update state machine on every second cycle.
     if (cycle[0]) begin
       // Increment p whenever oam_ptr carries in state 0 or 1.
@@ -525,9 +559,6 @@ module PPU(input clk, input ce, input reset,   // input clock  21.48 MHz / 4. 1 
            output reg        tap_pal_we,    // 1-CLK2 pulse, 1 per palette write
            output reg [4:0]  tap_pal_idx,   // raw palette index (bridge applies $3F1x mirror)
            output reg [5:0]  tap_pal_val,
-           output reg        tap_oam_we,    // 1-CLK2 pulse, 1 per OAM byte write
-           output reg [7:0]  tap_oam_addr,
-           output reg [7:0]  tap_oam_val,
            output reg [14:0] tap_loopy_t,   // scroll intent (NOT loopy_v -- see nes_bridge)
            output reg [2:0]  tap_fine_x,
            output reg        tap_loopy_w,   // $2005/$2006 write toggle (0 = pair complete)
@@ -537,7 +568,12 @@ module PPU(input clk, input ce, input reset,   // input clock  21.48 MHz / 4. 1 
            // See the LoopyGen port comment -- this is the address the GAME
            // programmed through $2006/$2007, never the render's fetch address.
            output reg [14:0] tap_loopy_v,
-           output reg        tap_loopy_v_we);
+           output reg        tap_loopy_v_we,
+           // OAM port B, lent to the bridge (see SpriteRAM)
+           input  [8:0]      oamb_a,
+           input             oamb_we,
+           input  [7:0]      oamb_d,
+           output [7:0]      oamb_q);
   // These are stored in control register 0
   reg obj_patt; // Object pattern table
   reg bg_patt;  // Background pattern table
@@ -559,7 +595,6 @@ module PPU(input clk, input ce, input reset,   // input clock  21.48 MHz / 4. 1 
     ppuctrl_full = 0;
     ppumask_full = 0;
     tap_pal_we = 0;
-    tap_oam_we = 0;
     tap_loopy_t = 0;
     tap_fine_x = 0;
     tap_loopy_w = 0;
@@ -619,7 +654,6 @@ module PPU(input clk, input ce, input reset,   // input clock  21.48 MHz / 4. 1 
   // This will set oam_ptr to 0 right before the scanline 240 and keep it there throughout vblank.
   wire before_line = (enable_playfield || enable_objects) && (exiting_vblank || end_of_line && !is_in_vblank);
   wire [7:0] oam_bus;
-  wire [7:0] oam_ptr_tap;   // sd2snes bridge tap (registered into tap_oam_addr below)
   wire sprite_overflow;
   wire obj0_on_line;                        // True if sprite#0 is included on the current line
   SpriteRAM sprite_ram(clk, ce,
@@ -634,7 +668,7 @@ module PPU(input clk, input ce, input reset,   // input clock  21.48 MHz / 4. 1 
                        din,
                        sprite_overflow,
                        obj0_on_line,
-                       oam_ptr_tap);
+                       oamb_a, oamb_we, oamb_d, oamb_q);
   wire [4:0] obj_pixel_noblank;
   wire [12:0] sprite_vram_addr;
   wire is_obj0_pixel;               // True if obj_pixel originates from sprite0.
@@ -816,14 +850,9 @@ module PPU(input clk, input ce, input reset,   // input clock  21.48 MHz / 4. 1 
   // from cycle E+1 on, exactly what the direct wires used to show during E.
   always @(posedge clk) begin
     tap_pal_we <= ce && write && (ain == 7) && is_pal_address;
-    // OAM: $2004 store; addr = oam_ptr (pre-increment), raw din (SpriteRAM
-    // masks attr bits 2-4 in its own array; renderer ignores those bits).
-    tap_oam_we <= ce && write && (ain == 4);
     if (ce) begin
       tap_pal_idx  <= loopy[4:0];
       tap_pal_val  <= din[5:0];
-      tap_oam_addr <= oam_ptr_tap;
-      tap_oam_val  <= din;
     end
     // snapshot levels: D cones are pure register outputs (loopy_t / loopy_x /
     // ppuctrl_full / ppumask_full) -> every-clock re-register is a wire path.

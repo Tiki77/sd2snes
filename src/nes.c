@@ -39,7 +39,7 @@
                                 load_rom stream normalmente pra 0x880000.
      3. nes_update_romprops()-- valida o stub (LoROM <=512KB sem SaveRAM, igual
                                 ao sgb_update_romprops) e aponta
-                                fpga_conf = FPGA_NES / load_address = 0x880000.
+                                fpga_conf = nes_core_for(mapper) (fpga_nes, _mmc3 ou _k) / load_address = 0x880000.
      4. nes_load_prg()       -- stream do PRG pra PSRAM 0x000000 e do CHR-ROM
                                 pra 0x200000 EM FORMATO NES NATIVO; CHR-RAM =>
                                 regiao zerada; CIRAM/WRAM/CART-RAM zeradas p/
@@ -80,6 +80,13 @@
 #include "fpga.h"
 #include "cfg.h"
 #include "memory.h"
+#include "crc32.h"
+#include "nesave.h"
+
+#ifndef CONFIG_MK2
+_Static_assert(NESAVE_WINDOW_ADDR == NES_PSRAM_CARTRAM_ADDR,
+               "nesave.c window must be the core's CART-RAM window");
+#endif
 
 /* ~64B como o sgb_romprops: pequeno demais pra justificar AHB (o gotcha de
    .bss mira buffers de centenas de bytes); espelha o precedente do SGB. */
@@ -142,14 +149,9 @@ static uint8_t nes_size_class(uint8_t banks) {
        fiacoes de A0/A1 de cada numero) e 75 (VRC1).  O VRC4 usa o contador
        VRC (modo scanline 114/114/113 ciclos e modo ciclo, latch/ack em
        $F00x); o VRC2 (22) e o VRC1 nao tem IRQ.
-       O VRC6 (24/26) FICOU FORA e continua NOIMPL -- e' o unico item do
-       Sec. 1 do contrato que o RTL do lote nao entregou.  Ele precisa de
-       modulo proprio (quatro modos de janela, uma tabela de nametable por
-       modo e o contador VRC), ~300-370 LEs contando o braco novo do
-       MultiMapper, e o fit fechou em 14.946/15.408 LEs (97%): entrar com ele
-       deixaria a folga no piso de 150 LEs que o contrato exige.  Estar na
-       whitelist SEM o RTL seria a PIOR falha possivel -- o mapper cairia no
-       default MMC0 e o jogo rodaria lixo, em vez do popup NOIMPL limpo.
+       O VRC6 (24/26) entrou DEPOIS, como segundo MODO do mesmo modulo (o
+       contador VRC e os oito seletores de CHR sao os mesmos): ver o bloco
+       "passe da comunidade" abaixo.
      - Namco: 19 (N163) e 210 (N175/N340, o mesmo modulo sem IRQ/RAM/audio).
      - Jaleco: 18 (SS 88006, regs por nibble + IRQ de ciclo com mascara de
        largura) e 72 (JF-17/19, latch por borda de d7/d6).
@@ -160,6 +162,22 @@ static uint8_t nes_size_class(uint8_t banks) {
        Chip Select da placa; desabilitada, a leitura de CHR devolve open bus
        (has_chr_dout no mmu.v).  E' o unico deste lote que nao acrescenta
        banco nenhum -- so' um caminho de dados.
+   Passe da comunidade -- tres familias novas, cada uma com o seu core (a
+   particao de cores por familia de mapper: S principal, B = MMC3 e afins,
+   K = Konami/Jaleco/Namco/Irem/Sunsoft e os novos):
+     - Bandai FCG-1/2 + LZ93D50: 16, 157, 159 (+ o 153 no RTL, fora da lista).  [core K]  Um arquivo de
+       registradores so' (CHR 1KB x8, PRG 16KB, mirroring, contador de IRQ de 16
+       bits) em duas fiacoes; o 16 decodifica as DUAS por endereco ($6000-$7FFF
+       FCG-1/2, $8000-$FFFF LZ93D50), entao o submapper NES 2.0 nao precisa
+       viajar.  A EEPROM serial (24C01/24C02) e o leitor de codigo de barras do
+       Datach (157) NAO existem: $6000-$7FFF le zero (o 153 tem 8KB de WRAM ali).
+       Consequencia: o jogo nao salva (re-inicializa a EEPROM vazia) e o Datach
+       nao le cartao.  O 153 nao esta' na lista: o jogo dele nao inicializa
+       com a CART-RAM zerada, que e' como o firmware a entrega em todo load.
+     - Konami VRC6: 24 e 26.  [core K]  Dois numeros de iNES para duas fiacoes
+       de UM chip (o 26 troca A0/A1), sem OR.  SEM os tres canais de audio.
+     - TxSROM: 118.  [core B]  O MMC3 com o CIRAM A10 ligado em CHR A17: o bit
+       7 de cada banco de CHR e' a pagina de nametable.  CHR ate' 128KB.
    AUDIO DE EXPANSAO (N163, SS 88006/JF-17 com uPD775x) NAO existe no core:
    esses titulos rodam com a trilha incompleta, o que e' release note e nao
    motivo de NOIMPL.  Idem a NAMETABLE VINDA DE CHR-ROM (N163 com valor < $E0
@@ -172,32 +190,55 @@ static uint8_t nes_size_class(uint8_t banks) {
    CADA mapper deste lote tem limite PROPRIO de PRG/CHR, derivado da largura
    do seu seletor de banco no RTL -- ver nes_size_limits[] logo abaixo.  Estar
    nesta lista NAO basta: sem o guard de tamanho a ROM aliasa em silencio. */
+/* O conjunto de mappers aceitos e' repartido em TRES cores (verilog/sd2snes_nes,
+   sd2snes_nes_mmc3, sd2snes_nes_k): as mesmas fontes, com os bracos de mapper das outras
+   familias compilados fora (macros NES_NO_* no main.qsf de cada um).  Esta tabela e'
+   o espelho do h_* do MultiMapper em mmu.v: mapper -> arquivo do core que o TEM.
+   Mexeu num, mexa no outro -- um mapper roteado para o core errado carrega como NROM
+   (h_mmc0 e' o fallback do MultiMapper) e roda lixo, sem erro nenhum.
+     S  (fpga_nes)      NROM/UxROM/CNROM/AxROM/28, MMC1, discretos
+     B  (fpga_nes_mmc3) MMC3, Namco 108, Taito, MMC6
+     K  (fpga_nes_k)    Konami VRC, Jaleco, Namco 163, Irem, Sunsoft FME-7
+   Devolve NULL para mapper nao suportado. */
+static const uint8_t nes_maps_s[] = {
+  0, 1, 2, 3, 7, 28,
+  11, 34, 66, 71, 79, 87, 113, 232,          /* lote 1 */
+  70, 78, 86, 89, 93, 94, 97, 140, 152, 180, 184,   /* discretos do lote 2 */
+  72, 185                                     /* Jaleco JF-17, CNROM com CHR disable */
+};
+/* MMC3, familia Namco 108, Taito TC0190+TC0690 / X1-005 / X1-017.  O MMC6 e' o
+   submapper 1 do 4 (alias $F4, so' dentro do mapper_flags16). */
+static const uint8_t nes_maps_b[] = { 4, 88, 95, 154, 206, 33, 48, 80, 82, 118 };
+/* Sunsoft FME-7, Konami VRC1 / VRC2+VRC4, Namco 163 / 175+340, Jaleco SS 88006,
+   Irem G-101 / H3001, Konami VRC6 (24/26) e Bandai FCG/LZ93D50 (16/159).  O 153
+   (Bandai com 8KB de WRAM) e o 157 (Datach) tem o RTL no core K mas ficam FORA da
+   lista: o 153 nao inicializa com a CART-RAM zerada, e a tela dos jogos Datach nao
+   tem referencia de emulador confiavel nem foi provada em placa. */
+static const uint8_t nes_maps_k[] = { 69, 75, 21, 22, 23, 25, 19, 210, 18, 32, 65,
+                                      24, 26, 16, 159 };
+
+static uint8_t nes_map_in(const uint8_t *l, uint8_t n, uint8_t mapper) {
+  while(n--) if(*l++ == mapper) return 1;
+  return 0;
+}
+
+static const uint8_t *nes_core_for(uint8_t mapper) {
+  if(nes_map_in(nes_maps_s, sizeof(nes_maps_s), mapper)) return FPGA_NES;
+  if(nes_map_in(nes_maps_b, sizeof(nes_maps_b), mapper)) return FPGA_NES_MMC3;
+  if(nes_map_in(nes_maps_k, sizeof(nes_maps_k), mapper)) return FPGA_NES_K;
+  /* MMC5 (ExROM): so' existe no core fpga_nes_mmc5 (verilog/sd2snes_nes_mmc5), com o
+     MMC5 como unico mapper e os comandos $17/$18 da bridge.  Degrau N1: PRG/CHR banking,
+     IRQ de scanline, split de scroll + de CHR por faixa (Castlevania III USA);
+     fill/ExRAM como nametable, atributos estendidos, split vertical, audio de
+     expansao e save de PRG-RAM NAO existem ainda.  Por isso o mapper so' vale para
+     os titulos provados (nes_mmc5_ok[], por CRC32 do PRG): os outros recebem o popup
+     de nao suportado em vez de rodar com a tela/som incompletos. */
+  if(mapper == 5) return FPGA_NES_MMC5;
+  return NULL;
+}
+
 static uint8_t nes_mapper_supported(uint8_t mapper) {
-  switch(mapper) {
-    case 0: case 1: case 2: case 3: case 4: case 7: case 28:
-    case 11: case 34: case 66: case 69: case 71: case 79: case 87:
-    case 113: case 232:
-    /* lote 2 -- familia Namco 108 */
-    case 88: case 95: case 154: case 206:
-    /* lote 2 -- discretos */
-    case 70: case 78: case 86: case 89: case 93: case 94: case 97:
-    case 140: case 152: case 180: case 184:
-    /* lote 3 -- Konami VRC1 / VRC2+VRC4 (o VRC6 ficou FORA -- ver acima) */
-    case 21: case 22: case 23: case 25: case 75:
-    /* lote 3 -- Namco 163 / 175+340 */
-    case 19: case 210:
-    /* lote 3 -- Jaleco SS 88006 / JF-17 */
-    case 18: case 72:
-    /* lote 3 -- Taito TC0190+TC0690 / X1-005 / X1-017 */
-    case 33: case 48: case 80: case 82:
-    /* lote 3 -- Irem G-101 / H3001 */
-    case 32: case 65:
-    /* lote 3 -- CNROM com CHR disable */
-    case 185:
-      return 1;
-    default:
-      return 0;
-  }
+  return nes_core_for(mapper) != NULL;
 }
 
 /* ALIAS INTERNO DE SUBMAPPER (NES-MAPPERS-LOTE2.md Sec. 1.3) -- TRES ESPELHOS:
@@ -270,8 +311,9 @@ static uint8_t nes_mapper_supported(uint8_t mapper) {
        O 22 tem uma fiacao so' (VRC2a) e tambem nao precisa de submapper.
      - 33/48 (Taito TC0190/TC0690) e 80/82 (X1-005/X1-017): sao numeros de
        iNES DISTINTOS, nao submappers -- cada um cai no seu case, sem alias.
-       (24/26 = VRC6 tambem eram numeros distintos, mas nem chegam aqui: sem
-       RTL, sairam da whitelist.)
+       (24/26 = VRC6 e 16/153/157/159 = Bandai tambem sao numeros distintos:
+       o VRC6 tem UMA fiacao por numero, e o Bandai 16 decodifica as duas
+       fiacoes do chip por endereco -- ver o bloco do passe da comunidade.)
      - 185: o submapper (4-7) diz qual valor de Chip Select habilita a
        CHR-ROM.  A wiki da' a heuristica que cobre TODOS os jogos conhecidos
        sem o header ("desabilita a CHR-ROM nas duas primeiras leituras de
@@ -305,6 +347,10 @@ static const struct {
   uint8_t prg_max;
   uint8_t chr_max;
 } nes_size_limits[] = {
+  /* MMC5: PRG = 7 bits de 8KB -> 1MB; CHR ate' 256KB (o id de janela do renderer tem 8
+     bits).  CHR-RAM nao e' suportada pelo variante (chr_max != 0 so' vale p/ CHR-ROM; a
+     recusa da CHR-RAM esta' abaixo, em nes_id). */
+  {  5, 64, 32},
   /* Color Dreams: PRG 32K = d[1:0] -> 4x32KB = 128KB; CHR 8K = d[7:4] -> 16x8KB = 128KB */
   { 11,  8, 16},
   /* NINA-001: PRG 32K = d[1:0] -> 128KB; CHR 2x4K = d[3:0] -> 16x4KB = 64KB.
@@ -408,13 +454,30 @@ static const struct {
      (TwinBee 3, Ganbare Pennant Race) tem 128KB de CHR. */
   { 22, 16, 16},
 
-  /* (24/26 = VRC6 nao tem linha aqui, de proposito: eles sairam da whitelist
-     junto com o RTL, entao nes_mapper_supported() os rejeita muito antes --
-     mesma razao pela qual o mapper 4, que tem guard proprio, tambem falta.
-     Se o VRC6 voltar, a linha e' { 24, 16, 32} e { 26, 16, 32}: PRG 16K de 4
-     bits e PRG 8K de 5 bits dao 256KB nos dois, e R0-R7 de 8 bits x 1KB dao
-     256KB de CHR -- os 512KB que a wiki cita sao do modo $B003 bit 5 = 0,
-     que placa nenhuma usou.) */
+  /* ---- Passe da comunidade: Konami VRC6 (24, 26) ----
+     PRG 16K de 4 bits (.... PPPP) e PRG 8K de 5 bits (...P PPPP) dao 256KB nos
+     dois; R0-R7 de 8 bits x 1KB dao 256KB de CHR -- os 512KB que a wiki cita
+     sao do modo $B003 bit 5 = 0 numa placa que nunca existiu, e o id de janela
+     do tap tem um byte so'. */
+  { 24, 16, 32},
+  { 26, 16, 32},
+
+  /* ---- Passe da comunidade: Bandai FCG-1/2 + LZ93D50 ----
+     PRG ".... PPPP" = 4 bits x 16KB = 256KB (16, 157, 159); CHR "CCCC CCCC" =
+     8 bits x 1KB = 256KB (16, 159).  153: o PRG externo do $8000 (1 bit, 256KB
+     cada) leva a 512KB, e a CHR e' RAM de 8KB sem banco.  157 (Datach): PRG
+     256KB, CHR-RAM de 8KB sem banco -- chr_max 0 = CHR-RAM obrigatoria. */
+  { 16, 16, 32},
+  {159, 16, 32},
+  {153, 32,  0},
+  {157, 16,  0},
+
+  /* ---- Passe da comunidade: TxSROM (118) ----
+     O MMC3 (PRG de 6 bits x 8KB = 512KB) com o bit 7 do id de CHR desviado
+     para o CIRAM A10: CHR ate' 128KB (16 bancos de 8KB).  Acima disso o bit 7
+     chegaria ao barramento de endereco da CHR e a ROM aliasaria: a wiki avisa
+     que nem a Nintendo fez TLSROM de 256KB. */
+  {118, 32, 16},
 
   /* ---- Lote 3: Konami VRC1 (75) ----
      PRG ".... PPPP" = 4 bits x 8KB -> 16x8KB = 128KB.  CHR: 4 bits do
@@ -514,6 +577,41 @@ static const struct {
   {185,  2,  1},
 };
 
+/* MMC5 (ExROM): a lista de titulos aceitos.  O mapper 5 tem recursos que o core variante
+   so' cobre em parte (ver nes_mapper_supported), entao um titulo entra aqui depois de
+   provado, e e' reconhecido pelo CRC32 do PRG-ROM (sem header/trainer) + tamanho; um
+   romhack/traducao/dump diferente do mesmo jogo cai no popup de nao suportado. */
+static const struct {
+  uint32_t prg_crc;
+  uint32_t prg_bytes;
+} nes_mmc5_ok[] = {
+  { 0x95CA9EC7UL, 262144UL },   /* Castlevania III: Dracula's Curse (USA) */
+};
+
+static uint8_t nes_mmc5_validated(const nes_header_t *header, uint8_t has_trainer) {
+  uint32_t size = (uint32_t)header->prg_16k_banks * 16384UL;
+  uint32_t off  = 16UL + (has_trainer ? 512UL : 0UL);
+  uint8_t  size_hit = 0;
+  uint32_t crc;
+  UINT     got;
+
+  for(unsigned i = 0; i < sizeof(nes_mmc5_ok) / sizeof(nes_mmc5_ok[0]); i++)
+    if(nes_mmc5_ok[i].prg_bytes == size) size_hit = 1;
+  if(!size_hit) return 0;                       /* a maioria dos MMC5 sai aqui, sem ler nada */
+
+  if(f_lseek(&file_handle, off) != FR_OK || file_handle.fptr != off) return 0;
+  crc = crc32_init();
+  for(uint32_t left = size; left; left -= got) {
+    UINT want = (left > sizeof(file_buf)) ? (UINT)sizeof(file_buf) : (UINT)left;
+    if(f_read(&file_handle, file_buf, want, &got) != FR_OK || got != want) return 0;
+    for(UINT i = 0; i < got; i++) crc = crc32_update(crc, file_buf[i]);
+  }
+  crc = crc32_finalize(crc);
+  for(unsigned i = 0; i < sizeof(nes_mmc5_ok) / sizeof(nes_mmc5_ok[0]); i++)
+    if(nes_mmc5_ok[i].prg_bytes == size && nes_mmc5_ok[i].prg_crc == crc) return 1;
+  return 0;
+}
+
 void nes_id(nes_romprops_t* props, uint8_t *filename) {
   nes_header_t* header = &(props->header);
 
@@ -527,6 +625,7 @@ void nes_id(nes_romprops_t* props, uint8_t *filename) {
   props->has_trainer = 0;
   props->has_chr_ram = 0;
   props->is_nes20 = 0;
+  props->region = NES_REGION_NTSC;
   props->supported = 0;
   props->prgsize_bytes = 0;
   props->chrsize_bytes = 0;
@@ -562,6 +661,16 @@ void nes_id(nes_romprops_t* props, uint8_t *filename) {
   props->has_trainer     = (header->flags6 >> 2) & 1;
   props->four_screen     = (header->flags6 >> 3) & 1;
   props->is_nes20        = ((header->flags7 & 0x0C) == 0x08);
+
+  /* Timing declarado: NES 2.0 byte 12 bits 1:0 (0 NTSC, 1 PAL, 2 multi-regiao, 3 Dendy);
+     iNES 1.0 byte 9 bit 0 (1 = PAL; pouco confiavel em dumps, so' informa).  NAO recusa:
+     o core roda a ROM PAL/Dendy com o pacer NTSC (aproximado), ver nes.h. */
+  if(props->is_nes20) {
+    uint8_t t = header->padding[1] & 3;
+    props->region = (t == 1) ? NES_REGION_PAL : (t == 3) ? NES_REGION_DENDY : NES_REGION_NTSC;
+  } else {
+    props->region = (header->flags9 & 1) ? NES_REGION_PAL : NES_REGION_NTSC;
+  }
 
   /* mapper number, derivacao iNES classica: nibble alto de flags7 + nibble
      baixo de flags6.  Headers antigos contaminados ("DiskDude!" nos bytes
@@ -686,6 +795,22 @@ void nes_id(nes_romprops_t* props, uint8_t *filename) {
     }
   }
 
+  /* MMC5 sem CHR-ROM (CHR-RAM): o variante nao tem o caminho $41 (mirror de CHR-RAM da
+     bridge) -- nenhum titulo licenciado do MMC5 usa CHR-RAM. */
+  if(props->mapper_id == 5 && header->chr_8k_banks == 0) {
+    props->error = MENU_ERR_NOIMPL;
+    props->error_param = (const uint8_t*)"MMC5 CHR-RAM";
+    return;
+  }
+
+  /* MMC5: so' entra o titulo PROVADO (nes_mmc5_ok[]); os demais caem no mesmo popup de
+     mapper nao suportado dos outros mappers. */
+  if(props->mapper_id == 5 && !nes_mmc5_validated(header, props->has_trainer)) {
+    props->error = MENU_ERR_NOIMPL;
+    props->error_param = (const uint8_t*)"mapper 5 title";
+    return;
+  }
+
   /* NES 2.0 byte 11 (= header->padding[0], offset 0x0B) declara o TAMANHO da
      CHR-RAM: nibble baixo = CHR-RAM volatil, nibble alto = CHR-NVRAM (com
      bateria); cada um e' um SHIFT, bytes = 64 << shift, 0 = ausente.  O iNES
@@ -720,10 +845,9 @@ void nes_id(nes_romprops_t* props, uint8_t *filename) {
 
   /* BATTERY (flags6 bit 1) e' registrado mas NAO rejeita (design Sec. 6/8.4):
      a CART-RAM de 8KB em 0x3C0000 existe e funciona -- o mapper 4 usa o mesmo
-     encoding do MMC1/Mapper28 -- so' nao ha' PERSISTENCIA em fase nenhuma.  O
-     efeito e' "joga sem salvar" (Crystalis, Blade Buster, Kirby), que e' util,
-     e nao "roda errado", que seria motivo de NOIMPL.  A persistencia e' fase
-     propria; nao transformar isto num filtro sem mudar o design.
+     encoding do MMC1/Mapper28.  A persistencia (<stem>.srm em saves/nes/) e'
+     do nesave.c, que le essa janela por PSRAM; aqui o bit so' e' registrado.
+     Nao transformar isto num filtro.
 
      O lote 3 acrescenta placas com RAM INTERNA do proprio ASIC em vez da
      PRG-RAM de 8KB da placa -- N163 (128B, porta $4800), Taito X1-005 (128B
@@ -733,9 +857,8 @@ void nes_id(nes_romprops_t* props, uint8_t *filename) {
      AQUI: sao todas menores que a janela de CART-RAM de 8KB em 0x3C0000, o
      RTL as decodifica dentro dela, e o nes_load_prg ja' zera os 8KB inteiros
      em todo load (nes_sram_memset_to logo depois do stream), que e' o boot
-     deterministico que essas placas precisam.  Como nao ha' persistencia, o
-     bit de bateria continua informativo para elas tambem -- inclusive nos
-     titulos do N163/X1-005/X1-017 que salvavam DENTRO da RAM do ASIC. */
+     deterministico que essas placas precisam.  O nesave.c persiste o prefixo
+     da janela dessas placas como qualquer outra (nesave_size). */
 
   /* four-screen nao e' representavel no mapper_flags do fpganes -> NOIMPL */
   if(props->four_screen) {
@@ -827,7 +950,9 @@ uint8_t nes_update_romprops(snes_romprops_t *romprops, uint8_t *nes_filename) {
       return 0;
     }
 
-    romprops->fpga_conf = FPGA_NES;
+    /* o arquivo do core depende do mapper (nes_core_for); core ausente no cartao =
+       popup SUPPLFILE no pre-check do load_rom, com o nome do arquivo */
+    romprops->fpga_conf = nes_core_for(nes_romprops.mapper_id);
     romprops->load_address = 0x880000;
   }
 
@@ -1292,6 +1417,8 @@ typedef struct __attribute__ ((__packed__)) _nes_breadcrumb {
   uint32_t chr_snes4_bytes; /* +46 LE, bytes realmente escritos em chr_snes4_addr (tiles*32) */
   uint8_t  chr_ram;         /* +50 1 = CHR-RAM (chr=0 no header); 0x500000/0x600000 NAO tocadas */
   uint8_t  chr_converted;   /* +51 1 = conversao rodou e cobriu TODO o chr_streamed; 0 = CHR-RAM ou stream curto */
+  uint8_t  region;          /* +52 NES_REGION_*: timing declarado no header (0 NTSC/nao dito, 1 PAL, 2 Dendy);
+                               PAL/Dendy rodam com o pacer NTSC.  So acrescenta, sem bump de versao */
 } nes_breadcrumb_t;
 
 uint32_t nes_load_prg(uint8_t *nes_filename) {
@@ -1373,7 +1500,9 @@ uint32_t nes_load_prg(uint8_t *nes_filename) {
      CIRAM 2KB, CPU-RAM 2KB, CART-RAM 8KB */
   nes_sram_memset_to(NES_PSRAM_CIRAM_ADDR,   2048, 0x00);
   nes_sram_memset_to(NES_PSRAM_WRAM_ADDR,    2048, 0x00);
-  nes_sram_memset_to(NES_PSRAM_CARTRAM_ADDR, 8192, 0x00);
+  /* MMC5: a superset de 64KB de PRG-RAM do core variante (8 bancos de 8KB em 0x3C0000) */
+  nes_sram_memset_to(NES_PSRAM_CARTRAM_ADDR,
+                     (nes_romprops.mapper_id == 5) ? 65536 : 8192, 0x00);
 
   /* breadcrumb de layout (criterio do gate da Fase 0/1c) */
   nes_breadcrumb_t bc;
@@ -1403,6 +1532,12 @@ uint32_t nes_load_prg(uint8_t *nes_filename) {
   bc.chr_ram         = nes_romprops.has_chr_ram;
   bc.chr_converted   = (!nes_romprops.has_chr_ram) && (chr_conv_done == chr_done)
                        && (chr_conv_done == nes_romprops.chrsize_bytes);
+  bc.region          = nes_romprops.region;
+  if(nes_romprops.region) {
+    nes_dbg_log(nes_romprops.region == NES_REGION_PAL
+                ? "REGION PAL (runs with NTSC timing, approximate)"
+                : "REGION Dendy (runs with NTSC timing, approximate)");
+  }
   /* bounded: com o FPGA morto (latch setado) vira no-op -- o registro que
      sobrevive nesse caso e' o nesdbg.log no SD, nao a PSRAM */
   nes_sram_writeblock_to(&bc, NES_PSRAM_BREADCRUMB_ADDR, sizeof(bc));

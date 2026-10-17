@@ -1,3 +1,8 @@
+# S core (the main fpga_nes): NROM/UxROM/CNROM/AxROM/28, MMC1 and the discrete-logic
+# mappers.  The MMC3 / Namco 108 / Taito family lives in fpga_nes_mmc3, the Konami /
+# Jaleco / Namco 163 / Irem / Sunsoft FME-7 family in fpga_nes_k.  The NES_NO_* macros
+# gate the mapper arms of MultiMapper in mmu.v ; without any of them the source is the complete core.  The firmware
+# routes each mapper to its file in nes_core_for() (src/nes.c).
 # -------------------------------------------------------------------------- #
 #
 # Copyright (C) 2018  Intel Corporation. All rights reserved.
@@ -504,6 +509,10 @@ set_global_assignment -name GENERATE_RBF_FILE ON
 set_global_assignment -name ENABLE_CONFIGURATION_PINS OFF
 set_global_assignment -name ENABLE_BOOT_SEL_PIN OFF
 set_global_assignment -name VERILOG_MACRO "MK3=<None>"
+set_global_assignment -name VERILOG_MACRO "NES_NO_MMC3=<None>"
+set_global_assignment -name VERILOG_MACRO "NES_NO_M69=<None>"
+set_global_assignment -name VERILOG_MACRO "NES_NO_VRC=<None>"
+set_global_assignment -name VERILOG_MACRO "NES_NO_M1K=<None>"
 
 set_global_assignment -name POWER_PRESET_COOLING_SOLUTION "23 MM HEAT SINK WITH 200 LFPM AIRFLOW"
 set_global_assignment -name POWER_BOARD_THERMAL_MODEL "NONE (CONSERVATIVE)"
@@ -546,3 +555,6 @@ set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to PT5_in
 set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to PM6_out
 
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top
+
+# Fitter seed, pinned from a >= 5 seed sweep (see the README of this core family).
+set_global_assignment -name SEED 1

@@ -19,7 +19,12 @@
   // Placeholder mirroring sd2snes_sgb's mk2 pattern. Unmeasured for this core.
 `else // MK3
   `define MSU_AUDIO
-  `define MSU_DATA
+  // MSU_DATA is OFF for this core: the NES core has no MSU-1 data port.  The
+  // 16 KiB msu_databuf cost 16 of the 56 M9Ks (the device was at 56/56), and
+  // nothing in the NES path can reach it: the SNES-side renderer never touches
+  // $2000-$2007, and the firmware does not offer MSU-1 for a .nes (memory.c,
+  // msu1_check is skipped when nes_romprops.has_nes).  MSU_AUDIO stays: the DAC
+  // carries the APU samples and its palmode/volume-select commands.
   `define NES_DEBUG
 `endif
 

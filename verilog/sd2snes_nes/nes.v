@@ -160,9 +160,6 @@ module NES(input clk, input reset, input ce,
            output        ppu_tap_pal_we,
            output [4:0]  ppu_tap_pal_idx,
            output [5:0]  ppu_tap_pal_val,
-           output        ppu_tap_oam_we,
-           output [7:0]  ppu_tap_oam_addr,
-           output [7:0]  ppu_tap_oam_val,
            output [14:0] ppu_tap_loopy_t,
            output [2:0]  ppu_tap_fine_x,
            output        ppu_tap_loopy_w,   // $2005/$2006 write toggle (0 = pair complete)
@@ -174,6 +171,13 @@ module NES(input clk, input reset, input ce,
            // nes_split_capture.v's _eff_t note.
            output [14:0] ppu_tap_loopy_v,
            output        ppu_tap_loopy_v_we,
+
+           // OAM port B, lent to the video bridge (the OAM array is an M9K
+           // inside the PPU; see nes_oamram in nes_bridge.v)
+           input  [8:0]  oamb_a,
+           input         oamb_we,
+           input  [7:0]  oamb_d,
+           output [7:0]  oamb_q,
 
            // sd2snes video-bridge Class A tap: the memory-bus WRITE, registered
            // IN-CORE.  Same 1:1 event stream as sampling ROM_BUS_WRQ on the
@@ -229,6 +233,15 @@ module NES(input clk, input reset, input ce,
            output [63:0] chr_snap_win,
            output [7:0]  chr_snap_win_flags,
            output        chr_snap_win_en
+`ifdef NES_MMC5
+           // MMC5 video-bridge state (NES_MMC5 variant; see nes_m5_capture.v):
+           // display-start baseline, register-write event log, count, overflow.
+           , output        m5_en,
+           output [175:0] m5_base,
+           output [167:0] m5_ev,
+           output [3:0]   m5_cnt,
+           output         m5_ovf
+`endif
            );
   reg [7:0] from_data_bus;
   wire [7:0] cpu_dout;
@@ -338,9 +351,9 @@ module NES(input clk, input reset, input ce,
           chr_read, chr_write, chr_addr, chr_to_ppu, chr_from_ppu,
           scanline, cycle, mapper_ppu_flags,
           ppu_tap_pal_we, ppu_tap_pal_idx, ppu_tap_pal_val,
-          ppu_tap_oam_we, ppu_tap_oam_addr, ppu_tap_oam_val,
           ppu_tap_loopy_t, ppu_tap_fine_x, ppu_tap_loopy_w, ppu_tap_ppuctrl, ppu_tap_ppumask,
-          ppu_tap_loopy_v, ppu_tap_loopy_v_we);
+          ppu_tap_loopy_v, ppu_tap_loopy_v_we,
+          oamb_a, oamb_we, oamb_d, oamb_q);
 
   // -- Memory mapping logic
   wire [15:0] prg_addr = addr;
@@ -358,7 +371,11 @@ module NES(input clk, input reset, input ce,
                            chr_read, chr_addr, chr_linaddr, chr_from_ppu_mapper, has_chr_from_ppu_mapper, chr_allow, vram_a10, vram_ce, mapper_irq,
                            chr_snap_s1_present, chr_snap_s0_bank, chr_snap_s1_bank,
                            chr_snap_win, chr_snap_win_flags, chr_snap_win_en, nt_snap_arr,
-                           nt_snap_code);
+                           nt_snap_code
+`ifdef NES_MMC5
+                           , chr_write, chr_from_ppu, apu_ce && !pause_cpu, m5_en, m5_base, m5_ev, m5_cnt, m5_ovf
+`endif
+                           );
   assign chr_to_ppu = has_chr_from_ppu_mapper ? chr_from_ppu_mapper : memory_din_ppu;
                              
   // Mapper IRQ seems to be delayed by one PPU clock.   

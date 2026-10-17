@@ -61,6 +61,15 @@ extern uint8_t fpga_boot_led;
 /* NES core (fpganes adaptado, verilog/sd2snes_nes) -- mk3-only: so existe
    fpga_nes.bi3; nenhum .bit mk2 e' planejado (ver nes.c). */
 #define FPGA_NES ((const uint8_t*)"/sd2snes/fpga_nes." FPGA_CONF_EXT)
+/* The other two NES cores: same sources and renderer, each with the mapper families of
+   the others compiled out (verilog/sd2snes_nes_mmc3, sd2snes_nes_k).  nes_core_for()
+   (nes.c) maps the mapper number to one of the three. */
+#define FPGA_NES_MMC3 ((const uint8_t*)"/sd2snes/fpga_nes_mmc3." FPGA_CONF_EXT)
+#define FPGA_NES_K ((const uint8_t*)"/sd2snes/fpga_nes_k." FPGA_CONF_EXT)
+/* NES core variant for MMC5 (mapper 5) cartridges (verilog/sd2snes_nes_mmc5): the NES core
+   with the MMC5 as its only mapper and the MMC5 video-bridge commands.  mk3-only like the
+   NES core; selected by nes_update_romprops() for mapper 5. */
+#define FPGA_NES_MMC5 ((const uint8_t*)"/sd2snes/fpga_nes_mmc5." FPGA_CONF_EXT)
 #define FPGA_SPC7110 ((const uint8_t*)"/sd2snes/fpga_spc7110." FPGA_CONF_EXT)
 #define FPGA_SMS ((const uint8_t*)"/sd2snes/fpga_sms." FPGA_CONF_EXT)
 /* Atari 2600 core (verilog/sd2snes_a26) -- mk3-only, like NES/SMS: only fpga_a26.bi3

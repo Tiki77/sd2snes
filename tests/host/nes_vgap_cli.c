@@ -23,6 +23,7 @@
 #include "m65816.h"
 
 #define VIEWPORT_CROP_Y 8
+#define NES_SPLIT_EFF_DELAY 1   /* o pre-pass do $11 soma 1 a' scanline das entradas j>=1 (nes_equates.i65) */
 #define NTARR_H 0
 #define NTARR_V 1
 
@@ -96,7 +97,7 @@ int main(int argc, char **argv) {
   m_poke16(sym("nes_sp_cnt"), 2);
   m_poke16(sym("nes_sp_bn"), 4);          /* 2 faixas x 2 bytes de indice */
   m_poke16(sym("nes_sp_snap") + 0, 0);
-  m_poke16(sym("nes_sp_snap") + 2, (uint16_t)split);
+  m_poke16(sym("nes_sp_snap") + 2, (uint16_t)(split + NES_SPLIT_EFF_DELAY));   /* o que o pre-pass deixa na snap da entrada 1 */
 
   m_call(sym("nhs_vgap_build"), 0);
 

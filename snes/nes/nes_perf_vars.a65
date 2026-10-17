@@ -1,0 +1,48 @@
+; nes_perf_vars.a65 -- variaveis da telemetria de performance (nes_perf.a65).
+; Objeto de endereco fixo (.ips), linkado SOMENTE na build de medicao
+; (make perf): a build de release nao o conhece e o binario sai byte a byte
+; igual ao de antes da telemetria.
+
+.link page $00
+; ============================================================
+; TELEMETRIA DE PERFORMANCE -- nes_perf.a65.  PINADO em $0200 do banco 0 (espelho
+; da WRAM $7E:0200, livre: a pilha desce de $1FFF e o DP acaba em $F1) -- enderecamento
+; ABSOLUTO de 3 bytes em vez de long de 4: cada byte de codigo custa 8 mc na ROM lenta.
+; Fica num objeto .ips proprio (endereco fixo, so' entra no link da build de medicao) e nao em nes_data.a65 (page $7F).  Estado de contexto: os
+; escritores de cada campo sao UM so' (MAIN ou NMI), exceto o zero dos
+; acumuladores no freeze (NMI), cuja corrida com um RMW do MAIN e' de
+; alguns ciclos por janela.  Scratch do MAIN (s*, t*, m*) e da NMI (nv, ens,
+; td, tm2, tm3, chk) separados: a NMI preempta o MAIN no meio da amostra.
+; Os acumuladores (nes_pf_acc) sao words, saturam em $FFFF, e viram bytes
+; do relatorio no freeze (nes_pf_freeze).  nes_pf_repw guarda o relatorio
+; como words (um byte por word) porque o 65816 nao tem "sta long,y".
+; ============================================================
+*= $000200
+nes_pf_base
+nes_pf_ent      .word 0   ; entradas de NMI (vetor), free-running (so' a NMI escreve)
+nes_pf_nmil     .word 0   ; linhas acumuladas DENTRO da NMI (so' a NMI escreve)
+nes_pf_n0       .word 0   ; MAIN: nes_pf_nmil no inicio do decode
+nes_pf_s0       .word 0,0 ; MAIN: amostra do inicio do decode  [ent, vm]
+nes_pf_s1       .word 0,0 ; MAIN: amostra apos o drain          [ent, vm]
+nes_pf_s2       .word 0,0 ; MAIN: amostra do fim do decode      [ent, vm]
+nes_pf_tw       .word 0   ; MAIN: parede do decode corrente (linhas)
+nes_pf_ta       .word 0   ; MAIN: age do decode corrente
+nes_pf_ts       .word 0   ; MAIN: skip do decode corrente
+nes_pf_md       .word 0   ; MAIN: scratch
+nes_pf_mm       .word 0   ; MAIN: scratch
+nes_pf_nv       .word 0   ; NMI: V de 9 bits (escrito no late-guard do apply e no fim da NMI)
+nes_pf_have     .word 0   ; NMI: 1 = esta NMI mediu a entrada
+nes_pf_ens      .word 0   ; NMI: entrada em linhas desde V=225 (0..261)
+nes_pf_td       .word 0   ; NMI: scratch
+nes_pf_tm2      .word 0   ; NMI: scratch
+nes_pf_tm3      .word 0   ; NMI: scratch do publish
+nes_pf_chk      .word 0   ; NMI: checksum em construcao
+nes_pf_hold     .word 0   ; NMIs desde o ultimo slot
+nes_pf_slot     .word 0   ; slot corrente (0..47)
+nes_pf_wseq     .word 0   ; numero da janela (so' o byte baixo vai no relatorio)
+nes_pf_pub      .word 0   ; ultimo byte publicado em $2BDF (espelho do ultimo valor publicado)
+nes_pf_prev     .word 0,0,0,0,0,0     ; contadores acumulados dos instrumentos antigos no
+                                      ; ultimo freeze: older stale bad reent wovr qovr
+nes_pf_acc      .word 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0   ; 24 acumuladores (words)
+nes_pf_repw     .word 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0   ; relatorio: 36 B + pad,
+                .word 0,0,0,0,0,0,0,0,0,0,0,0,0,0                        ; um byte por word

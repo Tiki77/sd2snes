@@ -461,9 +461,9 @@ endmodule
 //   - TQROM (mapper 119): 8KB of CHR-RAM at a SECOND address space
 //     (9'b11_1111_111); this core's CHR-RAM path is the 0x200000 one, and a
 //     second one with no target game is pure debt.
-//   - TxSROM (mapper 118): drives CIRAM A10 from chrsel[7] (a form of
-//     four-screen), which the loader already rejects (src/nes.c) and which
-//     nt_snap_arr cannot encode.
+//   (TxSROM, mapper 118, used to be on this list.  It is a fifth MODE of this
+//   module since the community-mapper pass: CIRAM A10 comes from chrsel[7] and
+//   the four pages ride the Fase-3 NT-code tap -- see the m118 notes below.)
 //   - `mmc3_alt_behavior`: upstream declares `wire mmc3_alt_behavior = 0`
 //     (mmu.v:277) = MMC3C / Sharp MMC3B "normal" IRQ semantics. Kept at 0, so
 //     the guard it controls is constant-true and is pruned to the constant (see
@@ -558,6 +558,18 @@ module MMC3(input clk, input ce, input reset,
   // wobble, on a core whose bridge samples the CHR state once per frame.
   wire t33 = (mnum == 8'd33);
   wire t48 = (mnum == 8'd48);
+  // --- TxSROM (118) mode -----------------------------------------------------
+  // "The CHR A17 line connects directly to CIRAM A10 line instead of MMC3's
+  // CIRAM A10 output": bit 7 of every CHR bank value is a NAMETABLE PAGE, and a
+  // nametable fetch at $2000-$2FFF is answered by the same 1KB/2KB window
+  // decode as a pattern fetch at $0000-$0FFF (the board ignores PPU A13), so
+  // quadrant k takes bit 7 of the window `chr_win_of(k)` -- inversion of $8000
+  // d7 included.  $A000 (the MMC3 mirroring bit) is "bypassed ... writing here
+  // has no effect".  Nothing else changes: PRG, IRQ and the register file are
+  // the MMC3's.  The bit is NOT masked out of the CHR id, because the size
+  // mask already drops it (TLSROM/TKSROM stop at 128KB, and src/nes.c refuses a
+  // 118 image above that -- a 256KB one would put bit 7 on the address bus).
+  wire m118 = (mnum == 8'd118);
   wire taito = t33 | t48;
 
   // --- MMC6 mode (internal alias $F4) ---------------------------------------
@@ -945,7 +957,7 @@ module MMC3(input clk, input ce, input reset,
   //           0 also selects the nametable at $2000-$27FF" means.
   wire mmc3_a10 = mirroring  ? chr_ain[11] : chr_ain[10];
   wire hdr_a10  = flags[14]  ? chr_ain[10] : chr_ain[11];
-  assign vram_a10 = !n108 ? mmc3_a10
+  assign vram_a10 = !n108 ? (m118 ? chrsel[7] : mmc3_a10)
                   : m95   ? chrsel[5]
                   : m154  ? ss_page
                   :         hdr_a10;
@@ -968,14 +980,22 @@ module MMC3(input clk, input ce, input reset,
   wire [1:0] n108_raw = m95  ? {n95_r0 ^ n95_r1, n95_r0 | n95_r1}
                       : m154 ? {1'b0, ss_page}
                       :        {1'b1, ~flags[14]};
-  assign snap_mirror = n108 ? n108_raw : {1'b1, mirroring};
+  // 118: the four pages are bit 7 of windows 0..3 (the window vector is already
+  // normalised for $8000 d7, so this is exactly "inv ? {R5.7,R4.7,R3.7,R2.7} :
+  // {R1.7,R1.7,R0.7,R0.7}").  Its 2-bit legacy code is the PARTITION rule the
+  // eight-window family uses (p0 != p1 -> V, else p0 != p2 -> H, else 1Sc).
+  wire [3:0] p118 = {snap_win_r[31], snap_win_r[23], snap_win_r[15], snap_win_r[7]};
+  wire [1:0] m118_raw = (p118[0] != p118[1]) ? 2'b10
+                      : (p118[0] != p118[2]) ? 2'b11
+                      :                        {1'b0, p118[0]};
+  assign snap_mirror = m118 ? m118_raw : n108 ? n108_raw : {1'b1, mirroring};
   // The same four decisions vram_a10 makes above, published as pages instead of
   // as a 2-bit approximation.  Mapper 4: `mirroring` 1 = A10 follows PPU A11 =
   // horizontal = (0,0,1,1); 0 = A10 follows PPU A10 = vertical = (0,1,0,1).
   // 206/88: the hardwired header bit, same two codes.  154: both halves on the
   // latched page.  95: R0.5 for quadrants 0/1, R1.5 for 2/3 -- the exact
   // hardware form, lockstep with bridge_sim/mappers.py Mapper95.nt_pages().
-  assign snap_ntpages = !n108 ? (mirroring ? 4'hc : 4'ha)
+  assign snap_ntpages = m118 ? p118 : !n108 ? (mirroring ? 4'hc : 4'ha)
                       : m95   ? {n95_r1, n95_r1, n95_r0, n95_r0}
                       : m154  ? {4{ss_page}}
                       :         (flags[14] ? 4'ha : 4'hc);
@@ -1623,6 +1643,25 @@ endmodule
 //
 // The mirroring code (0=V, 1=H, 2=1ScA, 3=1ScB) is bit-for-bit the FME-7's R12,
 // so vram_a10 and the snap_mirror recoding are copied from module Mapper69.
+//
+// KONAMI VRC6 (24 / 26) is a SECOND MODE of this module (nesdev "VRC6").  The
+// chip shares the VRC IRQ with the VRC4 (prescaler, scanline/cycle mode, the
+// latch/ack/E<-A rule) and the same eight 1 KiB CHR selects, so it rides this
+// arm instead of costing a module.  24 and 26 are two iNES numbers for two
+// wirings of ONE chip -- 26 is 24 with CPU A0/A1 swapped -- and, unlike 21/23/
+// 25, a board has exactly one wiring, so there is no OR of two decodes.
+// Registers ("Only address lines 0, 1, and 12-15 are used", mask $F003):
+//   $8000 16 KiB PRG ....PPPP   $C000 8 KiB PRG ...PPPPP   $E000-$FFFF fixed
+//   $B003 W.PN MMDD  PPU banking style (see chr_win_of / vrc6_ntcode below)
+//   $D000-$D003 R0-R3, $E000-$E003 R4-R7: a FULL byte each (the VRC4's nibble
+//   pairs do not exist here)   $F000 latch (a full byte)   $F001 [.....MEA]
+//   $F002 acknowledge   $9000-$9003 / $A000-$A003 / $B000-$B002: EXPANSION
+//   AUDIO, which this core does not have (the writes are accepted and dropped).
+// NOT reproduced: $B003 d4 (nametables from CHR-ROM -- the bridge only sees
+// CIRAM, same wall as the Namco 163), d7 (PRG-RAM enable; the window is always
+// live) and the 512 KiB form (the tap carries one byte per window).  Only
+// the three commercial games exist for this chip and all write $B003 = $20..$2C
+// or $A0..$AC, i.e. d5 set, banking mode 0.
 module VRC24(input clk, input ce, input reset,
              input [31:0] flags,
              input [15:0] prg_ain, output [21:0] prg_aout,
@@ -1640,10 +1679,19 @@ module VRC24(input clk, input ce, input reset,
              // sd2snes video-bridge CHR WINDOW VECTOR tap (protocol v2.5),
              // window k in [k*8 +: 8].  UNMASKED here; MultiMapper applies the
              // size mask where every other tap does.
-             output [63:0] snap_chr_win);
+             output [63:0] snap_chr_win,
+             // sd2snes video-bridge NT-CODE tap (Fase 3, CMD_PPU_SPLITS 0x16):
+             // the four per-quadrant CIRAM pages.  For 21/22/23/25 this is the
+             // canned code of `mirroring` (bit-for-bit ntcode_of(snap_mirror));
+             // the VRC6 can reach layouts the 2-bit field cannot name (R4-R7
+             // LSBs).  Appended at the END of the port list: the instantiation
+             // is POSITIONAL.
+             output [3:0] snap_ntpages);
   reg [7:0] chr_bank0, chr_bank1, chr_bank2, chr_bank3;
   reg [7:0] chr_bank4, chr_bank5, chr_bank6, chr_bank7;
   reg [4:0] prg_bank0, prg_bank1;
+  reg [3:0] prg16;                   // VRC6: the 16 KiB select at $8000
+  reg [7:0] b003;                    // VRC6: PPU banking style
   reg [1:0] mirroring;
   reg       prg_swap;
   reg [7:0] irq_latch, irq_counter;
@@ -1655,15 +1703,22 @@ module VRC24(input clk, input ce, input reset,
   wire m22 = (mnum == 8'd22);
   wire m23 = (mnum == 8'd23);
   wire m25 = (mnum == 8'd25);
+  wire m24 = (mnum == 8'd24);
+  wire m26 = (mnum == 8'd26);
+  wire vrc6 = m24 | m26;
   // Mapper 22 is the only VRC2 (see the module header).
   wire vrc2 = m22;
 
   // The two register-select lines, per the table in the header.
-  wire sel0 = m21 ? (prg_ain[1] | prg_ain[6])
+  wire sel0 = m24 ?  prg_ain[0]
+            : m26 ?  prg_ain[1]
+            : m21 ? (prg_ain[1] | prg_ain[6])
             : m22 ?  prg_ain[1]
             : m23 ? (prg_ain[0] | prg_ain[2])
             :       (prg_ain[1] | prg_ain[3]);   // 25
-  wire sel1 = m21 ? (prg_ain[2] | prg_ain[7])
+  wire sel1 = m24 ?  prg_ain[1]
+            : m26 ?  prg_ain[0]
+            : m21 ? (prg_ain[2] | prg_ain[7])
             : m22 ?  prg_ain[0]
             : m23 ? (prg_ain[1] | prg_ain[3])
             :       (prg_ain[0] | prg_ain[2]);   // 25
@@ -1679,6 +1734,9 @@ module VRC24(input clk, input ce, input reset,
   wire       cwr  = wr & chr_blk;
   wire       chi  = ridx[0];                 // 1 = the "high" half register
   wire [3:0] cdat = prg_din[3:0];
+  // VRC6: $D000-$D003 = R0-R3, $E000-$E003 = R4-R7, one FULL byte per register.
+  wire       v6cwr = wr & ((blk == 3'b101) | (blk == 3'b110));
+  wire [2:0] v6cidx = {~blk[0], ridx};      // $D (101) -> R0-R3, $E (110) -> R4-R7
 
   // VRC IRQ (nesdev "VRC IRQ").  Scanline mode divides CPU cycles by
   // 114/114/113 through a prescaler that starts at 341 and loses 3 per cycle;
@@ -1690,7 +1748,7 @@ module VRC24(input clk, input ce, input reset,
   always @(posedge clk) if (reset) begin
     chr_bank0 <= 0; chr_bank1 <= 0; chr_bank2 <= 0; chr_bank3 <= 0;
     chr_bank4 <= 0; chr_bank5 <= 0; chr_bank6 <= 0; chr_bank7 <= 0;
-    prg_bank0 <= 0; prg_bank1 <= 0;
+    prg_bank0 <= 0; prg_bank1 <= 0; prg16 <= 0; b003 <= 0;
     mirroring <= 0;
     prg_swap  <= 0;
     irq_latch <= 0; irq_counter <= 0;
@@ -1711,7 +1769,40 @@ module VRC24(input clk, input ce, input reset,
       end
     end
 
-    if (wr) begin
+    if (wr && vrc6) begin
+      case (blk)
+      3'b000: prg16     <= prg_din[3:0];              // $8000-$8003 16 KiB PRG
+      3'b011: if (ridx == 2'd3) b003 <= prg_din;      // $B003 (B000-B002 = audio)
+      3'b100: prg_bank1 <= prg_din[4:0];              // $C000-$C003 8 KiB PRG
+      3'b111: case (ridx)                             // $F000-$F002 IRQ
+        2'd0: irq_latch <= prg_din;
+        2'd1: begin
+          {irq_mode, irq_enable, irq_enable_ack} <= prg_din[2:0];
+          irq       <= 1'b0;
+          prescaler <= 9'd341;
+          if (prg_din[1]) irq_counter <= irq_latch;
+        end
+        2'd2: begin
+          irq        <= 1'b0;
+          irq_enable <= irq_enable_ack;
+        end
+        default: ;
+        endcase
+      default: ;                                      // $9000/$A000/$B000-2: audio
+      endcase
+      if (v6cwr) begin
+        if (v6cidx == 3'd0) chr_bank0 <= prg_din;
+        if (v6cidx == 3'd1) chr_bank1 <= prg_din;
+        if (v6cidx == 3'd2) chr_bank2 <= prg_din;
+        if (v6cidx == 3'd3) chr_bank3 <= prg_din;
+        if (v6cidx == 3'd4) chr_bank4 <= prg_din;
+        if (v6cidx == 3'd5) chr_bank5 <= prg_din;
+        if (v6cidx == 3'd6) chr_bank6 <= prg_din;
+        if (v6cidx == 3'd7) chr_bank7 <= prg_din;
+      end
+    end
+
+    if (wr && !vrc6) begin
       case (blk)
       3'b000: prg_bank0 <= prg_din[4:0];              // $8000-$8003 PRG select 0
       3'b001: begin                                   // $9000-$9003
@@ -1774,9 +1865,9 @@ module VRC24(input clk, input ce, input reset,
   reg [4:0] prgsel;
   always @* begin
     case (prg_ain[14:13])
-    2'b00: prgsel = prg_swap ? 5'b11110 : prg_bank0;   // $8000-$9FFF
-    2'b01: prgsel = prg_bank1;                         // $A000-$BFFF
-    2'b10: prgsel = prg_swap ? prg_bank0 : 5'b11110;   // $C000-$DFFF
+    2'b00: prgsel = vrc6 ? {prg16, 1'b0} : prg_swap ? 5'b11110 : prg_bank0;   // $8000-$9FFF
+    2'b01: prgsel = vrc6 ? {prg16, 1'b1} : prg_bank1;                         // $A000-$BFFF
+    2'b10: prgsel = vrc6 ? prg_bank1 : prg_swap ? prg_bank0 : 5'b11110;       // $C000-$DFFF
     2'b11: prgsel = 5'b11111;                          // $E000-$FFFF
     endcase
   end
@@ -1788,15 +1879,32 @@ module VRC24(input clk, input ce, input reset,
   function [7:0] chr_win_of;
     input [2:0] k;
     reg [7:0] v;
+    reg [2:0] ri;
+    reg       two;
     begin
-      case (k)
+      // VRC6 ([$B003] & 3, the first table of the page): mode 0 = window k is
+      // Rk; mode 1 = 2 KiB banks R0-R3, window k is R(k>>1); modes 2/3 = Rk for
+      // the low four windows and 2 KiB banks R4/R5 above them.  `two` marks a
+      // window that is half of a 2 KiB bank, and d5 decides what that half is:
+      // set = "2 KiB pattern table banks pass PPU A10 through (ignoring the LSB
+      // of the register)" -> {R[7:1], k0}; clear = "CHR/CIRAM A10 will be
+      // controlled directly by the register LSB" -> both halves are R itself.
+      ri  = !vrc6 ? k
+          : (b003[1:0] == 2'd0)  ? k
+          : (b003[1:0] == 2'd1)  ? {1'b0, k[2:1]}
+          : k[2]                 ? {2'b10, k[1]}
+          :                        k;
+      two = vrc6 && ((b003[1:0] == 2'd1) || (b003[1] && k[2]));
+      case (ri)
       3'd0: v = chr_bank0;  3'd1: v = chr_bank1;
       3'd2: v = chr_bank2;  3'd3: v = chr_bank3;
       3'd4: v = chr_bank4;  3'd5: v = chr_bank5;
       3'd6: v = chr_bank6;  3'd7: v = chr_bank7;
       endcase
       // "On VRC2a (mapper 22), the low bit is ignored (right shift value by 1)."
-      chr_win_of = vrc2 ? {1'b0, v[7:1]} : v;
+      chr_win_of = vrc2 ? {1'b0, v[7:1]}
+                 : (two && b003[5]) ? {v[7:1], k[0]}
+                 : v;
     end
   endfunction
 
@@ -1804,8 +1912,8 @@ module VRC24(input clk, input ce, input reset,
   reg [63:0] snap_win_r;
   // EXPLICIT sensitivity list for the same tool-portability reason module MMC3
   // spells its own out: the right-hand sides are function calls.
-  always @(chr_ain or vrc2 or chr_bank0 or chr_bank1 or chr_bank2 or chr_bank3
-           or chr_bank4 or chr_bank5 or chr_bank6 or chr_bank7) begin
+  always @(chr_ain or vrc2 or vrc6 or b003 or chr_bank0 or chr_bank1 or chr_bank2
+           or chr_bank3 or chr_bank4 or chr_bank5 or chr_bank6 or chr_bank7) begin
     chrsel     = chr_win_of(chr_ain[12:10]);
     snap_win_r = {chr_win_of(3'd7), chr_win_of(3'd6),
                   chr_win_of(3'd5), chr_win_of(3'd4),
@@ -1823,21 +1931,62 @@ module VRC24(input clk, input ce, input reset,
   assign chr_aout  = {4'b10_00, chrsel, chr_ain[9:0]};
   assign vram_ce   = chr_ain[13];
 
+  // --- VRC6 nametable pages ---------------------------------------------------
+  // CIRAM A10 for the four logical nametables, from the three tables of the
+  // page (mode / mirroring field MM = [$B003] bits 3:2 / d5):
+  //   d5 set,  mode 0   canned: MM 0 V, 1 H, 2 1ScA, 3 1ScB
+  //   d5 set,  mode 3   canned, "Mode 0 equivalent" reordered: MM 0 H, 1 V,
+  //                     2 1ScB, 3 1ScA
+  //   mode 1            four-screen: the pages are the LSBs of R4..R7
+  //   otherwise         the page of each quadrant is the LSB of the register
+  //                     the table names: a "V" layout is (R6,R7,R6,R7), an "H"
+  //                     layout (R6,R6,R7,R7).  V is MM bit 0 in mode 0 with d5
+  //                     clear, and NOT-MM-bit-0 in modes 2/3 (and in mode 2
+  //                     with d5 set).
+  // Written as an AND-OR of four one-hot terms (no case over sixteen values).
+  // vrc6_ntcode[k] = page of quadrant k.
+  wire [1:0] v6dd = b003[1:0];
+  wire [1:0] v6mm = b003[3:2];
+  wire       v6canned = b003[5] & (v6dd == 2'd0 | v6dd == 2'd3);
+  wire       v6four   = (v6dd == 2'd1);
+  wire       v6vert   = (v6dd == 2'd0) ? v6mm[0] : ~v6mm[0];
+  wire       v6regs   = ~v6canned & ~v6four;
+  wire [3:0] v6can    = (v6dd == 2'd0)
+                      ? (v6mm == 2'd0 ? 4'ha : v6mm == 2'd1 ? 4'hc : v6mm == 2'd2 ? 4'h0 : 4'hf)
+                      : (v6mm == 2'd0 ? 4'hc : v6mm == 2'd1 ? 4'ha : v6mm == 2'd2 ? 4'hf : 4'h0);
+  wire       l4 = chr_bank4[0], l5 = chr_bank5[0], l6 = chr_bank6[0], l7 = chr_bank7[0];
+  wire [3:0] vrc6_ntcode = ({4{v6canned}}          & v6can)
+                         | ({4{v6four}}            & {l7, l6, l5, l4})
+                         | ({4{v6regs &  v6vert}}  & {l7, l6, l7, l6})
+                         | ({4{v6regs & ~v6vert}}  & {l7, l7, l6, l6});
+
   always @* begin
-    casez (mirroring)
+    if (vrc6) vram_a10 = vrc6_ntcode[chr_ain[11:10]];
+    else casez (mirroring)
     2'b00:   vram_a10 = chr_ain[10];    // vertical
     2'b01:   vram_a10 = chr_ain[11];    // horizontal
     2'b1?:   vram_a10 = mirroring[0];   // one screen, lower / upper
     endcase
   end
 
-  // Same field, same recoding as module Mapper69's R12.
-  assign snap_mirror  = {~mirroring[1], mirroring[0]};
+  // Same field, same recoding as module Mapper69's R12.  The VRC6 collapses its
+  // four pages with the PARTITION rule the eight-window family uses.
+  wire [1:0] v6raw = (vrc6_ntcode[0] != vrc6_ntcode[1]) ? 2'b10
+                   : (vrc6_ntcode[0] != vrc6_ntcode[2]) ? 2'b11
+                   :                                      {1'b0, vrc6_ntcode[0]};
+  assign snap_mirror  = vrc6 ? v6raw : {~mirroring[1], mirroring[0]};
   assign snap_chr_win = snap_win_r;
+  // ntcode_of(): 00 -> 0, 01 -> F, 10 -> A, 11 -> C
+  assign snap_ntpages = vrc6 ? vrc6_ntcode
+                      : (mirroring == 2'b00) ? 4'ha
+                      : (mirroring == 2'b01) ? 4'hc
+                      : (mirroring == 2'b10) ? 4'h0
+                      :                        4'hf;
 endmodule
 
 // Mapper1K -- the "eight 1 KiB CHR windows + up to three 8 KiB PRG registers"
-// family, in ONE module: iNES mappers 18, 19, 32, 65, 75 and 210.
+// family, in ONE module: iNES mappers 18, 19, 32, 65, 75 and 210, plus the
+// Bandai FCG/LZ93D50 family (16, 153, 157, 159) -- see the BANDAI note below.
 //
 //   18   Jaleco SS 88006          nibble-pair registers, 16-bit down IRQ
 //   19   Namco 163 / 129          $800-block registers, 15-bit up IRQ, NT select
@@ -1902,6 +2051,31 @@ endmodule
 // an enable register ($9002, $F800, $C000 respectively); handing a well-behaved
 // ROM RAM it has not enabled yet is inert, and 32/65/75 have no RAM chip at all
 // so nothing there ever reads the window.
+//
+// BANDAI FCG-1/2 + LZ93D50 (16, 153, 157, 159; nesdev "INES Mapper 016/153/157/
+// 159" and "Bandai FCG board").  One register file: eight 1 KiB CHR selects at
+// $x000-$x007, 16 KiB PRG at $x008, mirroring at $x009 (0 V, 1 H, 2 1ScA, 3
+// 1ScB), IRQ control at $x00A, a 16-bit CPU-cycle DOWN counter at $x00B/$x00C
+// ("When it holds a value of zero, an IRQ is generated"; it keeps counting, so
+// it wraps), and the EEPROM port at $x00D.
+//   * FCG-1/2 (mapper 16 submapper 4) decodes $6000-$7FFF (mask $E00F) and has
+//     NO latch: $B/$C write the counter itself and $A only acknowledges.
+//   * LZ93D50 (mapper 16 submapper 5, 153, 157, 159) decodes $8000-$FFFF (mask
+//     $800F): $B/$C write a LATCH and $A copies it to the counter.
+//   Mapper 16 therefore decodes BOTH windows by address (the two never overlap
+//   and no board has the other one's port), which is also the answer to an
+//   iNES 1.0 dump that says only "16": no submapper byte travels to the core.
+//   153/157/159 are the LZ93D50 alone -- in 153 $6000-$7FFF is 8 KiB of WRAM.
+//   * 153 and 157 have 8 KiB of UNBANKED CHR-RAM; their $x000-$x007 are the
+//     outer PRG bank (153: "256 KiB outer PRG-ROM bank", bit 0, applied to the
+//     fixed window too) and the EEPROM clock (157).  The CHR selects are
+//     therefore not written and sit at the identity (window k = k).
+//   * The serial EEPROM (24C01/24C02, and the Datach barcode) is NOT modelled:
+//     $6000-$7FFF reads return a constant 0 (SDA low = every transfer is
+//     acknowledged).  Measured on nine titles: forcing the read to 0 changes
+//     nothing the game shows; the game finds an empty save and starts fresh.
+//     Consequence, by design: no save data (the game re-initialises it) and the
+//     Datach barcode reader is absent.
 module Mapper1K(input clk, input ce, input reset,
                 input [31:0] flags,
                 input [15:0] prg_ain, output [21:0] prg_aout,
@@ -1954,6 +2128,13 @@ module Mapper1K(input clk, input ce, input reset,
   wire m65  = (mnum == 8'd65);
   wire m75  = (mnum == 8'd75);
   wire m210 = (mnum == 8'd210);
+  wire m16  = (mnum == 8'd16);
+  wire m153 = (mnum == 8'd153);
+  wire m157 = (mnum == 8'd157);
+  wire m159 = (mnum == 8'd159);
+  wire bnd  = m16 | m153 | m157 | m159;
+  wire bnd_nobank = m153 | m157;         // CHR-RAM, no CHR select registers
+  wire bnd_noram  = bnd & ~m153;         // $6000-$7FFF is the EEPROM port
   wire m32any = m32 | mF1;
   // ALIAS $F1 (the mechanism NES-MAPPERS-LOTE2.md 1.3 established for $F8 and
   // $F4): Major League is a mapper 32 whose board ties CIRAM A10 to +5V and
@@ -1972,6 +2153,12 @@ module Mapper1K(input clk, input ce, input reset,
   wire [1:0] jidx = prg_ain[1:0];
   wire [2:0] iidx = prg_ain[2:0];
   wire       wr   = ce & prg_write & prg_ain[15];
+  // Bandai: LZ93D50 registers at $8000-$FFFF (mask $800F), FCG-1/2 at
+  // $6000-$7FFF (mask $E00F, mapper 16 only).  `bidx` = A3-A0.
+  wire       b_lz  = wr & bnd;                                    // $8000+ write
+  wire       b_fcg = ce & prg_write & m16 & (prg_ain[15:13] == 3'b011);
+  wire [3:0] bidx  = prg_ain[3:0];
+  reg        b_outer;                                             // 153 only
 
   // --- IRQ ------------------------------------------------------------------
   // One counter, three rules:
@@ -2018,10 +2205,24 @@ module Mapper1K(input clk, input ce, input reset,
     prg_mode  <= 1'b0;
     irq_counter <= 0; irq_latch <= 0; irq_enable <= 0; irq_width <= 0;
     irq <= 0;
+    b_outer <= 1'b0;
+    // Bandai CHR-RAM boards: identity windows (the CHR selects are never
+    // written there).  Power-on mirroring is the register's own zero =
+    // vertical, the rule stated above.
+    if (bnd_nobank) begin
+      chr_bank1 <= 8'd1; chr_bank2 <= 8'd2; chr_bank3 <= 8'd3;
+      chr_bank4 <= 8'd4; chr_bank5 <= 8'd5; chr_bank6 <= 8'd6; chr_bank7 <= 8'd7;
+    end
+    if (bnd) nt_page <= 4'b1010;
   end else if (ce) begin
     // Counter first, so a register write in the same cart cycle wins.
     if (irq_enable) begin
-      if (m19) begin
+      if (bnd) begin
+        // Down, one per CPU cycle, wrapping; the IRQ is asserted whenever the
+        // counter HOLDS zero and stays up until a $x00A write acknowledges it.
+        irq_counter <= cnt_dec;
+        if (irq_counter == 16'd0) irq <= 1'b1;
+      end else if (m19) begin
         if (n19_top) irq <= 1'b1;
         else         irq_counter <= cnt_inc;
       end else if (m65) begin
@@ -2050,6 +2251,42 @@ module Mapper1K(input clk, input ce, input reset,
       irq_counter[14:8] <= prg_din[6:0];
       irq_enable        <= prg_din[7];
       irq <= 1'b0;
+    end
+
+    // --- Bandai FCG-1/2 (6000 window) + LZ93D50 (8000 window) ---------------
+    if (b_lz | b_fcg) begin
+      if (!bnd_nobank) begin
+        if (bidx == 4'd0) chr_bank0 <= prg_din;
+        if (bidx == 4'd1) chr_bank1 <= prg_din;
+        if (bidx == 4'd2) chr_bank2 <= prg_din;
+        if (bidx == 4'd3) chr_bank3 <= prg_din;
+        if (bidx == 4'd4) chr_bank4 <= prg_din;
+        if (bidx == 4'd5) chr_bank5 <= prg_din;
+        if (bidx == 4'd6) chr_bank6 <= prg_din;
+        if (bidx == 4'd7) chr_bank7 <= prg_din;
+      end
+      // 153: $8000-$8003 are the outer PRG bank ($8004-$8007 are not wired).
+      if (m153 && (bidx[3:2] == 2'd0)) b_outer <= prg_din[0];
+      if (bidx == 4'd8) prg_bank0 <= {2'b00, prg_din[3:0]};
+      if (bidx == 4'd9) case (prg_din[1:0])
+                        2'd0: nt_page <= 4'b1010;   // vertical
+                        2'd1: nt_page <= 4'b1100;   // horizontal
+                        2'd2: nt_page <= 4'b0000;   // one-screen A (page 0)
+                        2'd3: nt_page <= 4'b1111;   // one-screen B (page 1)
+                        endcase
+      if (bidx == 4'd10) begin
+        irq_enable <= prg_din[0];
+        irq        <= 1'b0;
+        if (b_lz) irq_counter <= irq_latch;          // LZ93D50 only
+      end
+      // $B/$C: the counter itself on the FCG-1/2, the latch on the LZ93D50.
+      if (bidx == 4'd11) begin
+        if (b_lz) irq_latch[7:0]   <= prg_din; else irq_counter[7:0]  <= prg_din;
+      end
+      if (bidx == 4'd12) begin
+        if (b_lz) irq_latch[15:8]  <= prg_din; else irq_counter[15:8] <= prg_din;
+      end
+      // $D (EEPROM port) and $E/$F: not modelled.
     end
 
     if (wr) begin
@@ -2245,6 +2482,10 @@ module Mapper1K(input clk, input ce, input reset,
                          : prg_bank2;
     2'b11: prgsel = 6'b111111;                                    // $E000 = last
     endcase
+    // Bandai: a 16 KiB switchable bank at $8000 and the last 16 KiB at $C000
+    // (153: the last of the 256 KiB OUTER half the $8000 register picked).
+    if (bnd) prgsel = prg_ain[14] ? {b_outer, 4'b1111, prg_ain[13]}
+                                  : {b_outer, prg_bank0[3:0], prg_ain[13]};
   end
 
   // --- CHR ------------------------------------------------------------------
@@ -2300,12 +2541,18 @@ module Mapper1K(input clk, input ce, input reset,
   // whenever prg_allow is low).
   wire n163_irq_lo = m19 & (prg_ain[15:11] == 5'b01010);
   wire n163_irq_hi = m19 & (prg_ain[15:11] == 5'b01011);
-  assign has_prg_dout = n163_irq_lo | n163_irq_hi;
+  // Bandai (not 153): the serial EEPROM / barcode port reads at $6000-$7FFF.
+  // It is absent, so the read is answered with a constant zero (module note).
+  assign has_prg_dout = n163_irq_lo | n163_irq_hi | (bnd_noram & prg_is_ram & ~prg_write);
   always @* begin
-    if (n163_irq_hi) prg_dout = {irq_enable, irq_counter[14:8]};
-    else             prg_dout = irq_counter[7:0];
+    if (bnd)              prg_dout = 8'h00;
+    else if (n163_irq_hi) prg_dout = {irq_enable, irq_counter[14:8]};
+    else                  prg_dout = irq_counter[7:0];
   end
-  assign prg_allow = (prg_ain[15] && !prg_write) || prg_is_ram;
+  // No RAM chip behind $6000-$7FFF on the Bandai boards except 153: allow low
+  // there makes the mapper answer (reads) or the write fall on the floor, so the
+  // FCG-1/2 register window never lands in the CART-RAM either.
+  assign prg_allow = (prg_ain[15] && !prg_write) || (prg_is_ram && !bnd_noram);
 
   // --- Mirroring ------------------------------------------------------------
   // One 4:1 mux over the per-quadrant CIRAM pages, for all six mappers.
@@ -2339,6 +2586,7 @@ module Mapper1K(input clk, input ce, input reset,
   assign snap_ntpages = nt_page;
 endmodule
 
+`ifndef NES_MMC5   // the NES_MMC5 variant brings its own MultiMapper (mmu_mmc5.v)
 module MultiMapper(input clk, input ce, input ppu_ce, input reset,
                    input [19:0] ppuflags,                           // Misc flags from PPU for MMC5 cheating (unused, kept for interface compat)
                    input [31:0] flags,                              // Misc flags from ines header {prg_size(3), chr_size(3), mapper(8)}
@@ -2518,9 +2766,10 @@ module MultiMapper(input clk, input ce, input ppu_ce, input reset,
   wire [21:0] vrc_prg_addr, vrc_chr_addr;
   wire [1:0] vrc_snap_mirror;
   wire [63:0] vrc_snap_win;
+  wire [3:0] vrc_snap_pages;
   VRC24 vrc24(clk, ce, reset, flags, prg_ain, vrc_prg_addr, prg_read, prg_write, prg_din, vrc_prg_allow,
                                      chr_ain, vrc_chr_addr, vrc_chr_allow, vrc_vram_a10, vrc_vram_ce,
-                                     vrc_irq, vrc_snap_mirror, vrc_snap_win);
+                                     vrc_irq, vrc_snap_mirror, vrc_snap_win, vrc_snap_pages);
 
   // The eight-1KB-window family (18/19/32/65/75/210) -- ONE module, ONE arm.
   // Clocked from `ce`: every IRQ in it counts CPU cycles.
@@ -2557,10 +2806,24 @@ module MultiMapper(input clk, input ce, input ppu_ce, input reset,
   // no matter how many mappers the file grows.  Do not "simplify" this back
   // into a case.
   wire [7:0] mnum = flags[7:0];
+  // FAMILY MACROS.  The NES core is built three times, each with the arms of the
+  // other mapper families tied to 0 by NES_NO_<arm> (the macros of each main.qsf; see
+  // README_VARIANTS.md): fpga_nes keeps MMC1/M28/DISC, fpga_nes_mmc3 keeps MMC3,
+  // fpga_nes_k keeps M69/VRC/M1K.  A removed arm drops its module and the part of
+  // the capture protocol only it feeds.  No macro defined = the complete core, bit
+  // for bit.  The mapper -> core table of src/nes.c (nes_core_for) mirrors these
+  // arms; tests/test_nes_core_routing.py keeps the two in step.
+`ifdef NES_NO_MMC1
+  wire h_mmc1 = 1'b0;
+`else
   wire h_mmc1 = (mnum == 8'd1);
+`endif
   // Mapper 4 AND the Namco 108 family, which is a MODE of module MMC3 (206/88/
   // 95/154 -- see that module's header).  They share this arm, so they also
   // share the window-vector tap and the dynamic mirror tap below.
+`ifdef NES_NO_MMC3
+  wire h_mmc3 = 1'b0;
+`else
   wire h_mmc3 = (mnum == 8'd4)  || (mnum == 8'd206) || (mnum == 8'd88) ||
                 (mnum == 8'd95) || (mnum == 8'd154) ||
                 // ... and the Taito TC0190/TC0690 pair, a SECOND mode of the
@@ -2573,10 +2836,24 @@ module MultiMapper(input clk, input ce, input ppu_ce, input reset,
                 // ... the MMC6 ($F4), a THIRD mode of the same module ...
                 (mnum == 8'hF4) ||
                 // ... and the Taito X1-005/X1-017 pair, a FOURTH.
-                (mnum == 8'd80) || (mnum == 8'd82);
+                (mnum == 8'd80) || (mnum == 8'd82) ||
+                // ... and TxSROM (118), a FIFTH: the MMC3 with CIRAM A10 on CHR A17.
+                (mnum == 8'd118);
+`endif
+`ifdef NES_NO_M28
+  wire h_m28 = 1'b0;
+`else
   wire h_m28  = (mnum == 8'd0) || (mnum == 8'd2) || (mnum == 8'd3) ||
                 (mnum == 8'd7) || (mnum == 8'd28);
+`endif
+`ifdef NES_NO_M69
+  wire h_m69 = 1'b0;
+`else
   wire h_m69  = (mnum == 8'd69);
+`endif
+`ifdef NES_NO_DISC
+  wire h_disc = 1'b0;
+`else
   wire h_disc = (mnum == 8'd11)  || (mnum == 8'd34) || (mnum == 8'd66) ||
                 (mnum == 8'd71)  || (mnum == 8'd79) || (mnum == 8'd87) ||
                 (mnum == 8'd113) || (mnum == 8'd232) ||
@@ -2585,19 +2862,37 @@ module MultiMapper(input clk, input ce, input ppu_ce, input reset,
                 (mnum == 8'd97)  || (mnum == 8'd140) || (mnum == 8'd152) ||
                 (mnum == 8'd180) || (mnum == 8'd184) || (mnum == 8'hF8) ||
                 (mnum == 8'd72)  || (mnum == 8'd185);
+`endif
   // Konami VRC2/VRC4: the four iNES numbers are ONE chip with four different
   // register-line wirings, all decoded inside module VRC24.
+`ifdef NES_NO_VRC
+  wire h_vrc = 1'b0;
+`else
   wire h_vrc  = (mnum == 8'd21) || (mnum == 8'd22) ||
-                (mnum == 8'd23) || (mnum == 8'd25);
+                (mnum == 8'd23) || (mnum == 8'd25) ||
+                // ... and the VRC6 pair, a SECOND mode of the same module.
+                (mnum == 8'd24) || (mnum == 8'd26);
+`endif
   // The eight-1KB-window family; $F1 is the internal alias for mapper 32
   // submapper 1 (Major League), see module Mapper1K.
+`ifdef NES_NO_M1K
+  wire h_m1k = 1'b0;
+`else
   wire h_m1k  = (mnum == 8'd18) || (mnum == 8'd19) || (mnum == 8'd32) ||
                 (mnum == 8'hF1) || (mnum == 8'd65) || (mnum == 8'd75) ||
-                (mnum == 8'd210);
+                (mnum == 8'd210) ||
+                // ... and the Bandai FCG/LZ93D50 family.
+                (mnum == 8'd16) || (mnum == 8'd153) || (mnum == 8'd157) ||
+                (mnum == 8'd159);
+`endif
   // Mapper 75 rides the Mapper1K arm for the BUS but is the only member with
   // 4 KiB CHR granularity, so on the TAP side it announces the legacy $12 pair
   // instead of a window vector.
+`ifdef NES_NO_M1K
+  wire h_m75  = 1'b0;
+`else
   wire h_m75  = (mnum == 8'd75);
+`endif
   // Everything else keeps falling back to MMC0, exactly as the old `default`
   // arm did (the loader rejects those images anyway).
   wire h_mmc0 = !(h_mmc1 | h_mmc3 | h_m28 | h_m69 | h_disc | h_vrc | h_m1k);
@@ -2891,13 +3186,14 @@ module MultiMapper(input clk, input ce, input ppu_ce, input reset,
       else if (h_mmc3) nt_snap_code <= mmc3_snap_pages;
       else if (h_mmc1) nt_snap_code <= ntcode_of(mmc1_snap_mirror);
       else if (h_m69)  nt_snap_code <= ntcode_of(map69_snap_mirror);
-      else if (h_vrc)  nt_snap_code <= ntcode_of(vrc_snap_mirror);
+      else if (h_vrc)  nt_snap_code <= vrc_snap_pages;
       else if (h_disc) nt_snap_code <= ntcode_of(disc_snap_mirror);
       else if (h_m28)  nt_snap_code <= ntcode_of(map28_snap_mirror);
       else             nt_snap_code <= flags[14] ? 4'ha : 4'hc;
     end
   end
 endmodule
+`endif // NES_MMC5
 
 // PRG       = 0....
 // CHR       = 10...

@@ -78,6 +78,9 @@ NMI_HANDLER:
         beq nmi_reent_sat
         sta @nes_dbg_reent
 nmi_reent_sat:
+#ifdef NES_PERF
+        jsr nes_pf_reent         ; o relogio da telemetria conta TODA entrada de vetor
+#endif
         sep #$20 : .as
         bra nmi_reentry_exit
 nmi_not_busy:
@@ -143,6 +146,9 @@ nmi_wait_pad:
         lda #NES_DBG_VIS_HI
         sta $2122
 nmi_no_vis:
+#ifdef NES_PERF
+        jsr nes_pf_nmi_end       ; telemetria: fim da NMI + passo do canal $2BDF
+#endif
 
         sep #$20 : .as
         lda #$00
@@ -236,6 +242,10 @@ nes_snes_start:
         jsr nes_apu_unmute
 
         jsr nes_boot_init
+#ifdef NES_PERF
+        jsr nes_pf_init          ; telemetria: zera o bloco (WRAM nasce $55) e semeia os deltas
+                                 ; com os contadores que o boot acabou de zerar; antes da 1a NMI
+#endif
 
         ; --- carrega CHR (BG 2bpp de 0x500000, OBJ 4bpp de 0x600000 --
         ;     janelas PSRAM provisorias, ver nes_equates.i65). Tamanho de

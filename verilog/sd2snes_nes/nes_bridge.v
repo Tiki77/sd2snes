@@ -118,7 +118,48 @@
 //   l3_minelvaton frame 228.
 //////////////////////////////////////////////////////////////////////////////////
 
-module nes_bridge(
+// ---------------------------------------------------------------------------
+// nes_oamram -- the NES OAM, ONE true-dual-port M9K (512 x 8).
+//   port A = the PPU (SpriteRAM): write on $2004, registered read at oam_ptr.
+//   port B = the video bridge: live->frozen copy engine + serializer.
+// Replaces what used to be 256 B of flip-flops inside SpriteRAM (2.3k LEs) AND a
+// tap-fed M9K copy inside nes_bridge.  Both ports register their read data (the
+// M9K template; the consumer muxes AFTER the register).  Mixed-port
+// read-during-write is DON'T-CARE (no_rw_check): the only same-address overlap is
+// the bridge copy reading a byte the game rewrites in the same clock, a race the
+// old tap-fed copy had too (OAM is rewritten in vblank, the copy runs at line 120).
+// Contents power up as zeros (the emitted OAM block is defined for a never-written OAM).
+// ---------------------------------------------------------------------------
+module nes_oamram(
+  input            clk,
+  input            a_we,
+  input      [9:0] a_addr,
+  input      [7:0] a_d,
+  output reg [7:0] a_q,
+  input            b_we,
+  input      [8:0] b_addr,
+  input      [7:0] b_d,
+  output reg [7:0] b_q
+);
+  (* ramstyle = "M9K, no_rw_check" *) reg [7:0] mem [0:1023];
+  integer i;
+  initial for (i = 0; i < 1024; i = i + 1) mem[i] = 8'h00;
+  always @(posedge clk) begin
+    if (a_we) mem[a_addr] <= a_d;
+    a_q <= mem[a_addr];
+  end
+  always @(posedge clk) begin
+    if (b_we) mem[{1'b0, b_addr}] <= b_d;
+    b_q <= mem[{1'b0, b_addr}];
+  end
+endmodule
+
+module nes_bridge #(
+  // 1 = the OAM array is EXTERNAL (nes_wrap: it is the PPU's own M9K, reached
+  // through oamb_*; oam_we/oam_addr/oam_data are unused).  0 = the bridge owns a
+  // tap-fed nes_oamram (what the unit testbenches drive).
+  parameter EXT_OAM = 0
+)(
   input         clk,
   input         rst,
 
@@ -157,6 +198,11 @@ module nes_bridge(
   // OAM-DMA).  Testbenches tie it to frame_tick (copy-at-tick), byte-identical
   // to the old S_CPY: the NT scan alone is >=4096 cycles before OAM is read.
   input         oam_freeze,
+  // ---- OAM port B (live array lent by the PPU when EXT_OAM=1) ----
+  output [8:0]  oamb_a,
+  output        oamb_we,
+  output [7:0]  oamb_d,
+  input  [7:0]  oamb_q,
 
   // ---- Frame close (scanline==241) + snapshot ----
   input         frame_tick,
@@ -205,11 +251,13 @@ module nes_bridge(
   // `poison` = a mid-frame 8K<->4K (s1_present) flip made the captured strips
   // meaningless; suppress rather than ship an uninterpretable list.
   // Flat packed vectors: entry i = [i*8 +:8] in both.
+`ifndef NES_MMC5
   input  [2:0]  snap_cspl_cnt,    // 0..4 valid entries
   input         snap_cspl_ovf,    // >4 changes this frame: evicted, flag it
   input         snap_cspl_poison, // frame invalidated (CHR mode changed mid-frame)
   input  [31:0] snap_cspl_sl,     // 4x scanline[7:0]
   input  [63:0] snap_cspl_bank,   // 4x {s1_eff[7:0], s0_bank[7:0]}
+`endif
 
   // ---- v2.5 CHR WINDOW VECTOR, mapper 4 / MMC3 (CMD_CHR_STATE8 0x14 +
   //      CMD_CHR_SPLITS8 0x15) -- ADDITIVE ---------------------------------------
@@ -237,10 +285,12 @@ module nes_bridge(
   input         snap_chr_win_en,
   input  [63:0] snap_chr_win,
   input  [7:0]  snap_chr_win_flags,
+`ifndef NES_MMC5
   input  [2:0]  snap_cwin_cnt,    // 0..4 valid entries
   input         snap_cwin_ovf,    // >4 changes this frame: evicted, flag it
   input  [31:0] snap_cwin_sl,     // 4x scanline[7:0]
   input  [255:0] snap_cwin_win,   // 4x win[63:0]
+`endif
 
   // ---- Fase 3: PPU raster split (CMD_PPU_SPLITS 0x16) -----------------------
   // K=4 (scanline, payload) entries from nes_ppusplit_capture.v, payload =
@@ -344,6 +394,21 @@ module nes_bridge(
   output reg [15:0] bc_bytes_last,
   output reg [15:0] bc_frames,
   output reg [15:0] bc_overruns
+`ifdef NES_MMC5
+  // ---- MMC5 (NES_MMC5 variant): CMD_M5_STATE 0x17 + CMD_M5_EVENTS 0x18 --------
+  // The MMC5 replaces the window-vector commands.  snap_m5_base is the 22-byte
+  // state payload at the start of the display, snap_m5_ev the K=8 register-write
+  // log (slot i = {scanline[7:0], idx[4:0], value[7:0]} at [i*21 +: 21]), both
+  // straight from nes_m5_capture (registered in NES:core).  NOT latched at the
+  // accept: the capture re-arms only on the pre-render line, ~20 scanlines later
+  // (see nes_m5_capture.v), and the commands are emitted in the first bytes of
+  // the frame.  Only the count/overflow are latched at the accept.
+  , input         snap_m5_en,
+  input  [175:0] snap_m5_base,
+  input  [167:0] snap_m5_ev,
+  input  [3:0]   snap_m5_cnt,
+  input          snap_m5_ovf
+`endif
 );
 
   // ============================================================ opcodes / flags
@@ -420,6 +485,14 @@ module nes_bridge(
   //   FRAME_HDR.flags[5:4] and CMD_REGS.ppuctrl[4] are to be ignored (the same
   //   rule as "0x14 present => ignore the 0x12").
   localparam [7:0] OP_PPU_SPLITS = 8'h16;
+`ifdef NES_MMC5
+  // MMC5 (NES_MMC5 variant).  17 = 22-byte state payload, UNCONDITIONAL, fixed
+  // frame offset 18 (the slot of the 0x14: right after the constant-sentinel 0x12,
+  // which the renderer ignores once it sees a 0x17).  18 hdr cnt x [sl idx val],
+  // hdr = {ovf, 3'd0, cnt[3:0]}, emitted only with cnt >= 1.
+  localparam [7:0] OP_M5_STATE  = 8'h17;
+  localparam [7:0] OP_M5_EVENTS = 8'h18;
+`endif
   localparam [7:0] OP_PALETTE   = 8'h20;
   localparam [7:0] OP_PAL_FULL  = 8'h21;
   localparam [7:0] OP_NT_RUN    = 8'h30;
@@ -566,8 +639,7 @@ module nes_bridge(
   reg [7:0] ciram    [0:NT_SIZE-1];    // single, read LIVE (see note)
   reg       ntdirty0 [0:NT_SIZE-1];    // ping-pong bank 0
   reg       ntdirty1 [0:NT_SIZE-1];    // ping-pong bank 1
-  reg [7:0] oam      [0:255];          // live (taps)
-  reg [7:0] oam_frz  [0:255];          // frozen copy (S_CPY at tick)
+  // (the frozen OAM copy lives in nes_oamram too: upper half, address 256..511)
   // ================================= CHR MIRROR + PENDING (v2.7, CMD_CHR_RUN)
   // MICROARCHITECTURE (the one decision this block exists to record):
   //
@@ -659,7 +731,6 @@ module nes_bridge(
   integer k, kk;
   initial begin
     for (k=0;k<NT_SIZE;k=k+1)   begin ciram[k]=8'h00; ntdirty0[k]=1'b0; ntdirty1[k]=1'b0; ntpend[k]=2'b00; end
-    for (k=0;k<256;k=k+1)       begin oam[k]=8'h00; oam_frz[k]=8'h00; end
     // GOTCHA (cost a synthesis run when CB_SZ went 4096 -> 8192): quartus_map
     // refuses a constant loop of more than 5000 iterations -- "Error (10106):
     // Verilog HDL Loop error ... loop must terminate within 5000 iterations",
@@ -831,6 +902,19 @@ module nes_bridge(
     S_PSP_HDR  = 6'd50,  // emit hdr byte {ovf, cnt}
     S_PSP_LD   = 6'd51,  // consume: cur_p* <= l_psp_*[psp_i]
     S_PSP_E    = 6'd52;  // emit the 2 bytes of entry psp_i (scanline, payload)
+`ifdef NES_MMC5
+  localparam [5:0]
+    // CMD_M5_STATE: opcode, then per payload byte a request (cur_m5b <= byte m5_i
+    // of the base vector, kept off the mb_wdata cone) / write pair.
+    S_M5OP     = 6'd53,  // emit opcode 0x17
+    S_M5RD     = 6'd54,  // request: cur_m5b <= base byte m5_i
+    S_M5WR     = 6'd55,  // emit cur_m5b
+    // CMD_M5_EVENTS
+    S_M5EOP    = 6'd56,  // emit opcode 0x18
+    S_M5EH     = 6'd57,  // emit hdr byte
+    S_M5ELD    = 6'd58,  // consume: cur_m5e <= ev[m5_i]
+    S_M5EE     = 6'd59;  // emit the 3 bytes of event m5_i
+`endif
 
   reg [5:0]  st;
   reg [3:0]  sub;
@@ -866,6 +950,7 @@ module nes_bridge(
 
   // v2.3 CMD_CHR_SPLITS: same latch-at-the-tick + request/consume discipline.
   // No derivation needed (the payload is already a raw scanline + bank byte).
+`ifndef NES_MMC5
   reg [2:0]  l_cspl_cnt;          // 0..4
   reg [7:0]  l_cspl_hdr;          // {ovf, 4'd0, cnt[2:0]}
   reg        l_cspl_go;           // cnt>=2 && !poison -> emit this frame
@@ -874,6 +959,7 @@ module nes_bridge(
   reg [2:0]  cspl_i;              // emission entry cursor
   reg [7:0]  cur_csl;             // consumed entry (loaded in S_CSPL_LD)
   reg [15:0] cur_cbk;             // {s1, s0} -- the 0x13 carries BOTH (v2.9)
+`endif
 
   // v2.5 CMD_CHR_STATE8 / CMD_CHR_SPLITS8 (mapper 4): same latch-at-the-tick +
   // request/consume discipline, payload 8x wider.  l_cwsp_w is the frozen copy
@@ -883,6 +969,7 @@ module nes_bridge(
   reg        l_cwin_en;           // window-vector mapper (4/69/Namco 108) this frame -> emit 0x14
   reg [63:0] l_cwin;              // the frame-close window vector
   reg [7:0]  l_cwin_flags;        // 0x14 flags byte (bit0 = CHR-RAM)
+`ifndef NES_MMC5
   reg [2:0]  l_cwsp_cnt;          // 0..4
   reg [7:0]  l_cwsp_hdr;          // {ovf, 4'd0, cnt[2:0]}
   reg        l_cwsp_go;           // cnt>=2 -> emit 0x15 this frame
@@ -891,6 +978,15 @@ module nes_bridge(
   reg [2:0]  cwsp_i;              // emission entry cursor
   reg [7:0]  cur_cwsl;            // consumed entry scanline (S_CWSP_LD)
   reg [63:0] cur_cwin;            // consumed entry vector   (S_CWSP_LD)
+`endif
+
+`ifdef NES_MMC5
+  reg [3:0]  l_m5_cnt;            // events logged this frame (0..8), latched at the accept
+  reg        l_m5_ovf;            // a ninth write was dropped
+  reg [4:0]  m5_i;                // payload byte / event cursor
+  reg [7:0]  cur_m5b;             // consumed payload byte (S_M5RD)
+  reg [20:0] cur_m5e;             // consumed event {sl, idx, val} (S_M5ELD)
+`endif
 
   // Fase 3 CMD_PPU_SPLITS 0x16: same latch-at-the-tick + request/consume
   // discipline as the 0x13.  l_psp_pay[0] is NOT a plain copy of the capture's
@@ -1131,6 +1227,35 @@ module nes_bridge(
   // OAM copy cursor + engine (decoupled from the serialize FSM -- v1.4b).
   reg [8:0]  cpy_i;
   reg        cpy_run;    // a live->frz copy is in flight (triggered by oam_freeze)
+  reg        cpy_ph;     // 0 = read live[cpy_i], 1 = write frozen[cpy_i]
+  reg        frz_pend;   // a freeze pulse arrived while the serializer owned port B
+
+  // ============================================================ OAM live array
+  // Port B: read-only here; address = the copy cursor (the engine is the only
+  // reader of the live array).  q is registered inside nes_oamram, so oam_q has
+  // exactly the latency of the old `oam_q <= oam[cpy_i]`.
+  wire [7:0] oam_q;        // registered read of the live OAM (port B of nes_oamram)
+  reg  [7:0] oam_frz_q;    // serializer source (S_OAMB): oam_q registered ONE MORE time
+  wire oam_ser = (st == S_OAMA) || (st == S_OAMB);
+  assign oamb_a  = cpy_run ? {cpy_ph, cpy_i[7:0]} : {1'b1, oam_i[7:0]};
+  assign oamb_we = cpy_run & cpy_ph;
+  assign oamb_d  = oam_q;           // the live byte read in the previous cycle
+  // SERIALIZER TIMING: the M9K output (port B) must not feed xor_acc/mb_wdata in
+  // the same cycle (measured 9.2 ns of data delay, +2.2 ns of slack in the fit
+  // that introduced it).  oam_frz_q is a plain register behind it, so the
+  // serializer only ever reads a flip-flop, at the price of one cycle: S_OAMB
+  // spends its first cycle waiting for the pipeline (sub == 0).  The copy engine
+  // keeps reading oam_q directly (it feeds the M9K write port, not the serializer).
+  always @(posedge clk) oam_frz_q <= oam_q;
+  wire [7:0] oamb_q_int;
+  generate if (EXT_OAM == 0) begin : g_oam_int
+    nes_oamram oam_int(.clk(clk),
+      .a_we(oam_we), .a_addr({2'b00, oam_addr}), .a_d(oam_data), .a_q(),
+      .b_we(oamb_we), .b_addr(oamb_a), .b_d(oamb_d), .b_q(oamb_q_int));
+  end else begin : g_oam_ext
+    assign oamb_q_int = 8'd0;
+  end endgenerate
+  assign oam_q = (EXT_OAM != 0) ? oamb_q : oamb_q_int;
 
   // ============================================================ read plumbing
   // Live and frozen banks have SEPARATE read addresses (they can be active in
@@ -1138,7 +1263,7 @@ module nes_bridge(
   // frozen one).  All reads registered (M9K template).
   reg        ntdirty0_q, ntdirty1_q;
   reg [1:0]  ntpend_q;
-  reg [7:0]  ciram_q, oam_q, oam_frz_q;
+  reg [7:0]  ciram_q;
   reg [5:0]  pal_q;        // registered read of pal[pal_i] (S_PAL*_RD/_WR pair)
   reg [25:0] chrdsc_q;     // registered read of chrdsc[dsc_i]  (S_CR0/1, S_CR2/3)
   reg [7:0]  chrmem_q;     // registered read of chrmem[chr_ra_r] (S_CR*/S_CP*)
@@ -1331,8 +1456,6 @@ module nes_bridge(
     ntdirty1_q  <= ntdirty1[live ? nt_tap_ra  : nt_scan_ra];
     ntpend_q    <= ntpend[nt_scan_ra];
     ciram_q     <= ciram[ciram_ra];
-    oam_q       <= oam[cpy_i[7:0]];        // copy source (S_CPY)
-    oam_frz_q   <= oam_frz[oam_i[7:0]];    // serializer source (S_OAM*)
     pal_q       <= pal[pal_i[4:0]];        // register-array mux lands in a register
     // CHR arrays, simple-dual-port template (sync read here, sync write in the
     // tap / the FSM below).  chrmem is read at a REGISTERED address, so nothing
@@ -1365,11 +1488,18 @@ module nes_bridge(
       s0_valid<=0; s1_valid<=0; bc_bytes_last<=0; bc_frames<=0; bc_overruns<=0;
       dbg_pal_sum<=0; dbg_pal_wcnt<=0;
       l_split_cnt<=3'd0; l_split_hdr<=8'd0; spl_i<=3'd0;
+`ifndef NES_MMC5
       l_cspl_cnt<=3'd0; l_cspl_hdr<=8'd0; l_cspl_go<=1'b0; cspl_i<=3'd0;
+`endif
       l_psp_cnt<=3'd0; l_psp_hdr<=8'd0; l_psp_go<=1'b0; psp_i<=3'd0;
       l_cwin_en<=1'b0; l_cwin<=64'd0; l_cwin_flags<=8'd0;
+`ifndef NES_MMC5
       l_cwsp_cnt<=3'd0; l_cwsp_hdr<=8'd0; l_cwsp_go<=1'b0; cwsp_i<=3'd0;
-      cpy_run<=0; cpy_i<=9'd0;
+`endif
+`ifdef NES_MMC5
+      l_m5_cnt<=4'd0; l_m5_ovf<=1'b0; m5_i<=5'd0; cur_m5b<=8'd0; cur_m5e<=21'd0;
+`endif
+      cpy_run<=0; cpy_i<=9'd0; cpy_ph<=1'b0; frz_pend<=1'b0;
       cb_wp<=13'd0; dsc_wp<=8'd0; dsc_i<=8'd0;
       cb_open<=1'b0; cb_len<=8'd0; cb_next_off<=13'd0; cb_ovf<=1'b0;
       l_dsc_end<=8'd0; l_cb_end<=13'd0; crun_k<=8'd0; chr_ra_r<=13'd0;
@@ -1448,19 +1578,31 @@ module nes_bridge(
       if (ntb_cwe)  ciram[ntb_addr]  <= ntb_cwr;
       if (nt0_we)   ntdirty0[nt0_wa] <= nt0_wd;
       if (nt1_we)   ntdirty1[nt1_wa] <= nt1_wd;
-      if (oam_we)   oam[oam_addr]    <= oam_data;
       // -------- OAM freeze copy engine (v1.4b -- decoupled from the FSM) ------
       // oam_freeze pulses live oam[] -> oam_frz[] over 257 cycles (oam_q is the
       // 1-cycle-registered read of oam[cpy_i]; write lags by one, exactly the
       // old S_CPY pipeline).  In hardware the pulse lands MID-DISPLAY (scanline
       // 120) so the copy is DONE long before the frame tick -> the serializer
       // reads a stable, race-free oam_frz and never overlaps the vblank OAM-DMA.
-      if (oam_freeze && !cpy_run) begin cpy_run<=1'b1; cpy_i<=9'd0; end
-      else if (cpy_run) begin
-        cpy_i <= cpy_i + 9'd1;
-        if (cpy_i == 9'd256) cpy_run <= 1'b0;
+      // Port B of nes_oamram is ONE address bus, so the copy is HALF-RATE: phase 0
+      // reads live[cpy_i] (q lands next cycle), phase 1 writes that byte to
+      // frozen[cpy_i] (address 256+cpy_i).  512 cycles instead of 257 -- ~40 PPU
+      // dots, still done long before the vblank tick.  The serializer owns the bus
+      // while it streams the frozen half (S_OAMA/S_OAMB), so a freeze pulse that
+      // lands then is HELD (frz_pend) and starts the cycle after; in hardware the
+      // pulse is at scanline 120 and this never triggers.
+      if ((oam_freeze || frz_pend) && !cpy_run && !oam_ser) begin
+        cpy_run<=1'b1; cpy_i<=9'd0; cpy_ph<=1'b0; frz_pend<=1'b0;
+      end else begin
+        if (oam_freeze && !cpy_run) frz_pend <= 1'b1;
+        if (cpy_run) begin
+          cpy_ph <= ~cpy_ph;
+          if (cpy_ph) begin
+            cpy_i <= cpy_i + 9'd1;
+            if (cpy_i[7:0] == 8'hFF) cpy_run <= 1'b0;
+          end
+        end
       end
-      if (cpy_run && cpy_i != 9'd0) oam_frz[cpy_i[7:0]-8'd1] <= oam_q;
       if (mb_we) begin
         if (mb_wbuf) mbox1[mb_waddr] <= mb_wdata; else mbox0[mb_waddr] <= mb_wdata;
       end
@@ -1680,18 +1822,26 @@ module nes_bridge(
           // single register: cnt>=2 (a lone display-start entry is what every
           // non-splitting frame produces) AND !poison (a mid-frame 8K<->4K flip
           // invalidated the strips -- see nes_chrsplit_capture.v).
+`ifndef NES_MMC5
           l_cspl_cnt <= snap_cspl_cnt;
           l_cspl_hdr <= {snap_cspl_ovf, 4'd0, snap_cspl_cnt};
           l_cspl_go  <= (snap_cspl_cnt >= 3'd2) & ~snap_cspl_poison;
+`endif
           // v2.5 CMD_CHR_STATE8/SPLITS8 (mapper 4): the 0x14 gate is the mapper
           // itself (unconditional while enabled), the 0x15 gate is cnt>=2 -- no
           // poison term, the window vector has no mode flip to invalidate it.
           l_cwin_en  <= snap_chr_win_en;
           l_cwin     <= snap_chr_win;
           l_cwin_flags <= snap_chr_win_flags;
+`ifndef NES_MMC5
           l_cwsp_cnt <= snap_cwin_cnt;
           l_cwsp_hdr <= {snap_cwin_ovf, 4'd0, snap_cwin_cnt};
           l_cwsp_go  <= snap_chr_win_en & (snap_cwin_cnt >= 3'd2);
+`endif
+`ifdef NES_MMC5
+          l_m5_cnt   <= snap_m5_cnt;
+          l_m5_ovf   <= snap_m5_ovf;
+`endif
           // Fase 3 CMD_PPU_SPLITS 0x16: raw (scanline, payload) pairs, nothing
           // to derive.  The EMISSION GATE is latched here so the FSM branch
           // reads a single register:
@@ -1709,10 +1859,12 @@ module nes_bridge(
             l_spl_sx[si] <= {snap_spl_t[si*15 +: 5],    snap_spl_fx[si*3 +: 3]};
             l_spl_sy[si] <= {snap_spl_t[si*15+5 +: 5],  snap_spl_t[si*15+12 +: 3]};
             l_spl_nt[si] <= snap_spl_t[si*15+10 +: 2];
+`ifndef NES_MMC5
             l_cspl_sl[si]<= snap_cspl_sl[si*8 +: 8];
             l_cspl_bk[si]<= snap_cspl_bank[si*16 +: 16];
             l_cwsp_sl[si]<= snap_cwin_sl[si*8 +: 8];
             l_cwsp_w[si] <= snap_cwin_win[si*64 +: 64];
+`endif
           end
           // The 0x16 arrays are 3 deep (K=3), so they get their own loop rather
           // than riding the 4-deep one above.  Entry 0 takes the
@@ -1819,8 +1971,14 @@ module nes_bridge(
             // S_CSPL_OP -- that is hard rule (2) of the OP_CHR_STATE8 block,
             // enforced here by the ORDER of this if-chain (and, independently,
             // by the constant legacy tap in mmu.v, which keeps l_cspl_go at 0).
+`ifdef NES_MMC5
+            if (snap_m5_en) st<=S_M5OP;                   // MMC5: CMD_M5_STATE (then 0x18)
+            else
+`endif
             if (l_cwin_en) begin st<=S_CWST; sub<=0; end  // v2.5: CMD_CHR_STATE8
+`ifndef NES_MMC5
             else if (l_cspl_go) st<=S_CSPL_OP;            // v2.3: emit CMD_CHR_SPLITS
+`endif
             else if (l_split_cnt >= 3'd2) st<=S_SPL_OP;   // v1.3: emit CMD_SPLITS
             else if (l_psp_go) st<=S_PSP_OP;             // Fase 3: emit CMD_PPU_SPLITS
             else if (pal_present) st<=S_PAL;
@@ -1850,8 +2008,11 @@ module nes_bridge(
             9: begin mb_wdata<=l_cwin_flags;       xor_acc<=xor_acc^l_cwin_flags; end
           endcase
           if (sub==4'd9) begin
+`ifndef NES_MMC5
             if (l_cwsp_go) st<=S_CWSP_OP;                 // v2.5: CMD_CHR_SPLITS8
-            else if (l_split_cnt >= 3'd2) st<=S_SPL_OP;   // v1.3: CMD_SPLITS
+            else
+`endif
+            if (l_split_cnt >= 3'd2) st<=S_SPL_OP;        // v1.3: CMD_SPLITS
             else if (l_psp_go) st<=S_PSP_OP;             // Fase 3: CMD_PPU_SPLITS
             else if (pal_present) st<=S_PAL;
             else begin st<=S_NTA; nt_i<=0; nt_inrun<=1'b0; end
@@ -1865,6 +2026,7 @@ module nes_bridge(
         // consumes l_cwsp_*[cwsp_i] into cur_cw* (the 4-deep indexed read of a
         // 64-bit array stays OFF the mb_wdata/xor cone), S_CWSP_E emits the 9
         // bytes as a byte-select mux over those single registers.
+`ifndef NES_MMC5
         S_CWSP_OP: begin
           mb_we<=1'b1; mb_waddr<=wptr; wptr<=wptr+13'd1;
           mb_wdata<=OP_CHR_SPLITS8; xor_acc<=xor_acc^OP_CHR_SPLITS8;
@@ -1902,6 +2064,66 @@ module nes_bridge(
             end else begin cwsp_i<=cwsp_i+3'd1; sub<=4'd0; st<=S_CWSP_LD; end
           end else sub<=sub+4'd1;
         end
+`endif
+
+`ifdef NES_MMC5
+        // -------- CMD_M5_STATE (MMC5): 17 + 22 payload bytes -----------------
+        // UNCONDITIONAL, fixed frame offset 18.  Each payload byte goes through
+        // a request/consume pair so the 22:1 byte select lands in cur_m5b, not
+        // on the mb_wdata/xor_acc cone (SERIALIZER TIMING).
+        S_M5OP: begin
+          mb_we<=1'b1; mb_waddr<=wptr; wptr<=wptr+13'd1;
+          mb_wdata<=OP_M5_STATE; xor_acc<=xor_acc^OP_M5_STATE;
+          m5_i<=5'd0; st<=S_M5RD;
+        end
+        S_M5RD: begin
+          cur_m5b<=snap_m5_base[m5_i*8 +: 8];
+          st<=S_M5WR;
+        end
+        S_M5WR: begin
+          mb_we<=1'b1; mb_waddr<=wptr; wptr<=wptr+13'd1;
+          mb_wdata<=cur_m5b; xor_acc<=xor_acc^cur_m5b;
+          if (m5_i == 5'd21) begin
+            if (l_m5_cnt != 4'd0) st<=S_M5EOP;
+            else if (l_split_cnt >= 3'd2) st<=S_SPL_OP;
+            else if (l_psp_go) st<=S_PSP_OP;
+            else if (pal_present) st<=S_PAL;
+            else begin st<=S_NTA; nt_i<=0; nt_inrun<=1'b0; end
+          end else begin m5_i<=m5_i+5'd1; st<=S_M5RD; end
+        end
+
+        // -------- CMD_M5_EVENTS (MMC5): 18 hdr cnt x [sl idx val] -------------
+        S_M5EOP: begin
+          mb_we<=1'b1; mb_waddr<=wptr; wptr<=wptr+13'd1;
+          mb_wdata<=OP_M5_EVENTS; xor_acc<=xor_acc^OP_M5_EVENTS;
+          st<=S_M5EH;
+        end
+        S_M5EH: begin
+          mb_we<=1'b1; mb_waddr<=wptr; wptr<=wptr+13'd1;
+          mb_wdata<={l_m5_ovf, 3'd0, l_m5_cnt}; xor_acc<=xor_acc^{l_m5_ovf, 3'd0, l_m5_cnt};
+          m5_i<=5'd0; sub<=4'd0; st<=S_M5ELD;
+        end
+        S_M5ELD: begin
+          cur_m5e<=snap_m5_ev[m5_i[2:0]*21 +: 21];
+          st<=S_M5EE;
+        end
+        S_M5EE: begin
+          mb_we<=1'b1; mb_waddr<=wptr; wptr<=wptr+13'd1;
+          case (sub)
+            0: begin mb_wdata<=cur_m5e[20:13];       xor_acc<=xor_acc^cur_m5e[20:13]; end
+            1: begin mb_wdata<={3'd0, cur_m5e[12:8]};xor_acc<=xor_acc^{3'd0, cur_m5e[12:8]}; end
+            2: begin mb_wdata<=cur_m5e[7:0];         xor_acc<=xor_acc^cur_m5e[7:0]; end
+          endcase
+          if (sub==4'd2) begin
+            if ({1'b0, m5_i[3:0]}+5'd1 >= {1'b0, l_m5_cnt}) begin
+              if (l_split_cnt >= 3'd2) st<=S_SPL_OP;
+              else if (l_psp_go) st<=S_PSP_OP;
+              else if (pal_present) st<=S_PAL;
+              else begin st<=S_NTA; nt_i<=0; nt_inrun<=1'b0; end
+            end else begin m5_i<=m5_i+5'd1; sub<=4'd0; st<=S_M5ELD; end
+          end else sub<=sub+4'd1;
+        end
+`endif
 
         // -------- CMD_CHR_SPLITS (v2.3): 13 hdr(ovf|cnt) cnt x [sl bank] ------
         // Emitted only when l_cspl_go (cnt>=2 && !poison), so a frame with no
@@ -1910,6 +2132,7 @@ module nes_bridge(
         // S_CSPL_LD consumes l_cspl_*[cspl_i] into cur_c* (indexed array read
         // kept OFF the mb_wdata/xor cone -- SERIALIZER TIMING), S_CSPL_E emits
         // the 2 bytes from those single registers.
+`ifndef NES_MMC5
         S_CSPL_OP: begin
           mb_we<=1'b1; mb_waddr<=wptr; wptr<=wptr+13'd1;
           mb_wdata<=OP_CHR_SPLITS; xor_acc<=xor_acc^OP_CHR_SPLITS;
@@ -1948,6 +2171,7 @@ module nes_bridge(
             end else begin cspl_i<=cspl_i+3'd1; sub<=4'd0; st<=S_CSPL_LD; end
           end else sub<=sub+4'd1;
         end
+`endif
 
         // -------- CMD_SPLITS (v1.3): 11 hdr(ovf|cnt) cnt x [sl sx sy ntsel] ----
         // Emitted only when cnt>=2 (guaranteed by the S_REGS branch).  Entries
@@ -2375,16 +2599,21 @@ module nes_bridge(
 
         // -------- OAM: 50 + 256 bytes --------
         S_OAMA: begin
-          if (oam_i==9'd0) begin
+          if (oam_i==9'd0 && !cpy_run) begin
             mb_we<=1'b1; mb_waddr<=wptr; mb_wdata<=OP_OAM; xor_acc<=xor_acc^OP_OAM;
-            wptr<=wptr+13'd1; oam_i<=9'd1; st<=S_OAMB;   // oam_rd_a==0 -> oam_q next cyc
+            wptr<=wptr+13'd1; oam_i<=9'd1; st<=S_OAMB; sub<=4'd0;
+            // byte k is addressed (port B) while oam_i==k, lands in oam_q the cycle
+            // after and in oam_frz_q the cycle after that: S_OAMB cycle 0 only waits
           end
         end
         S_OAMB: begin
-          mb_we<=1'b1; mb_waddr<=wptr; mb_wdata<=oam_frz_q; wptr<=wptr+13'd1;
-          xor_acc<=xor_acc^oam_frz_q;
-          if (oam_i==9'd256) begin st<=S_DONE; sub<=0; end
-          else oam_i<=oam_i+9'd1;   // oam_rd_a follows oam_i
+          if (sub==4'd0) begin sub<=4'd1; oam_i<=oam_i+9'd1; end   // pipeline fill
+          else begin
+            mb_we<=1'b1; mb_waddr<=wptr; mb_wdata<=oam_frz_q; wptr<=wptr+13'd1;
+            xor_acc<=xor_acc^oam_frz_q;
+            if (oam_i==9'd257) begin st<=S_DONE; sub<=0; end   // byte 255 is out
+            else oam_i<=oam_i+9'd1;   // the address follows oam_i (wraps harmlessly past 255)
+          end
         end
 
         // -------- FRAME_DONE: F0 xor(body) --------

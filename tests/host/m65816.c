@@ -46,6 +46,13 @@ static int      hv_hi;             /* hi/lo flip-flop of $213C/$213D */
 
 /* --- GBC player extensions (m65816.h); every one of them is inert at 0 --- */
 static int       gbc;              /* master switch, m_gbc_mode() */
+/* NES transport (m_nesdev_mode): the renderer's device transport talks to a
+ * control block ($2BD0-$2BDF), a mailbox window ($6000-$7FFF) and the WRAM port;
+ * each of them is opened ONLY by this switch, off by default, so every gate
+ * written before it still aborts on a stray access there. */
+static int       nesdev;
+static uint8_t   nes_cb[16];       /* $2BD0-$2BDF */
+static const uint8_t *nes_mbx[2];  /* the two 8 KB mailbox buffers */
 static uint8_t  *view_win;         /* 320 KB, banks $E0-$E4 (wire $03: $E4 = the FB) */
 #define RW_MAX 4
 static uint32_t  rw_lo[RW_MAX], rw_hi[RW_MAX];   /* m_set_read_watch */
@@ -80,6 +87,12 @@ static uint8_t   coldata[3];       /* $2132: the fixed colour's R, G, B */
  * 18 + 8*C + 8*B.  V/H, $4210/$4211/$4212, NMI at V=225 and the V-IRQ at VTIME
  * come out of that clock, and WAI waits for them. */
 static int       clk_on;
+/* m_dbgreg_sink: one write-only debug register the renderer publishes into
+ * (NES_DBG_REND, $2BDF).  Off by default, so an unmodelled write still aborts. */
+static int       dbgreg_on;
+static uint16_t  dbgreg_addr;
+static uint8_t   dbgreg_last;
+static unsigned  dbgreg_n;
 static uint64_t  clk_stall_pend;   /* m_clock_stall, applied in clk_advance */
 static uint64_t  clk_mc, clk_line_start, clk_pend, clk_depth0;
 static int       clk_line, clk_lines = 262;
@@ -119,6 +132,7 @@ void m_reset_memory(void) {
   /* The GBC wiring is reset too: a driver configures it AFTER m_reset_memory,
      so a stale view window or EF sink can never survive into a run that did
      not ask for one. */
+  nesdev = 0; memset(nes_cb, 0, sizeof(nes_cb)); nes_mbx[0] = nes_mbx[1] = NULL;
   gbc = 0; view_win = NULL; ef_base = 0; ef_len = 0; ef_fn = NULL;
   rw_n = 0; rw_fn = NULL;
   pad_joy1 = 0; cmd_fn = NULL; dma_fn = NULL;
@@ -352,16 +366,16 @@ static void reg_write(uint16_t off, uint8_t v) {
          from inside dma_run(); modelling only the store would leave the one
          path that matters unmodelled. */
       case 0x2180:
-        if(!gbc) M_DIE("WRAM port $2180 requires m_gbc_mode()\n");
+        if(!gbc && !nesdev) M_DIE("WRAM port $2180 requires m_gbc_mode() or m_nesdev_mode()\n");
         wram[wmadd & 0x1ffff] = v; wmadd = (wmadd + 1) & 0x1ffff; break;
       case 0x2181:
-        if(!gbc) M_DIE("WRAM port $2181 requires m_gbc_mode()\n");
+        if(!gbc && !nesdev) M_DIE("WRAM port $2181 requires m_gbc_mode() or m_nesdev_mode()\n");
         wmadd = (wmadd & 0x1ff00) | v; break;
       case 0x2182:
-        if(!gbc) M_DIE("WRAM port $2182 requires m_gbc_mode()\n");
+        if(!gbc && !nesdev) M_DIE("WRAM port $2182 requires m_gbc_mode() or m_nesdev_mode()\n");
         wmadd = (wmadd & 0x100ff) | ((uint32_t)v << 8); break;
       case 0x2183:
-        if(!gbc) M_DIE("WRAM port $2183 requires m_gbc_mode()\n");
+        if(!gbc && !nesdev) M_DIE("WRAM port $2183 requires m_gbc_mode() or m_nesdev_mode()\n");
         wmadd = (wmadd & 0x0ffff) | ((uint32_t)(v & 1) << 16); break;
       default:
         /* MUTE BY WHITELIST, never by 'default'.  These only shape what the
@@ -443,6 +457,13 @@ static void reg_write(uint16_t off, uint8_t v) {
        byte there when an IGR combo fires; it is a mailbox, not code. */
     if(off == 0x2a00) { cmd_n++; if(cmd_fn) cmd_fn(v); return; }
   }
+  if(dbgreg_on && off == dbgreg_addr) { dbgreg_n++; dbgreg_last = v; return; }
+  if(nesdev) {
+    if(off >= 0x2bd0 && off <= 0x2bdf) { nes_cb[off - 0x2bd0] = v; return; }
+    if(off == 0x2a00) { cmd_n++; if(cmd_fn) cmd_fn(v); return; }   /* MCU_CMD (IGR), sunk */
+    if(off == 0x4201) { cpu_reg[0x01] = v; return; }
+    if(off >= 0x2140 && off <= 0x2143) return;     /* no S-SMP: the unmute handshake times out */
+  }
   M_DIE("write to unmodelled register $%04X = $%02X\n", off, v);
 }
 
@@ -482,6 +503,13 @@ static uint8_t reg_read(uint16_t off) {
     if(decoy_on && (off & 0x70) == 0x60) return dma_reg[off & 0x0f];
     return dma_reg[off - 0x4300];
   }
+  if(nesdev) {
+    if(off >= 0x2bd0 && off <= 0x2bdf) return nes_cb[off - 0x2bd0];
+    if(off == 0x4218) return (uint8_t)pad_joy1;
+    if(off == 0x4219) return (uint8_t)(pad_joy1 >> 8);
+    if(off == 0x421a || off == 0x421b) return 0x00;          /* controller 2: nothing plugged */
+    if(off >= 0x2140 && off <= 0x2143) return 0x00;          /* no S-SMP (see reg_write) */
+  }
   if(gbc) {
     if(off == 0x2180) { uint8_t r = wram[wmadd & 0x1ffff]; wmadd = (wmadd + 1) & 0x1ffff; return r; }
     if(off >= 0x2140 && off <= 0x2143) return 0x00;       /* no S-SMP: see reg_write */
@@ -512,6 +540,15 @@ static uint8_t bus_read(uint32_t a) {
     }
     if(bank == 0xef) return 0x00;   /* contract sec. 3: write-only, reads $00 */
   }
+  if(nesdev) {
+    uint8_t bank = (uint8_t)(a >> 16);
+    uint16_t off = (uint16_t)a;
+    if((bank <= 0x3f || (bank >= 0x80 && bank <= 0xbf)) && off >= 0x6000 && off < 0x8000) {
+      const uint8_t *b = nes_mbx[nes_cb[6] & 1];
+      if(!b) M_DIE("mailbox read $%06X without m_nesdev_mailbox()\n", a);
+      return b[off - 0x6000];
+    }
+  }
   { uint8_t *p = mem_ptr(a, 0);
     return p ? *p : reg_read((uint16_t)a); }
 }
@@ -538,6 +575,12 @@ static void bus_write(uint32_t a, uint8_t v) {
 
 /* --- GBC wiring (see m65816.h) --- */
 void m_gbc_mode(int on) { gbc = on ? 1 : 0; }
+void m_nesdev_mode(int on) { nesdev = on ? 1 : 0; }
+void m_nesdev_mailbox(const uint8_t *buf0, const uint8_t *buf1) { nes_mbx[0] = buf0; nes_mbx[1] = buf1; }
+uint8_t m_nesdev_cb(int off) { return nes_cb[off & 15]; }
+void m_nesdev_cb_set(int off, uint8_t v) { nes_cb[off & 15] = v; }
+void m_bus_write(uint32_t a, uint8_t v) { bus_write(a, v); }
+uint8_t m_bus_read(uint32_t a) { return bus_read(a); }
 void m_hdma_decoy(int on) { decoy_on = on ? 1 : 0; }
 void m_set_view_window(uint8_t *buf) { view_win = buf; }
 void m_set_read_watch(int n, const uint32_t *lo, const uint32_t *hi, void (*fn)(uint32_t)) {
@@ -1519,3 +1562,7 @@ int m_step_resume(uint64_t max) {
 }
 
 uint16_t m_step_sp(void) { return step_s0; }
+
+void m_dbgreg_sink(uint16_t addr) { dbgreg_on = 1; dbgreg_addr = addr; dbgreg_n = 0; dbgreg_last = 0; }
+unsigned m_dbgreg_writes(void) { return dbgreg_n; }
+uint8_t m_dbgreg_last(void) { return dbgreg_last; }

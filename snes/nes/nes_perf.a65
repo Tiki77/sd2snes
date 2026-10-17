@@ -1,0 +1,716 @@
+; nes_perf.a65 -- TELEMETRIA DE PERFORMANCE do renderer, publicada no canal de
+; 1 byte NES_DBG_REND ($2BDF -> NDBG +31).  Existe para responder, NO SILICIO,
+; o que o profiler do bsnes nao responde: onde o tempo do frame vai quando o
+; renderer perde frames (SMB3 P-speed: ~1 overrun por frame no device com o
+; decode a 0,57 frame no bsnes).
+;
+; O QUE MEDE (por janela de 48 slots x NES_PF_HOLD NMIs)
+;   decode      tempo de PAREDE de um decode (drain + parse + convert + commit
+;               + ACK), em linhas de scan: histograma de 6 faixas, maximo,
+;               soma; mais a parte gasta no drain e a parte que a NMI roubou
+;               do decode (parede - NMI = CPU do MAIN)
+;   transporte  frames nunca decodificados (salto de seq), drains de seq-1
+;               ("older"), drains descartados ("stale"), parses abortados,
+;               frames ja' velhos quando o ACK sai (age)
+;   NMI         latencia de entrada (V de 9 bits no late-guard do apply),
+;               applies pulados por NMI tardia, duracao e fim da NMI, NMIs
+;               que terminaram em display ativo, reentradas, wovr/qovr
+;
+; RELOGIO.  Uma AMOSTRA e' o par (ent, vm): `ent` = numero de entradas de NMI
+; (incrementa no FIM da NMI, tambem na reentrada), vm = (V9 - 225) mod 262, com
+; V9 o contador de scan de 9 bits ($2137 latcha, $213D lido DUAS vezes: V[7:0]
+; e depois V[8] -- V sempre em 9 bits, [256,261] e' vblank).  Duas amostras
+; dao um intervalo em linhas: (ent1-ent0)*262 + vm1-vm0, modulo 65536.  A
+; amostra le ent / V / ent e repete se ent mudou: uma NMI no meio da leitura
+; bagunca o flip-flop do $213D, e a releitura de ent a pega.  A unica janela
+; cega e' a que vai do disparo da NMI (V=225) ate' o MAIN parar de executar --
+; uma instrucao.
+;
+; CONVENCAO DE CHAMADA (custo!): as rotinas de decode (MAIN) e de NMI sao
+; chamadas de pontos onde A/X/Y estao mortos e o codigo e' .as/.xl; elas NAO
+; salvam nada, destroem A/X/Y e voltam com A de 8 bits e X/Y de 16 (.as/.xl).
+; Cada byte de codigo custa 8 mc (ROM lenta): salvar registradores era ~15% do
+; custo da primeira versao.
+;
+; CANAL.  O relatorio (36 B: versao|HOLD, numero da janela, 30 B de campos,
+; checksum) e' congelado no fim de cada ciclo e transmitido em 48 slots de 6
+; bits, cada um mantido NES_PF_HOLD NMIs em $2BDF:
+;       bit7 = 1 so' no slot 0      bit6 = paridade do slot      bits5..0 = dado
+; O decoder do lado do host e' utils/nes_perf_decode.py (mesmo formato).
+;
+; REGRAS QUE ESTE ARQUIVO SEGUE (snescom rastreia A/X/Y por ORDEM DE FONTE):
+; toda sub-rotina declara a largura na primeira linha, todo label alvo de
+; branch cai em trecho .al/.xl, e as secoes de 8 bits sao curtas e nunca
+; contem label.
+
+.link page $00
+#include "nes_equates.i65"
+
+#ifdef NES_PERF
+
+; offsets (em bytes) dos acumuladores em nes_pf_acc.  DECN e APPLY nao tem
+; acumulador: o freeze os deriva (soma do histograma / soma dos bins de entrada).
+#define PFA_H0      2
+#define PFA_H1      4
+#define PFA_H2      6
+#define PFA_H3      8
+#define PFA_H4      10
+#define PFA_H5      12
+#define PFA_SKIP    14
+#define PFA_LATE    16
+#define PFA_LDISP   18
+#define PFA_E0      22
+#define PFA_E1      24
+#define PFA_E2      26
+#define PFA_EMAX    28
+#define PFA_NDUR    30
+#define PFA_NEND    32
+#define PFA_NOVR    34
+#define PFA_AGE1    36
+#define PFA_AGE2    38
+#define PFA_DMAX    40
+#define PFA_DSUM    42
+#define PFA_DNMI    44
+#define PFA_DRN     46
+
+; ------------------------------------------------------------
+; nes_pf_init -- zera o bloco, semeia os deltas dos instrumentos antigos e arma
+; o ciclo para congelar no 1o slot.  Chamada uma vez no boot, com a NMI
+; desligada e os contadores antigos ja' zerados por nes_boot_init.
+; ------------------------------------------------------------
+nes_pf_init:
+        php
+        rep #$30 : .al : .xl
+        pha
+        phx
+        ldx #$0000
+        lda #$0000
+pfin_z:
+        .al : .xl
+        sta nes_pf_base,x
+        inx
+        inx
+        cpx #$00c0
+        bcc pfin_z
+        lda #NES_PF_SLOTS-1
+        sta nes_pf_slot           ; o 1o incremento dispara o freeze
+        lda @nes_dbg_older         ; semeia os deltas: o 1o relatorio nao carrega o
+        sta nes_pf_prev           ; que os instrumentos antigos ja' contaram
+        lda @nes_dbg_stale
+        sta nes_pf_prev+2
+        lda @nes_dbg_badrun
+        clc
+        adc @nes_dbg_badop
+        sta nes_pf_prev+4
+        lda @nes_dbg_reent
+        sta nes_pf_prev+6
+        lda @nes_dbg_wovr
+        sta nes_pf_prev+8
+        lda @nes_dbg_qovr
+        sta nes_pf_prev+10
+        plx
+        pla
+        plp
+        rts
+
+; ------------------------------------------------------------
+; nes_pf_reent -- NMI que chegou com a anterior ainda rodando: so' conta a
+; entrada (o relogio precisa de TODA entrada de vetor, nao so' das completas).
+; ------------------------------------------------------------
+nes_pf_reent:
+        php
+        rep #$20 : .al
+        pha
+        lda nes_pf_ent
+        inc
+        sta nes_pf_ent
+        pla
+        plp
+        rts
+
+; ------------------------------------------------------------
+; pf_samp -- grava a amostra (ent, vm) em nes_pf_s0+X (X = 0/4/8).  Contexto
+; MAIN.  Entra .al/.xl, sai .al/.xl.
+; ------------------------------------------------------------
+pf_samp:
+        .al : .xl
+        lda nes_pf_ent
+        sta nes_pf_s0,x
+        sep #$20 : .as
+        lda $213f                  ; reseta o flip-flop hi/lo do latch
+        lda $2137                  ; latcha H/V
+        lda $213d                  ; V[7:0]
+        sta nes_pf_s0+2,x
+        lda $213d                  ; V[8] no bit 0
+        and #$01
+        sta nes_pf_s0+3,x
+        rep #$20 : .al
+        lda nes_pf_ent
+        cmp nes_pf_s0,x
+        bne pf_samp                ; uma NMI passou no meio: refaz
+        lda nes_pf_s0+2,x         ; V9 -> vm = (V9 - 225) mod 262
+        sec
+        sbc #225
+        bcs pfsm_ok
+        adc #262
+pfsm_ok:
+        .al : .xl
+        sta nes_pf_s0+2,x
+        rts
+
+; ------------------------------------------------------------
+; Sondas do decode (MAIN).
+;   nes_pf_dec_begin  no topo do caminho "ha' frame novo"
+;   nes_pf_dec_mid    depois do drain da mailbox (opcional: nem todo transporte tem drain)
+;   nes_pf_dec_end    depois do nes_process_frame.  A = age (frames publicados
+;                     depois do drenado quando o ACK sai), X = skip (frames que
+;                     ninguem decodificou entre o ultimo ACK e este)
+; ------------------------------------------------------------
+nes_pf_dec_begin:
+        rep #$30 : .al : .xl
+        ldx #$0000
+        jsr pf_samp
+        lda nes_pf_s0             ; s1 = s0: sem drain medido, o drain e' zero
+        sta nes_pf_s1
+        lda nes_pf_s0+2
+        sta nes_pf_s1+2
+        lda nes_pf_nmil
+        sta nes_pf_n0
+        sep #$20 : .as
+        rts
+
+nes_pf_dec_mid:
+        rep #$30 : .al : .xl
+        ldx #$0004
+        jsr pf_samp
+        sep #$20 : .as
+        rts
+
+; pf_since -- A = linhas entre s0 e a amostra em nes_pf_s0+X (X = 4/8), mod 65536.
+pf_since:
+        .al : .xl
+        lda nes_pf_s0,x           ; dE
+        sec
+        sbc nes_pf_s0
+        sta nes_pf_mm
+        asl
+        sta nes_pf_md             ; 2*dE
+        asl
+        clc
+        adc nes_pf_md             ; 6*dE
+        sta nes_pf_md
+        lda nes_pf_mm
+        xba
+        and #$ff00                 ; 256*dE (so' o byte baixo de dE conta)
+        clc
+        adc nes_pf_md             ; 262*dE
+        clc
+        adc nes_pf_s0+2,x         ; + vm
+        sec
+        sbc nes_pf_s0+2           ; - vm0
+        rts
+
+nes_pf_dec_end:
+        rep #$30 : .al : .xl
+        sta nes_pf_ta
+        txa
+        sta nes_pf_ts
+        ldx #$0008
+        jsr pf_samp
+        lda nes_pf_s1              ; drain (zero se nao houve mid: s1 = s0)
+        cmp nes_pf_s0
+        beq pfde_dr0               ; mesma NMI: so' a diferenca de vm (o caso comum)
+        ldx #$0004
+        jsr pf_since
+        bra pfde_dradd
+pfde_dr0:
+        .al : .xl
+        lda nes_pf_s1+2
+        sec
+        sbc nes_pf_s0+2
+pfde_dradd:
+        .al : .xl
+        clc
+        adc nes_pf_acc+PFA_DRN
+        bcc pfde_dr
+        lda #$ffff
+pfde_dr:
+        .al : .xl
+        sta nes_pf_acc+PFA_DRN
+        ldx #$0008                 ; parede
+        jsr pf_since
+        sta nes_pf_tw
+        clc
+        adc nes_pf_acc+PFA_DSUM
+        bcc pfde_ds
+        lda #$ffff
+pfde_ds:
+        .al : .xl
+        sta nes_pf_acc+PFA_DSUM
+        lda nes_pf_tw
+        cmp nes_pf_acc+PFA_DMAX
+        bcc pfde_dm
+        sta nes_pf_acc+PFA_DMAX
+pfde_dm:
+        .al : .xl
+        lda nes_pf_nmil           ; linhas que a NMI gastou DENTRO do decode
+        sec
+        sbc nes_pf_n0
+        clc
+        adc nes_pf_acc+PFA_DNMI
+        bcc pfde_dn
+        lda #$ffff
+pfde_dn:
+        .al : .xl
+        sta nes_pf_acc+PFA_DNMI
+        lda nes_pf_ts             ; skip: um valor "negativo" nao existe
+        beq pfde_sk0
+        cmp #$8000
+        bcs pfde_sk0
+        clc
+        adc nes_pf_acc+PFA_SKIP
+        bcc pfde_sk
+        lda #$ffff
+pfde_sk:
+        .al : .xl
+        sta nes_pf_acc+PFA_SKIP
+pfde_sk0:
+        .al : .xl
+        lda nes_pf_ta
+        beq pfde_age0
+        ldx #PFA_AGE1
+        jsr pf_inc
+        lda nes_pf_ta
+        cmp #$0002
+        bcc pfde_age0
+        ldx #PFA_AGE2
+        jsr pf_inc
+pfde_age0:
+        .al : .xl
+        lda nes_pf_tw             ; histograma da parede: <.5, <1, <1.5, <2, <3, >=3 frame
+        ldx #PFA_H0
+        cmp #131
+        bcc pfde_hdo
+        ldx #PFA_H1
+        cmp #262
+        bcc pfde_hdo
+        ldx #PFA_H2
+        cmp #393
+        bcc pfde_hdo
+        ldx #PFA_H3
+        cmp #524
+        bcc pfde_hdo
+        ldx #PFA_H4
+        cmp #786
+        bcc pfde_hdo
+        ldx #PFA_H5
+pfde_hdo:
+        .al : .xl
+        jsr pf_inc
+        sep #$20 : .as
+        rts
+
+; pf_inc -- acc[X]++ saturando em $FFFF (A destruido)
+pf_inc:
+        .al : .xl
+        lda nes_pf_acc,x
+        inc
+        beq pfi_sat
+        sta nes_pf_acc,x
+pfi_sat:
+        .al : .xl
+        rts
+
+; ------------------------------------------------------------
+; Lado NMI.  O late-guard do apply deixa o V de 9 bits em nes_pf_nv
+; (lo = V[7:0], hi = V[8]).
+;
+; nes_pf_entry -- chamada em nav_ok (V9 em [225,232]: o apply vai rodar).
+; Latencia de entrada L = V9 - 225 (0..7): bins 0-1 / 2-3 / 4-7, maximo.
+; ------------------------------------------------------------
+nes_pf_entry:
+        rep #$30 : .al : .xl
+        lda nes_pf_nv
+        sec
+        sbc #225
+        sta nes_pf_ens
+        lda #$0001
+        sta nes_pf_have
+        lda nes_pf_ens
+        ldx #PFA_E0
+        cmp #2
+        bcc pfen_do
+        ldx #PFA_E1
+        cmp #4
+        bcc pfen_do
+        ldx #PFA_E2
+pfen_do:
+        .al : .xl
+        lda nes_pf_acc,x          ; <= 1 por NMI: nao satura dentro de uma janela
+        inc
+        sta nes_pf_acc,x
+        lda nes_pf_ens
+        cmp nes_pf_acc+PFA_EMAX
+        bcc pfen_mx
+        sta nes_pf_acc+PFA_EMAX
+pfen_mx:
+        .al : .xl
+        sep #$20 : .as
+        rts
+
+; nes_pf_late -- chamada em nav_late (apply PULADO: NMI tardia, ou V fora da
+; janela).  L >= 37 = a NMI so' entrou com a PPU em display ativo (V9 em 0..224).
+nes_pf_late:
+        rep #$30 : .al : .xl
+        lda nes_pf_nv
+        sec
+        sbc #225
+        bcs pfla_ok
+        adc #262
+pfla_ok:
+        .al : .xl
+        sta nes_pf_ens
+        lda #$0001
+        sta nes_pf_have
+        lda nes_pf_acc+PFA_LATE
+        inc
+        sta nes_pf_acc+PFA_LATE
+        lda nes_pf_ens
+        cmp #37
+        bcc pfla_nd
+        lda nes_pf_acc+PFA_LDISP
+        inc
+        sta nes_pf_acc+PFA_LDISP
+        lda nes_pf_ens
+pfla_nd:
+        .al : .xl
+        cmp nes_pf_acc+PFA_EMAX
+        bcc pfla_mx
+        sta nes_pf_acc+PFA_EMAX
+pfla_mx:
+        .al : .xl
+        sep #$20 : .as
+        rts
+
+; ------------------------------------------------------------
+; nes_pf_nmi_end -- ULTIMA coisa da NMI antes de liberar a guarda de
+; reentrada.  Le o V de fim, fecha a duracao da NMI (a partir da entrada que o
+; apply mediu; sem apply, a partir de V=225), incrementa ent e anda o canal.
+; ------------------------------------------------------------
+nes_pf_nmi_end:
+        rep #$30 : .al : .xl
+        sep #$20 : .as
+        lda $213f
+        lda $2137
+        lda $213d
+        sta nes_pf_nv
+        lda $213d
+        and #$01
+        sta nes_pf_nv+1
+        rep #$20 : .al
+        lda nes_pf_have
+        bne pfne_have
+        sta nes_pf_ens             ; NMI sem apply: assume que entrou em V=225 (L = 0). A
+                                   ; NMI sem frame pendente tambem custa (espera do pad,
+                                   ; ack) e tambem rouba tempo do MAIN
+pfne_have:
+        .al : .xl
+        lda nes_pf_nv              ; Le = linhas desde V=225 no fim da NMI
+        sec
+        sbc #225
+        bcs pfne_leok
+        adc #262
+pfne_leok:
+        .al : .xl
+        sta nes_pf_tm2            ; Le
+        sec
+        sbc nes_pf_ens            ; dur = Le - L de entrada
+        bcs pfne_durok
+        adc #262                   ; a NMI atravessou o V=225 seguinte
+pfne_durok:
+        .al : .xl
+        sta nes_pf_td
+        clc
+        adc nes_pf_nmil
+        sta nes_pf_nmil
+        lda nes_pf_td
+        cmp nes_pf_acc+PFA_NDUR
+        bcc pfne_nd
+        sta nes_pf_acc+PFA_NDUR
+pfne_nd:
+        .al : .xl
+        lda nes_pf_tm2
+        cmp nes_pf_acc+PFA_NEND
+        bcc pfne_ne
+        sta nes_pf_acc+PFA_NEND
+pfne_ne:
+        .al : .xl
+        cmp #38                    ; Le >= 38 <=> V9 em [1,224]: display ativo
+        bcc pfne_inblank
+        lda nes_pf_acc+PFA_NOVR
+        inc
+        sta nes_pf_acc+PFA_NOVR
+pfne_inblank:
+        .al : .xl
+        lda #$0000
+        sta nes_pf_have
+        lda nes_pf_ent
+        inc
+        sta nes_pf_ent
+        jsr nes_pf_stream
+        sep #$20 : .as
+        rts
+
+; ------------------------------------------------------------
+; nes_pf_stream -- um passo do canal por NMI: a cada NES_PF_HOLD NMIs anda um
+; slot; ao dar a volta, congela um relatorio novo.
+; ------------------------------------------------------------
+nes_pf_stream:
+        .al : .xl
+        lda nes_pf_hold
+        inc
+        cmp #NES_PF_HOLD
+        bcc pfs_keep
+        lda nes_pf_slot
+        inc
+        cmp #NES_PF_SLOTS
+        bcc pfs_nofreeze
+        jsr nes_pf_freeze
+        lda #$0000
+pfs_nofreeze:
+        .al : .xl
+        sta nes_pf_slot
+        jsr nes_pf_publish
+        lda #$0000
+pfs_keep:
+        .al : .xl
+        sta nes_pf_hold
+        rts
+
+; nes_pf_publish -- grava em $2BDF o slot corrente: dado = 6 bits a partir do
+; bit 6*slot do relatorio (MSB primeiro).  r = (6*slot) mod 8 e' 0/6/4/2, o
+; deslocamento do par de bytes e' 10 - r.
+nes_pf_publish:
+        .al : .xl
+        lda nes_pf_slot
+        asl
+        sta nes_pf_tm2
+        asl
+        clc
+        adc nes_pf_tm2
+        sta nes_pf_tm2            ; bit inicial = 6*slot
+        and #$0007
+        sta nes_pf_tm3
+        lda #10
+        sec
+        sbc nes_pf_tm3
+        sta nes_pf_tm3            ; deslocamento
+        lda nes_pf_tm2
+        lsr
+        lsr
+        lsr
+        asl                        ; indice do byte * 2 (relatorio em words)
+        tax
+        lda nes_pf_repw,x         ; rep[i]
+        xba                        ; rep[i] vai para o byte alto
+        ora nes_pf_repw+2,x       ; | rep[i+1]
+        pha                        ; (o 65816 nao tem "ldx long")
+        lda nes_pf_tm3
+        tax                        ; X = deslocamento
+        pla
+pfp_sh:
+        .al : .xl
+        cpx #$0000
+        beq pfp_shd
+        lsr
+        dex
+        bra pfp_sh
+pfp_shd:
+        .al : .xl
+        and #$003f
+        sta nes_pf_tm3
+        lda nes_pf_slot
+        and #$0001
+        beq pfp_t0
+        lda nes_pf_tm3            ; paridade do slot -> bit 6
+        ora #$0040
+        sta nes_pf_tm3
+pfp_t0:
+        .al : .xl
+        lda nes_pf_slot
+        bne pfp_nz
+        lda nes_pf_tm3            ; slot 0 -> bit 7
+        ora #$0080
+        sta nes_pf_tm3
+pfp_nz:
+        .al : .xl
+        sep #$20 : .as
+        lda nes_pf_tm3
+        sta nes_pf_pub
+        sta NES_DBG_REND
+        rep #$20 : .al
+        rts
+
+; ------------------------------------------------------------
+; nes_pf_freeze -- fecha a janela: acumuladores -> relatorio, zera os
+; acumuladores.  Layout do relatorio (rep[i], i em bytes):
+;   0       versao<<4 | HOLD          1      numero da janela
+;   2..21   20 campos de 8 bits (acc 0..19, saturados em 255):
+;             decn h0..h5 skip late ldisp apply e0 e1 e2 emax ndur nend novr age1 age2
+;   22      dmax/4 (saturado)         23..28 dsum/4 dnmi/4 drn/4 (16 bits LE)
+;   29..34  deltas desde o freeze anterior: older stale bad reent wovr qovr
+;   35      checksum: c = 0x5A; para i em 0..34: c = rol8(c) ^ rep[i]
+; ------------------------------------------------------------
+pf_sat8:
+        .al : .xl
+        cmp #$0100
+        bcc pfs8_ok
+        lda #$00ff
+pfs8_ok:
+        .al : .xl
+        rts
+
+pf_delta:                          ; A = valor atual, X = offset em nes_pf_prev -> A = delta
+        .al : .xl
+        pha
+        sec
+        sbc nes_pf_prev,x
+        sta nes_pf_td
+        pla
+        sta nes_pf_prev,x
+        lda nes_pf_td
+        rts
+
+nes_pf_freeze:
+        .al : .xl
+        lda nes_pf_acc+PFA_H0     ; DECN = soma do histograma, APPLY = soma dos bins de
+        clc                        ; entrada (nenhum dos dois tem acumulador proprio)
+        adc nes_pf_acc+PFA_H1
+        adc nes_pf_acc+PFA_H2
+        adc nes_pf_acc+PFA_H3
+        adc nes_pf_acc+PFA_H4
+        adc nes_pf_acc+PFA_H5
+        sta nes_pf_acc
+        lda nes_pf_acc+PFA_E0
+        clc
+        adc nes_pf_acc+PFA_E1
+        adc nes_pf_acc+PFA_E2
+        sta nes_pf_acc+20
+        lda #NES_PF_HDR
+        sta nes_pf_repw
+        lda nes_pf_wseq
+        and #$00ff
+        sta nes_pf_repw+2
+        lda nes_pf_wseq
+        inc
+        sta nes_pf_wseq
+        ldx #$0000
+pfz_g8:
+        .al : .xl
+        lda nes_pf_acc,x          ; word i -> rep[2+i] (word offset 4+2i)
+        jsr pf_sat8
+        sta nes_pf_repw+4,x
+        inx
+        inx
+        cpx #40
+        bcc pfz_g8
+        lda nes_pf_acc+PFA_DMAX   ; dmax em unidades de 4 linhas
+        lsr
+        lsr
+        jsr pf_sat8
+        sta nes_pf_repw+44        ; rep[22]
+        lda nes_pf_acc+PFA_DSUM   ; rep[23..24]
+        lsr
+        lsr
+        tax
+        and #$00ff
+        sta nes_pf_repw+46
+        txa
+        xba
+        and #$00ff
+        sta nes_pf_repw+48
+        lda nes_pf_acc+PFA_DNMI   ; rep[25..26]
+        lsr
+        lsr
+        tax
+        and #$00ff
+        sta nes_pf_repw+50
+        txa
+        xba
+        and #$00ff
+        sta nes_pf_repw+52
+        lda nes_pf_acc+PFA_DRN    ; rep[27..28]
+        lsr
+        lsr
+        tax
+        and #$00ff
+        sta nes_pf_repw+54
+        txa
+        xba
+        and #$00ff
+        sta nes_pf_repw+56
+        lda @nes_dbg_older         ; rep[29..34]
+        ldx #0
+        jsr pf_delta
+        jsr pf_sat8
+        sta nes_pf_repw+58
+        lda @nes_dbg_stale
+        ldx #2
+        jsr pf_delta
+        jsr pf_sat8
+        sta nes_pf_repw+60
+        lda @nes_dbg_badrun
+        clc
+        adc @nes_dbg_badop
+        ldx #4
+        jsr pf_delta
+        jsr pf_sat8
+        sta nes_pf_repw+62
+        lda @nes_dbg_reent
+        ldx #6
+        jsr pf_delta
+        jsr pf_sat8
+        sta nes_pf_repw+64
+        lda @nes_dbg_wovr
+        ldx #8
+        jsr pf_delta
+        jsr pf_sat8
+        sta nes_pf_repw+66
+        lda @nes_dbg_qovr
+        ldx #10
+        jsr pf_delta
+        jsr pf_sat8
+        sta nes_pf_repw+68
+        lda #$005a                 ; checksum
+        sta nes_pf_chk
+        ldx #$0000
+pfz_ck:
+        .al : .xl
+        lda nes_pf_chk
+        asl
+        cmp #$0100
+        bcc pfz_ckr
+        and #$00ff
+        inc
+pfz_ckr:
+        .al : .xl
+        eor nes_pf_repw,x
+        sta nes_pf_chk
+        inx
+        inx
+        cpx #70
+        bcc pfz_ck
+        lda nes_pf_chk
+        sta nes_pf_repw+70        ; rep[35]
+        ldx #$0000                 ; zera os acumuladores
+        lda #$0000
+pfz_z:
+        .al : .xl
+        sta nes_pf_acc,x
+        inx
+        inx
+        cpx #PFA_DRN+2
+        bcc pfz_z
+        rts
+
+#endif

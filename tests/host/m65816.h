@@ -247,4 +247,25 @@ void     m_run_clocked(uint64_t until_mc);
 void     m_set_cpurev(int rev);
 void     m_set_pal(int pal);
 
+/* A write-only debug register the program publishes into (the NES renderer's
+ * NES_DBG_REND, $2BDF): the write is counted and the last value kept instead of
+ * aborting.  Not armed by default, so every gate that predates it still dies on
+ * a write there. */
+void     m_dbgreg_sink(uint16_t addr);
+unsigned m_dbgreg_writes(void);
+uint8_t  m_dbgreg_last(void);
+
+/* NES device transport (the renderer's control block, mailbox and WRAM port;
+ * see m65816.c).  Off by default.  The control block is plain storage the
+ * driver plays the bridge with: m_nesdev_cb_set() writes it as the bridge
+ * would, m_nesdev_cb() reads it back (what the renderer wrote).  The mailbox
+ * window $6000-$7FFF serves the buffer selected by NES_BUF_SEL ($2BD6 & 1). */
+void    m_nesdev_mode(int on);
+void    m_nesdev_mailbox(const uint8_t *buf0, const uint8_t *buf1);
+uint8_t m_nesdev_cb(int off);
+void    m_nesdev_cb_set(int off, uint8_t v);
+/* One bus access as the CPU would issue it (registers included). */
+void    m_bus_write(uint32_t a24, uint8_t v);
+uint8_t m_bus_read(uint32_t a24);
+
 #endif /* M65816_H */

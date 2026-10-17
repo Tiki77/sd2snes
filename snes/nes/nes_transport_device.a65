@@ -37,6 +37,9 @@ nes_dev_poll_frame:
         cmp @nes_dev_last_seq
         sep #$20 : .as
         beq ndp_none
+#ifdef NES_PERF
+        jsr nes_pf_dec_begin       ; telemetria: t0 do decode (parede)
+#endif
         ; --- v3.9: DRENA EM ORDEM.  A mailbox e' um ping-pong de 2 buffers: se
         ;     o renderer esta' 2 frames atras (seq - last == 2), o frame seq-1
         ;     AINDA esta' intacto no outro buffer -- drena-lo primeiro e' o que
@@ -74,6 +77,9 @@ ndp_want_set:
         bcs ndp_none               ; (nunca stalla; bcs fica por robustez)
         jsr nes_dev_drain_mailbox  ; captura o seq DRENADO em @nes_dev_drain_seq
                                     ; (o mesmo que escolheu NES_BUF_SEL) -- ver la.
+#ifdef NES_PERF
+        jsr nes_pf_dec_mid         ; telemetria: fim do drain
+#endif
         ; --- v3.9: a COPIA E' SUSPEITA se a bridge publicou N+2 durante o drain.
         ;     A mailbox e' um ping-pong de 2 buffers SEM stall: o frame N+2 vai
         ;     para o MESMO buffer de N.  O drain e' um DMA em chunks de 512 B
@@ -107,6 +113,22 @@ ndp_want_set:
 ndp_fresh:
         sep #$20 : .as
         jsl nes_process_frame
+#ifdef NES_PERF
+        ; telemetria: age = frames ja' publicados depois do drenado, skip = frames
+        ; que ninguem decodificou entre o ultimo ACK e este (seq - last - 1)
+        rep #$30 : .al : .xl
+        lda NES_FRAME_SEQ
+        sec
+        sbc @nes_dev_drain_seq
+        pha
+        lda @nes_dev_drain_seq
+        sec
+        sbc @nes_dev_last_seq
+        dec
+        tax
+        pla
+        jsr nes_pf_dec_end         ; volta .as/.xl
+#endif
         ; --- v3.9: um frame cujo PARSE ABORTOU (nes_frame_valid = 0: opcode
         ;     desconhecido no laco TLV) NAO e' ACKado.  O caso real, medido em
         ;     silicio no SMB1 (colunas da fase perdidas no menu-load, +9
@@ -194,6 +216,14 @@ ndp_none:
 ; ------------------------------------------------------------
 nes_dev_drain_mailbox:
         rep #$20 : .al
+        ; v3.10: o NES_LEN do control block e' o do frame MAIS NOVO. Quando o poll
+        ; escolheu o buffer seq-1 (renderer >= 2 atras) a copia de NES_LEN bytes
+        ; nao tem o tamanho do frame dele: pode ser MAIOR (cauda do frame
+        ; truncada) ou MENOR (lixo de um frame anterior depois do F0). Marca o
+        ; drain como "antigo" para o nes_dev_complete_frame acertar a conta.
+        lda @nes_dev_want_seq
+        eor NES_FRAME_SEQ         ; 0 = e' o mais novo
+        sta @nes_dev_older
         lda @nes_dev_want_seq     ; v3.9: SEQ escolhido pelo poll (o mais antigo intacto). Le UMA
         sta @nes_dev_drain_seq    ; vez e reusa p/ os DOIS papeis: (1) NES_BUF_SEL
                                   ; = SEQ&1, o buffer que sera' processado; (2) o
@@ -310,6 +340,10 @@ ndm_chunk_sz:
 ndm_chunks_done:
         lda #$0000
         sta nes_parse_consumed   ; limpa p/ o parser (que tambem zera)
+        lda @nes_dev_older
+        beq ndm_no_ext
+        jsr nes_dev_complete_frame ; frame antigo: garante que a copia vai ate' o F0
+ndm_no_ext:
         sep #$20 : .as
 
 ndm_skip_dma:
@@ -319,6 +353,254 @@ ndm_skip_dma:
         sep #$20 : .as
         lda #^nes_mailbox_buf
         sta nes_parse_bank
+        rts
+
+; ============================================================
+; nes_dev_complete_frame -- v3.10. Chamada so' no drain do buffer ANTIGO
+; (nes_dev_older != 0). O control block publica um UNICO NES_LEN, o do frame
+; mais novo; o buffer seq-1 tem o frame dele, de tamanho proprio, seguido do
+; que sobrou de frames anteriores daquele buffer. Copiar NES_LEN bytes erra
+; para os dois lados:
+;   - NES_LEN maior: o parser anda alem do F0 (o nes_render para no F0).
+;   - NES_LEN menor: a copia termina no MEIO do frame -- o ultimo NT_RUN
+;     chega com a cauda lixo (tiles errados que nada re-envia: a bridge
+;     ja' soltou o delta quando o frame foi ACKado) ou a OAM chega pela metade.
+; Aqui o andador percorre os comandos da copia (tamanhos == os dos handlers do
+; nes_render) e, enquanto o proximo comando nao cabe inteiro em nes_parse_len,
+; drena mais um chunk de 512 B da janela (ate' NES_MAILBOX_SIZE). Para no F0,
+; em opcode desconhecido (o parser aborta e conta o badop, como antes) ou com a
+; janela esgotada.  Entra .al/.xl; sai .al/.xl.
+; ============================================================
+nes_dev_complete_frame:
+        rep #$30 : .al : .xl
+        lda #$0000
+        sta @nes_ndc_pos
+ndc_loop:
+        rep #$30 : .al : .xl
+        lda @nes_ndc_pos
+        cmp nes_parse_len
+        bcc ndc_have1             ; pos < len: ha' o opcode
+ndc_more:
+        jsr nes_dev_extend
+        bcs ndc_done
+        bra ndc_loop
+ndc_have1:
+        .al : .xl
+        lda @nes_ndc_pos
+        tax
+        sep #$20 : .as
+        lda @nes_mailbox_buf,x    ; opcode
+        cmp #CMD_FRAME_DONE
+        bne ndc_not_f0
+        ; o F0 e' o ULTIMO comando: so' 2 bytes (nao pede o header de 4)
+        rep #$20 : .al
+        lda @nes_ndc_pos
+        clc
+        adc #$0002
+        cmp nes_parse_len
+        bcc ndc_done
+        beq ndc_done
+        bra ndc_more
+ndc_not_f0:
+        .as : .xl
+        rep #$20 : .al
+        lda @nes_ndc_pos
+        clc
+        adc #$0004                ; o header de qualquer outro comando cabe em 4 bytes
+        cmp nes_parse_len
+        bcc ndc_have4
+        beq ndc_have4
+        bra ndc_more
+ndc_have4:
+        lda @nes_ndc_pos
+        tax
+        sep #$20 : .as
+        lda @nes_mailbox_buf,x    ; opcode
+        cmp #CMD_FRAME_DONE
+        beq ndc_done
+        ldy #$0001
+        cmp #CMD_NOP
+        beq ndc_sz
+        ldy #$0006
+        cmp #CMD_FRAME_HDR
+        beq ndc_sz
+        ldy #$0008
+        cmp #CMD_REGS
+        beq ndc_sz
+        ldy #$0004
+        cmp #CMD_CHR_STATE
+        beq ndc_sz
+        ldy #$000a
+        cmp #CMD_CHR_STATE8
+        beq ndc_sz
+        ldy #$0021
+        cmp #CMD_PALETTE_FULL
+        beq ndc_sz
+        ldy #$0003
+        cmp #CMD_CHR_BANK
+        beq ndc_sz
+        ldy #$0101
+        cmp #CMD_OAM
+        beq ndc_sz
+        cmp #CMD_NT_RUN
+        beq ndc_run
+        cmp #CMD_CHR_RUN
+        beq ndc_run
+        cmp #CMD_PALETTE
+        beq ndc_pal
+        cmp #CMD_SPLITS
+        beq ndc_spl4
+        cmp #CMD_CHR_SPLITS
+        beq ndc_spl3
+        cmp #CMD_PPU_SPLITS
+        beq ndc_spl2
+        cmp #CMD_CHR_SPLITS8
+        beq ndc_spl9
+        bra ndc_done              ; opcode desconhecido: quem trata e' o parser
+        .as : .xl
+ndc_run:
+        lda @nes_mailbox_buf+3,x  ; len
+        rep #$20 : .al
+        and #$00ff
+        clc
+        adc #$0004                ; 4 + len
+        tay
+        bra ndc_sz16
+        .as : .xl
+ndc_pal:
+        lda @nes_mailbox_buf+1,x  ; count
+        rep #$20 : .al
+        and #$00ff
+        asl
+        clc
+        adc #$0002                ; 2 + 2*count
+        tay
+        bra ndc_sz16
+        .as : .xl
+ndc_spl4:
+        lda @nes_mailbox_buf+1,x
+        rep #$20 : .al
+        and #$000f
+        asl : asl
+        clc
+        adc #$0002                ; 2 + 4*cnt
+        tay
+        bra ndc_sz16
+        .as : .xl
+ndc_spl2:
+        lda @nes_mailbox_buf+1,x
+        rep #$20 : .al
+        and #$000f
+        asl
+        clc
+        adc #$0002                ; 2 + 2*cnt
+        tay
+        bra ndc_sz16
+        .as : .xl
+ndc_spl3:
+        lda @nes_mailbox_buf+1,x
+        rep #$20 : .al
+        and #$000f
+        sta @nes_ndc_tmp
+        asl
+        clc
+        adc @nes_ndc_tmp
+        clc
+        adc #$0002                ; 2 + 3*cnt
+        tay
+        bra ndc_sz16
+        .as : .xl
+ndc_spl9:
+        lda @nes_mailbox_buf+1,x
+        rep #$20 : .al
+        and #$000f
+        sta @nes_ndc_tmp
+        asl : asl : asl
+        clc
+        adc @nes_ndc_tmp
+        clc
+        adc #$0002                ; 2 + 9*cnt
+        tay
+        bra ndc_sz16
+        .as : .xl
+ndc_sz:
+        rep #$20 : .al
+        .al : .xl
+ndc_sz16:
+        tya
+        sta @nes_ndc_sz           ; Y = tamanho do comando
+ndc_fit:
+        lda @nes_ndc_pos
+        clc
+        adc @nes_ndc_sz
+        cmp nes_parse_len
+        bcc ndc_adv
+        beq ndc_adv
+        jsr nes_dev_extend        ; o comando nao cabe inteiro: mais um chunk
+        bcs ndc_done
+        bra ndc_fit
+ndc_adv:
+        sta @nes_ndc_pos          ; A = pos + tamanho
+        brl ndc_loop
+        .al : .xl
+ndc_done:
+        rts
+
+; ------------------------------------------------------------
+; nes_dev_extend -- drena mais um chunk (<= 512 B) da janela, logo depois do
+; que ja' esta' em nes_mailbox_buf, e soma a nes_parse_len.  Canal 1 (o do
+; MAIN, ver nes_dev_drain_mailbox); reprograma tudo em vez de confiar nos
+; enderecos que o DMA anterior deixou.  Entra/sai .al/.xl.  C=1: a janela
+; acabou (nes_parse_len == NES_MAILBOX_SIZE), nada foi copiado.
+; ------------------------------------------------------------
+nes_dev_extend:
+        .al : .xl
+        lda nes_parse_len
+        cmp #NES_MAILBOX_SIZE
+        bcs ndx_full
+        lda #NES_MAILBOX_SIZE
+        sec
+        sbc nes_parse_len         ; resto da janela
+        cmp #$0200
+        bcc ndx_sz
+        lda #$0200
+        .al : .xl
+ndx_sz:
+        sta @nes_ndc_tmp          ; chunk
+        lda nes_parse_len
+        clc
+        adc #!nes_mailbox_buf
+        sta $2181                 ; WMADD = nes_mailbox_buf + len (o banco $7F ja' esta' em $2183)
+        lda nes_parse_len
+        clc
+        adc #NES_MAILBOX_WINDOW
+        sta $4312                 ; A1T = janela + len
+        lda @nes_ndc_tmp
+        sta $4315
+        sep #$20 : .as
+        lda #$01
+        sta $2183                 ; banco $7F
+        lda #$00
+        sta $4310                 ; modo 0, A-bus incrementa
+        lda #$80
+        sta $4311                 ; B-bus = $2180
+        lda #$00
+        sta $4314                 ; A-bus banco 0
+        lda #$02
+        sta $420b                 ; dispara SO' o canal 1
+        rep #$20 : .al
+        lda nes_parse_len
+        clc
+        adc @nes_ndc_tmp
+        sta nes_parse_len
+        lda @nes_dbg_ext
+        inc
+        sta @nes_dbg_ext
+        clc
+        rts
+        .al : .xl
+ndx_full:
+        sec
         rts
 
 ; ============================================================

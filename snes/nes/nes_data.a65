@@ -700,6 +700,60 @@ nes_chrw_qcur     .byt 0   ; +$DB: nes_chr_cur_slot do frame cacheado
 nes_fb_cgdone     .byt 0   ; +$DC: 1 = o commit corrente COPIOU fb_cg
                            ; (fecha a corrida MAIN/NMI do pd_acc)
 
+; ============================================================
+; MMC5 (core variante NES_MMC5) -- estado do renderer para CMD_M5_STATE $17 +
+; CMD_M5_EVENTS $18. PINADO em $7F5000 (livre: entre o $7F4C00 e o ring do logger
+; em $7F6000). Todo array e' ESPACADO EM WORD (X = k*2), como o bloco das janelas.
+; Os ids de janela de 1KB tem 8 bits no degrau N1 (CHR <= 256KB), mas o que o
+; reconciliador compara e' a palavra EMPACOTADA bg | (obj << 8): ver nes_m5_objsh.
+; ============================================================
+*= $7F5000
+nes_m5_active   .byt 0     ; +$00: 1 = modo MMC5 (1o $17 visto). Sticky; GATE lido-antes-
+                           ; de-escrito: zerado no nes_boot_init (a WRAM nasce $55)
+nes_m5_spr16    .byt 0     ; +$01: sprites 8x16 (flags b1 do $17)
+nes_m5_last     .byt 0     ; +$02: conjunto escrito por ULTIMO (0 = A, 1 = B)
+nes_m5_mode     .byt 0     ; +$03: modo de CHR ($5101, 0..3)
+nes_m5_wmask    .word 0    ; +$04: mascara dos ids de 1KB = (chr_mask << 3) | 7
+nes_m5_nev      .byt 0     ; +$06: eventos do $18 (0..8)
+nes_m5_ovf      .byt 0     ; +$07: ovf do $18
+nes_m5_nband    .byt 0     ; +$08: faixas construidas (1..4)
+nes_m5_cb       .byt 0     ; +$09: faixa corrente (nband-1)
+nes_m5_lastsl   .byt 0     ; +$0A: scanline da ULTIMA mudanca de visao de BG
+nes_m5_esl      .byt 0     ; +$0B: evento em tratamento: scanline
+nes_m5_eidx     .byt 0     ; +$0C: ... idx
+nes_m5_eval     .byt 0     ; +$0D: ... valor
+nes_m5_pdur     .byt 0     ; +$0E: maior duracao de faixa vista (a PRIMARIA)
+nes_m5_pad      .byt 0     ; +$0F
+nes_m5_sel      .word 0    ; +$10: conjunto da consulta do nes_m5_id (0 = A, 1 = B)
+nes_m5_t        .word 0    ; +$12: scratch
+nes_m5_size     .word 0    ; +$14: bytes do $17 (+ $18) consumidos neste frame
+nes_m5_ei       .word 0    ; +$16: offset do evento corrente dentro do $18
+nes_m5_nevb     .word 0    ; +$18: 3 * nev
+nes_m5_bgsel    .word 0    ; +$1A: conjunto da visao de BG
+nes_m5_objsel   .word 0    ; +$1C: conjunto da visao de OBJ
+nes_m5_sptr     .word 0    ; +$1E: parse_ptr salvo (lo/hi)
+nes_m5_sbank    .byt 0     ; +$20: parse_ptr salvo (banco)
+nes_m5_pad2     .byt 0     ; +$21
+nes_m5_ra       .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0   ; +$22: A0..A7 (words)
+nes_m5_rb       .byt 0,0,0,0,0,0,0,0                    ; +$32: B0..B3 (words)
+nes_m5_bgv      .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0   ; +$3A: visao de BG (words)
+nes_m5_objv     .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0   ; +$4A: visao de OBJ
+nes_m5_curbg    .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0   ; +$5A: BG da faixa corrente
+nes_m5_curobj   .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0   ; +$6A: OBJ da faixa corrente
+nes_m5_pobj     .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0   ; +$7A: OBJ da faixa PRIMARIA
+nes_m5_objsh    .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0   ; +$8A: pobj << 8 (WORD por janela);
+                           ; ZERO fora do modo MMC5 -- e' o que o ncws_cp / ldcmp_band
+                           ; OR-am em toda composicao (neutro nos outros mappers)
+nes_m5_bandsl   .byt 0,0,0,0,0,0,0,0                    ; +$9A: inicio de cada faixa (words)
+nes_m5_bandbg   .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0   ; +$A2: BG das 4 faixas (4 x 8 words)
+                .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+                .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+                .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+nes_m5_syn      .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0   ; +$E2: $14 + $15 SINTETICOS (50 B)
+                .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+                .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+                .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+
 ; --- buffers de stage e shadow. Ficam acima do magic/breadcrumb do harness
 ;     ($7F7FE0-$7F7FEA) e do ring do logger ($7F6000+), na metade alta de $7F
 ;     que estava 100% livre. Capacidade por buffer: NES_CHRQ_TILES_MAX = 192
@@ -1352,3 +1406,94 @@ nes_dbg_stale        .word 0  ; v3.9: drains DESCARTADOS (a bridge publicou N+2 
                               ; que o drain de N copiava) -- canal $2BDF k=3
 nes_dev_want_seq     .word 0  ; v3.9: seq que o drain vai copiar (o mais ANTIGO intacto)
 nes_dbg_older        .word 0  ; v3.9: drains de seq-1 (renderer >= 2 atras) -- canal k=1
+; v3.10 -- COMPLETAR o drain do buffer ANTIGO (nes_dev_complete_frame).  Pinados
+; logo apos os de cima (livre ate' $7F8200).
+nes_dev_older        .word 0  ; != 0: o drain corrente e' do buffer seq-1, entao NES_LEN
+                              ; (o do frame MAIS NOVO) nao e' o tamanho dele
+nes_ndc_pos          .word 0  ; cursor do andador de comandos
+nes_ndc_sz           .word 0  ; tamanho do comando sob o cursor
+nes_ndc_tmp          .word 0  ; scratch (count do header / tamanho do chunk)
+nes_dbg_ext          .word 0  ; chunks EXTRAS drenados (frame antigo maior que o NES_LEN)
+
+; v3.11 -- copia do estagio do ch3 (nes_cspl_nba + nes_cspl_sl, 16 B contiguos)
+; enquanto o nes_psp_ntpage o usa para montar a tabela do ch5. PINADO em $7F4C10
+; (livre ate' o bloco MMC5 em $7F5000).
+*= $7F4C10
+nes_npg_save         .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+
+; v3.11 -- REGIAO TERCIARIA do reconciliador de janelas (ver NES_CHR_BG12NBA_T3
+; em nes_equates). Mesmo formato word-espacado de nes_chrw_r0/_pl0, mas so' as
+; entradas k = 4..7 sao usadas. PINADO em $7F4C20 (livre ate' $7F5000).
+*= $7F4C20
+nes_chrw_r2       .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 ; residencia reg 2
+nes_chrw_pl2      .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 ; planos reg 2 (so' BG)
+nes_chrw_pend2    .byt 0   ; bitmask de janelas pendentes na regiao 2
+nes_chrw_t3ok     .byt 0   ; 1 = o frame corrente PODE usar a regiao 2 (BG na
+                           ; metade alta, CHR-ROM, fora do MMC5, sem full)
+nes_chrw_t3bst    .word 0  ; faixa TERCIARIA escolhida ($ffff = nenhuma)
+nes_chrw_t3use    .word 0  ; breadcrumb: faixas exibidas pela regiao 2
+nes_chrw_t3arm    .word 0  ; breadcrumb: armacoes da regiao 2
+; v3.11 -- COLAPSO de codigo de nametable por faixa (nes_npg_collapse): o $11
+; do frame guarda onde esta' o payload dele, para o $16 saber o ntsel de cada
+; faixa.
+nes_npg_s11       .word 0  ; nes_parse_ptr do $11 deste frame
+nes_npg_s11n      .byt 0   ; cnt do $11 deste frame (0 = frame sem $11; zerado
+                           ; no init do decode)
+nes_npg_n         .byt 0   ; entradas copiadas
+nes_npg_ssl       .byt 0,0,0,0  ; scanline de cada entrada do $11
+nes_npg_snt       .byt 0,0,0,0  ; ntsel de cada entrada do $11
+nes_npg_i         .word 0  ; faixa do $16 sob exame
+nes_npg_code      .byt 0   ; codigo de 4 bits da faixa
+nes_npg_q         .byt 0   ; quadrante (ntsel) em vigor no inicio da faixa
+nes_npg_bsl       .byt 0   ; scanline da faixa
+nes_npg_t         .byt 0   ; scratch
+nes_npg_coll      .word 0  ; breadcrumb: faixas colapsadas para tela unica
+; v3.13 -- VITIMA DA REGRA 4 e SECUNDARIA SO' DE FUNDO (nes_chrw_victim,
+; nes_chrw_diffbg). Logo depois do bloco do colapso, ainda antes do $7F5000.
+nes_chrw_secok    .byt 0   ; 1 = o reconcile deste frame tem a faixa SECUNDARIA
+                           ; em @nes_chrw_bests (so' o $15 liga, so' em volta da
+                           ; reconciliacao da primaria; zerado no boot)
+nes_chrw_vco      .byt 0   ; janelas da secundaria que faltam na OUTRA regiao
+nes_chrw_vcc      .byt 0   ; ... e na CORRENTE
+nes_chrw_pcmp     .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 ; composicao primaria guardada
+nes_chrw_vict     .word 0  ; breadcrumb: transicoes que despejaram a CORRENTE
+nes_chrw_dball    .byt 0   ; modo do nes_chrw_diffbg (1 = os 8 ids contam)
+nes_chrw_armbg    .byt 0   ; 1 = o arm poe na fila so' o plano de fundo
+nes_bgh_vis       .byt 0   ; 1 = o BG foi exibido no ultimo apply (abertura da tela)
+nes_bgh_cnt       .byt 0   ; vblanks com o BG segurado na abertura (teto NES_BGH_MAX)
+nes_oam_hmask     .byt 0   ; janelas da regiao exibida descendo que sprite le (nho_hmask)
+nes_oam_hobj      .byt 0   ; janelas que o need marca com OBJ
+nes_chrw_fbnow    .byt 0   ; 1 = o resolve do ultimo $15 caiu em fallback
+nes_chrw_dn0      .byt 0   ; need0/need1 do MAIN para o nes_chrw_diff
+nes_chrw_dn1      .byt 0   ; (o diffbg os reduz ao plano de fundo)
+nes_bgh_dim       .byt 0   ; 1 = abertura retida em brilho 0 (o release volta em 0)
+nes_bgh_gl        .word 0   ; cursor da conversao global visto na abertura ($ffff = passada feita)
+nes_bgh_settle    .byt 0   ; quadros seguidos com a abertura pronta (NES_BGH_SETTLE)
+nes_oam_hold      .byt 0   ; 1 = a OAM do quadro anterior fica (nes_chrw_early_obj)
+nes_oam_holdn     .byt 0   ; quadros seguidos com a OAM retida
+nes_chrw_eobjn    .byt 0   ; janelas descidas pelo nes_chrw_early_obj neste vblank
+nes_dec_gen       .byt 0   ; geracao do decode (+1 por frame; nes_chrw_genok)
+nes_chrw_agtmp    .byt 0   ; rascunho do ncwg_idx
+nes_chrw_agw      .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 ; geracao que armou cada janela (regiao*8+k)
+; ------------------------------------------------------------
+; v3.13 -- SEGUNDO BUFFER das tabelas vivas de HDMA (ch2/ch3/ch4/ch5). PINADO em
+; $7F4F00 (livre ate' o $7F5000 do MMC5) para os harnesses acharem o buffer que o
+; A1T aponta: o seletor de cada canal diz qual dos dois foi escrito por ultimo
+; (0 = o vivo antigo: nes_hdma_live / nes_chdma_live / nes_ndma_live /
+; nes_vg_tab; 1 = o daqui). O canal 4 guarda o deslocamento em nes_vg_woff.
+; ------------------------------------------------------------
+*= $7F4F00
+nes_hlive_sel     .byt 0   ; ch2: 1 = nes_hdma_liveb tem a tabela do ultimo apply
+nes_clive_sel     .byt 0   ; ch3: idem nes_chdma_liveb
+nes_nlive_sel     .byt 0   ; ch5: idem nes_ndma_liveb
+nes_vg_sel        .byt 0   ; ch4: buffer da PROXIMA escrita (0 = nes_vg_tab)
+nes_vg_woff       .word 0  ; ch4: deslocamento do buffer escrito por ultimo (nvg_pick)
+*= $7F4F10
+nes_hdma_liveb    .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+*= $7F4F30
+nes_chdma_liveb   .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+*= $7F4F40
+nes_ndma_liveb    .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+*= $7F4F50
+nes_vg_tabb       .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+                  .byt 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0

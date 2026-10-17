@@ -300,6 +300,21 @@ nes_boot_init:
         sta @nes_chrw_ev          ; fast-skip do $15: os tres sao
         sta @nes_chrw_qok         ; GATES lidos antes de escritos
         sta @nes_chrw_qskip       ; (clear_wram enche de $55)
+        sta @nes_chrw_secok       ; v3.13: gate lido pelo nes_chrw_victim
+        sta @nes_chrw_armbg       ; v3.13: lido pelo nes_chrw_arm
+        sta @nes_bgh_vis          ; v3.13: abertura da tela (lidos antes
+        sta @nes_bgh_cnt          ; de escritos)
+        sta @nes_bgh_dim
+        sta @nes_bgh_settle
+        sta @nes_oam_hold
+        sta @nes_oam_holdn
+        sta @nes_hlive_sel        ; v3.13: buffers vivos de HDMA (bit 0)
+        sta @nes_clive_sel
+        sta @nes_nlive_sel
+        sta @nes_vg_sel
+        sta @nes_chrw_fbnow       ; v3.13: idem
+        sta @nes_chrw_dn0         ; v3.13: need do MAIN para o diff
+        sta @nes_chrw_dn1
         sta @nes_fb_cgdone
         sta @nes_dbg_cgcnt        ; instrumento (contador por USB, nasce 0)
         sta @nes_dbg_ntbank       ; SONDAS: gates lidos-antes-de-escritos
@@ -349,6 +364,8 @@ nes_boot_init:
         sta @nes_chr_dma_hxor
         sta @nes_chrw_pend0
         sta @nes_chrw_pend1
+        sta @nes_chrw_pend2          ; v3.11: regiao terciaria
+        sta @nes_chrw_t3ok
         sta @nes_chrw_need0
         sta @nes_chrw_need1
         sta @nes_chrw_jreg
@@ -357,6 +374,7 @@ nes_boot_init:
         sta @nes_chrw_dmask
         sta @nes_chrw_dcnt
         sta @nes_chrw_starve         ; anti-fome do pick (gate 2.4)
+        sta @nes_m5_active           ; MMC5: GATE lido-antes-de-escrito (a WRAM nasce $55)
         lda #$ff
         sta @nes_chrw_jk             ; nenhum job em voo
         rep #$20 : .al
@@ -370,6 +388,8 @@ nes_boot_init:
         sta @nes_chrw_skips
         sta @nes_chrw_loads
         sta @nes_chrw_1pl
+        sta @nes_chrw_t3use
+        sta @nes_chrw_t3arm
         rep #$10 : .xl
         ldx #$0000
 nbz_win_loop:
@@ -380,10 +400,13 @@ nbz_win_loop:
         sta @nes_chrw_pl0,x          ; ... com os 2 planos ja' na VRAM
         lda #NES_CHR_BANK_EMPTY
         sta @nes_chrw_r1,x           ; regiao 1 vazia
+        sta @nes_chrw_r2,x           ; v3.11: regiao 2 vazia
         lda #$0000
         sta @nes_chrw_pl1,x
+        sta @nes_chrw_pl2,x
         sta @nes_chrw_want,x
         sta @nes_chrw_cmp,x
+        sta @nes_m5_objsh,x          ; MMC5: OR neutro (0) fora do modo MMC5
         inx
         inx
         cpx #$0010

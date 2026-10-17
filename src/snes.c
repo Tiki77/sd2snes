@@ -55,6 +55,7 @@
 #include "savestate.h"
 #include "manual.h"
 #include "sufami.h"
+#include "nesave.h"
 #include "wdiag.h"
 
 uint32_t saveram_crc, saveram_crc_old;
@@ -151,6 +152,8 @@ void prepare_reset() {
   /* Sufami Turbo Slot B: the companion minicart's own battery, flushed here beside the
      pack above because the SNES is already halted.  Only when it actually changed. */
   sufami_slotb_flush_inreset();
+  /* NES battery PRG-RAM, same reason: the core is held with the SNES, read it raw */
+  nesave_flush_inreset(file_lfn);
   /* the savestate slot picked in the game; LAST, since ss_base rereads file_lfn */
   savestate_slot_persist();
   // don't save SGB RTC since we are in reset and it may be undefined
@@ -348,6 +351,9 @@ uint8_t snes_main_loop() {
   /* the game's session module, if it has one: the SPC7110 RTC-4513 backup (rtc7110.bin),
      which writes the card only on a change */
   module_idle();
+
+  /* NES battery PRG-RAM (the core's own PSRAM window; no-op without a battery .nes) */
+  nesave_tick(file_lfn);
 
   if(romprops.sramsize_bytes && CFG.enable_autosave) {
     uint32_t crc_bytes = min(romprops.sramsize_bytes - saveram_offset, SRAM_REGION_SIZE);
