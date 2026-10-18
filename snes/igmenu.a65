@@ -485,23 +485,27 @@ igm_no_slotpos:
 	; --- seed pprev with the held opening combo so it makes no fresh edge.  Samples the
 	;     LIVE pad, so it is agnostic to which combo is armed (IngameButtonsMenu).
 	;     BOTH controllers, merged exactly like read_pad (snes/pad.a65) does for the rest of
-	;     the menu: the low nibble of $4218/$421a is the controller ID and reads 0 only for a
-	;     standard pad, so a non-zero nibble means a non-standard controller whose buttons
-	;     must be ignored -- and what the mask leaves behind carries no button bits, so ORing
-	;     it in contributes nothing instead of injecting phantom presses.  The seed and the
+	;     the menu: the low nibble of $4218/$421a is the controller ID, 0 for a standard pad
+	;     and 4 for the NTT Data keypad (the same 12 buttons, PAD_ID_NOTPAD); any other
+	;     controller's bits are not buttons and count as nothing, so ORing it in injects no
+	;     phantom presses.  The seed and the
 	;     input loop below MUST sample the same pair, or player 2 holding a button at open
 	;     time would produce a phantom edge on the first frame. ---
 	lda @$004218
-	and #$000f
-	bne igm_seed_pad1_id
-	lda @$004218
+	bit #PAD_ID_NOTPAD                       ; standard pad or NTT Data keypad?
+	beq igm_seed_pad1_id
+	lda #$0000                               ; another controller: no buttons
 igm_seed_pad1_id:
+	.al
+	and #$fff0                               ; the 12 buttons, without the ID nibble
 	sta @ovl_pprev
 	lda @$00421a
-	and #$000f
-	bne igm_seed_pad2_id
-	lda @$00421a
+	bit #PAD_ID_NOTPAD
+	beq igm_seed_pad2_id
+	lda #$0000
 igm_seed_pad2_id:
+	.al
+	and #$fff0
 	ora @ovl_pprev
 	sta @ovl_pprev
 	; --- arm the theme's HDMA channels. LAST thing before the unblank, not inside
@@ -555,16 +559,20 @@ igmenu_loop:
 	- lda @$004212 : and #$01 : bne -       ; auto-joypad read DONE (bit0 clear)
 	rep #$20 : .al
 	lda @$004218                            ; fresh pad, controller 1...
-	and #$000f
-	bne igm_pad1_id
-	lda @$004218
+	bit #PAD_ID_NOTPAD
+	beq igm_pad1_id
+	lda #$0000
 igm_pad1_id:
+	.al
+	and #$fff0
 	sta @ovl_cur
 	lda @$00421a                            ; ...merged with controller 2 (see the seed above)
-	and #$000f
-	bne igm_pad2_id
-	lda @$00421a
+	bit #PAD_ID_NOTPAD
+	beq igm_pad2_id
+	lda #$0000
 igm_pad2_id:
+	.al
+	and #$fff0
 	ora @ovl_cur
 	sta @ovl_cur
 	eor @ovl_pprev

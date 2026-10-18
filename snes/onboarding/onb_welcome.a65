@@ -301,15 +301,21 @@ wel_cmd:
 wel_pads:
   .al
   lda $4218
-  and #$000f
-  bne +
-  lda $4218
-+ sta @onb_tmp
+  bit #$000b            ; standard pad (ID 0) or NTT Data keypad (ID 4)
+  beq wel_pads_p1
+  lda #$0000
+wel_pads_p1:
+  .al
+  and #$fff0
+  sta @onb_tmp
   lda $421a
-  and #$000f
-  bne +
-  lda $421a
-+ ora @onb_tmp
+  bit #$000b
+  beq wel_pads_p2
+  lda #$0000
+wel_pads_p2:
+  .al
+  and #$fff0
+  ora @onb_tmp
   rts
 
 ; wel_waitblank: the next VBlank's start. .as, DB = 0.

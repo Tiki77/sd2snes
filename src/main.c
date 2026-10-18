@@ -322,6 +322,9 @@ int main(void) {
        autoboot is about to start a game (the file is read only on that first load). */
     snescmd_writebyte((firstboot && CFG.boot_intro && !cfg_is_autoboot_enabled())
                       ? BOOT_INTRO_MAGIC : 0, SNESCMD_BOOT_INTRO);
+    /* The menu publishes port 1's controller ID here every frame; an older menu never
+       writes it, so it must not outlive the menu that wrote it. */
+    sram_writebyte(0, SRAM_PAD1_ID_ADDR);
     if(!menu_handoff) snes_reset(1);
     fpga_reset_srtc_state();
     if(!firstboot) {

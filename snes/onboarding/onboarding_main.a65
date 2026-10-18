@@ -2439,18 +2439,25 @@ onb_read_pad:
   rep #$20 : .al
   ldx onb_pad_mem      ; previous frame's held buttons
   ; Both controllers, merged like the menu's read_pad (snes/pad.a65): the low nibble of
-  ; $4218/$421a is the controller ID and is 0 only for a standard pad; a non-zero one keeps
-  ; just that nibble, which carries no button bits, so a mouse adds no phantom presses.
+  ; $4218/$421a is the controller ID, 0 for a standard pad and 4 for the NTT Data keypad
+  ; (the same 12 buttons; mask $000b = PAD_ID_NOTPAD of the menu). Any other controller
+  ; counts as nothing, so a mouse adds no phantom presses.
   lda $4218             ; controller 1 (byetUDLRaxlriiii layout in high byte)
-  and #$000f
-  bne +
-  lda $4218
-+ sta @onb_pad_mem
+  bit #$000b
+  beq onb_rp_p1
+  lda #$0000
+onb_rp_p1:
+  .al
+  and #$fff0            ; the 12 buttons, without the ID nibble
+  sta @onb_pad_mem
   lda $421a             ; controller 2
-  and #$000f
-  bne +
-  lda $421a
-+ ora @onb_pad_mem
+  bit #$000b
+  beq onb_rp_p2
+  lda #$0000
+onb_rp_p2:
+  .al
+  and #$fff0
+  ora @onb_pad_mem
   sta @onb_pad_mem
   ; auto-repeat for the directionals (UDLR = bits $0f00 of $4218 high byte)
   and #$0f00

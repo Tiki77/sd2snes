@@ -43,6 +43,11 @@
 ;  silent otherwise and the firmware jsl's into the wrong bank (the firmware does
 ;  compare the two and refuses to patch, so the failure is a dead feature, not a hang).
 ;
+;  THE NTT DATA KEYPAD.  Its first 16 bits are a standard pad's with ID nibble 4 instead
+;  of 0, so the raw word never matches a gesture. hx_pad drops the nibble on both ports,
+;  and the firmware also patches the stub when the menu saw a keypad in port 1 (PAD1_ID)
+;  with controller 2 off; then only the port-1 part below runs.
+;
 ;  CONTEXT.  A is 16-bit on entry (the stub's rep #$20) and carries the raw $4218.
 ;  X and Y belong to the GAME and are of unknown width: do not touch them, and use
 ;  no indexed addressing. DB/DP are the game's too, so every access is long (@) or
@@ -51,7 +56,17 @@
 ; ======================================================================
 hx_pad:
 	.al
-	sta @NMI_PAD                 ; default: controller 1, byte-for-byte the old store
+	bit #PAD_ID_NOTPAD           ; controller 1 is a standard pad or an NTT Data keypad?
+	bne hx_p1_raw
+	and #$fff0                   ; drop the ID nibble: 0 for a pad, 4 for the keypad,
+hx_p1_raw:                       ;   whose word could never match a gesture otherwise
+	.al
+	sta @NMI_PAD                 ; default: controller 1
+; The firmware also patches the stub for an NTT Data keypad in port 1 with controller 2
+; OFF (PAD1_ID, snes/mouse.a65): then port 2 must stay out of the hooks, as before.
+	lda @CFG_ENABLE_INGAME_PAD2  ; 0/1 (16-bit load: the high byte is the next field)
+	lsr
+	bcc hx_port1
 ; --- take a sample of port 2 that is not mid-fill --------------------------
 ; MEASURED IN HARDWARE: reading $421A right here loses the value in ~3 frames out
 ; of 4. The stub's own `lda $4218` sits in the narrow window before the auto-joypad
@@ -92,8 +107,10 @@ hx_have:
 ; register, so no branch can pick up a half-shifted word.
 	lda @HX_PAD2
 	beq hx_port1                 ; nothing held on port 2 (also: nothing plugged in)
-	and #$000F
-	bne hx_port1                 ; not a standard pad on port 2 -> its bits are not buttons
+	bit #PAD_ID_NOTPAD
+	bne hx_port1                 ; not a standard pad / NTT keypad on port 2 -> not buttons
+	and #$fff0
+	beq hx_port1                 ; an idle NTT keypad (only its ID nibble)
 	lda @NMI_PAD
 	and #$000F
 	bne hx_port2                 ; port 1 is not a standard pad (mouse) -> port 2 owns it
@@ -108,6 +125,7 @@ hx_have:
 	bne hx_port1
 hx_port2:
 	lda @HX_PAD2
+	and #$fff0                   ; same word without the ID nibble (keypad: 4)
 	sta @NMI_PAD
 	lda #$0001
 	sta @HX_PAD_SRC              ; tell ss_input to use this word, not the live $4218

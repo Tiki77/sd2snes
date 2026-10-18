@@ -204,21 +204,24 @@ mhg_loop:
 	; Merge BOTH controllers, the same way read_pad (snes/pad.a65) does it for the rest of
 	; the menu -- the guide picker right before this loop already answers to controller 2,
 	; and the viewer must not be the one place where it stops working.  The low nibble of
-	; $4218/$421a is the controller ID and reads 0 only for a standard pad: a non-zero nibble
-	; means a non-standard controller, and what the mask leaves behind carries no button bits,
-	; so ORing it in contributes nothing instead of injecting phantom presses.
+	; $4218/$421a is the controller ID: 0 for a standard pad, 4 for the NTT Data keypad (the
+	; same 12 buttons, PAD_ID_NOTPAD).  Any other controller counts as nothing, so ORing it
+	; in injects no phantom presses.
 	lda @$004218
-	and #$000f
-	bne mhg_pad1_id
-	lda @$004218
+	bit #PAD_ID_NOTPAD                         ; standard pad or NTT Data keypad?
+	beq mhg_pad1_id
+	lda #$0000                                 ; another controller: no buttons
 mhg_pad1_id:
+	.al
 	sta @man_pad_cur
 	lda @$00421a
-	and #$000f
-	bne mhg_pad2_id
-	lda @$00421a
+	bit #PAD_ID_NOTPAD
+	beq mhg_pad2_id
+	lda #$0000
 mhg_pad2_id:
+	.al
 	ora @man_pad_cur
+	and #$fff0                                 ; the 12 buttons, without the ID nibble
 	sta @man_pad_cur
 	eor @man_pad_prev
 	and @man_pad_cur                           ; (cur ^ prev) & cur = newly pressed

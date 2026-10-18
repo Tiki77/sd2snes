@@ -920,7 +920,10 @@ static void snescmd_patch_pad2(uint8_t *bram) {
   uint8_t far[3];
   uint8_t *st = bram + HOOK_PADSTORE_OFF;
 
-  if(!CFG.enable_ingame_pad2) return;
+  /* An NTT Data keypad in port 1 (seen by the menu) needs hx_pad too: its ID nibble is
+     4, so its raw word never matches a gesture. hx_pad reads CFG itself and leaves port 2
+     alone when EnableIngamePad2 is off. */
+  if(!CFG.enable_ingame_pad2 && sram_readbyte(SRAM_PAD1_ID_ADDR) != PAD_ID_NTT) return;
   if(st[0] != ASM_STA_ABSLONG
      || st[1] != (SNESCMD_NMI_PAD & 0xff)
      || st[2] != (SNESCMD_NMI_PAD >> 8)

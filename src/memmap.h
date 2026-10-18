@@ -153,6 +153,8 @@
 #define SRAM_SRM_SLOT_STATUS_ADDR    (0xFF0717L) /* 1 byte: bitmask of existing battery-SRAM slot files. When EnableSramSlots is ON, bit i = slot i (i=0..3: <stem>.srm, <stem>.02/03/04.srm) exists on SD; when OFF, bit0 = the legacy <stem>.srm exists (bits1-3 clear). Staged by saveinfo_stage() at game load and refreshed after autosave; read by the in-game SAVES tab (igmenu.bin). Free $FF0701..$FF07FF gap, after SS_SLOT_STATUS. Lockstep with SRM_SLOT_STATUS in snes/memmap.i65. */
 #define SRAM_HX_PAD_SRC_ADDR         (0xFF07E2L) /* 2 bytes (high byte always 0). Which controller port the nmihook stub published in NMI_PAD this frame: 0 = port 1 or the feature is off, 1 = port 2. Written by hx_pad (snes/hookxlate.a65) on every hook entry when EnableIngamePad2 patched the stub, read by ss_input so the savestate matcher looks at the same port. The MCU only ZEROES it, at every game load (cheat.c), because this region survives resets and a stale 1 would aim the matcher at the wrong pad. Lockstep with HX_PAD_SRC in snes/memmap.i65. */
 #define SRAM_HX_PAD2_ADDR            (0xFF07E4L) /* 2 bytes: the last $421A sample hx_pad took outside the auto-joypad fill window (see HX_PAD2 in snes/memmap.i65 for why a live read is not usable inside the stub). The MCU only zeroes it, at every game load, together with SRAM_HX_PAD_SRC_ADDR. */
+#define SRAM_PAD1_ID_ADDR            (0xFF07FEL) /* 1 byte the MENU writes every frame: the ID nibble of controller port 1; PAD_ID_NTT = an NTT Data keypad (NDK10). Read at game load by snescmd_prepare_nmihook: the stub's pad store then goes through hx_pad, which drops the keypad's ID nibble so the hook gestures match. Zeroed here at every menu load, since an older menu never writes it and this region survives resets. Lockstep with PAD1_ID in snes/memmap.i65. */
+#define PAD_ID_NTT                   (0x04) /* the NTT Data keypad's controller ID nibble (serial bits 13-16 = 0100). Lockstep with snes/memmap.i65. */
 #define SRAM_EXP_ASK_ADDR            (0xFF07E6L) /* 1 byte: EXP_ASK_MAGIC while the firmware waits, inside the
                                                     game-load prerequisite check, for the user to confirm an
                                                     experimental console core (NES, Master System, Atari 2600,
@@ -408,6 +410,8 @@ _Static_assert(SS_SHADOW_PEND_ADDR + 2 <= SRAM_HX_PAD_SRC_ADDR,
 _Static_assert(SRAM_HX_PAD2_ADDR + 2 <= SRAM_EXP_ASK_ADDR && SRAM_EXP_ANSWER_ADDR + 1 <= SRAM_ONB_START_ADDR
                && SRAM_ONB_START_ADDR + 2 <= 0xFF0800L,
                "EXP_ASK/EXP_ANSWER/ONB_START must stay after HX_PAD2, inside the free $FF0701..$FF07FF gap");
+_Static_assert(SRAM_ONB_START_ADDR + 2 <= SRAM_PAD1_ID_ADDR && SRAM_PAD1_ID_ADDR + 1 <= 0xFF0800L,
+               "PAD1_ID (1 B) must stay after ONB_START, inside the free $FF0701..$FF07FF gap");
 _Static_assert(SRAM_HX_PAD_SRC_ADDR + 2 <= SRAM_HX_PAD2_ADDR && SRAM_HX_PAD2_ADDR + 2 <= 0xFF0800L,
                "HX_PAD_SRC and HX_PAD2 (2 B each, written as words by the hook stub) must stay inside the free $FF0701..$FF07FF gap");
 /* The one-byte flags packed at $FF0710..$FF071F. The port-2 words above once sat on top of

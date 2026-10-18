@@ -29,6 +29,13 @@
 ;  (mouse_tok): the click that closed a menu must not reach the browser. The modes
 ;  (browser, lists, game info, other) are described at mouse_post.
 ;
+;  THE NTT DATA KEYPAD (NDK10) is a standard pad plus a number pad. Its first 16 bits are
+;  the pad's, except the signature: bits 13-16 = 0100, so the low nibble of $4218 reads 4,
+;  not 0. The filter takes it as a pad (PAD_ID_NOTPAD) and drops the nibble; the keypad's
+;  own keys come in bits 17-32 and are not read. Port 1's nibble also goes to PAD1_ID:
+;  a keypad there makes the firmware send the hook's pad word through hx_pad
+;  (hookxlate.a65), the only way the in-game gestures can see it without the signature.
+;
 ;  ONE MOUSE.  Port 1 wins; a second mouse in port 2 is ignored (its ID nibble goes out
 ;  as read_pad always did).
 ; ======================================================================
@@ -71,11 +78,15 @@ mouse_pad1:
   sep #$20 : .as
   lda #$00
   sta @mouse_seen
+  lda $01, s                     ; the word's low byte: the ID nibble
+  and #$0f
+  sta @PAD1_ID                   ; PAD_ID_NTT makes the firmware unmask the hook gestures
   rep #$20 : .al
   pla
-  bit #$000f
+  bit #PAD_ID_NOTPAD
   bne mp1_ns
-  rtl                            ; a standard pad: its word as is
+  and #$fff0                     ; a standard pad or the NTT Data keypad: its 12 buttons
+  rtl
 mp1_ns:
   .al : .xl
   and #$000f
@@ -98,8 +109,12 @@ mouse_pad2:
   .al : .xl
   phx
   phy
-  bit #$000f
-  beq mp2_word                   ; a standard pad
+  bit #PAD_ID_NOTPAD
+  bne mp2_ns
+  and #$fff0                     ; a standard pad or the NTT Data keypad
+  bra mp2_word
+mp2_ns:
+  .al : .xl
   and #$000f
   cmp #$0001
   bne mp2_word                   ; another device: its ID nibble
