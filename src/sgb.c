@@ -386,7 +386,7 @@ uint8_t sgb_bios_state(void) {
   }
   else if (state <= SGB_BIOS_MISMATCH
        && (  (crc != 0xcb176e45) // sgb2 bios (JP)
-          && (crc != 0x2e353dbb) // sgb bios v1.0 (JU)
+          && (crc != 0x2e35edbb) // sgb bios v1.0 (JU)
           && (crc != 0x27a03c98) // sgb bios v1.1 (JU)
           && (crc != 0x8a4a174f) // sgb bios v1.2 (UE)
           )

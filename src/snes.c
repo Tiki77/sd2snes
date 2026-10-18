@@ -930,6 +930,8 @@ uint16_t snescmd_readstrn(void *buf, uint16_t addr, uint16_t size) {
    The menu publishes hx_pad's far address in its header; the capability BIT is what
    says so, since an older menu has RESET's own opcodes at that address and they read
    back as a plausible bank-$C1 pointer. */
+extern sgb_romprops_t sgb_romprops;
+
 static void snescmd_patch_pad2(uint8_t *bram) {
   uint8_t caps[4];
   uint8_t far[3];
@@ -939,6 +941,10 @@ static void snescmd_patch_pad2(uint8_t *bram) {
      4, so its raw word never matches a gesture. hx_pad reads CFG itself and leaves port 2
      alone when EnableIngamePad2 is off. */
   if(!CFG.enable_ingame_pad2 && sram_readbyte(SRAM_PAD1_ID_ADDR) != PAD_ID_NTT) return;
+  /* hx_pad sits in the menu's bank $C1, which only the SNES cores map to the menu: on
+     the SGB core $C1 is the SGB BIOS, so the jsl would run BIOS bytes inside the NMI.
+     (The console players never run this stub.) */
+  if(sgb_romprops.has_sgb) return;
   if(st[0] != ASM_STA_ABSLONG
      || st[1] != (SNESCMD_NMI_PAD & 0xff)
      || st[2] != (SNESCMD_NMI_PAD >> 8)

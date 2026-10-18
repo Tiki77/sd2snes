@@ -767,7 +767,10 @@ static void load_set_features(const load_ctx_t *c) {
   uint8_t *filename = c->filename;
   uint8_t  is_menu  = c->is_menu;
   printf("r213fen=%d is_u16=%d filename=%s\n", cfg_is_r213f_override_enabled(), STS.is_u16, filename);
-  if(cfg_is_r213f_override_enabled() && !is_menu && !STS.is_u16) {
+  /* Not on a Game Boy: the SGB BIOS reads $213F only to reset the latch, and the GBC
+     player reads bit 4 to tell a PAL console apart -- forcing it there would arm its
+     NTSC line IRQ on a PAL console. */
+  if(cfg_is_r213f_override_enabled() && !is_menu && !STS.is_u16 && !sgb_romprops.has_sgb) {
     romprops.fpga_features |= FEAT_213F; /* e.g. for general consoles */
   }
   fpga_set_213f(romprops.region);
