@@ -423,6 +423,7 @@ TRANSLATIONS = {
     'text_spc_prompt': 'A: След. трек   B: Закрыть',
     'text_spc_prompt2': 'L/R: Пред./след. трек',
     'text_media_mouse2': 'Y: Пред. трек   Z: След. трек',
+    'text_media_repeat': 'X: Повтор',
     'text_pcm_promptb': 'B: Закрыть',
     'text_pcm_paused': 'Пауза',
     'text_pcm_erropen': 'Не удалось прочитать файл.',

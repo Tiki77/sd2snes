@@ -434,6 +434,7 @@ TRANSLATIONS = {
     'text_spc_prompt': 'A: Pista siguiente   B: Cerrar',
     'text_spc_prompt2': 'L/R: Pista ant./sig.',
     'text_media_mouse2': 'Y: Pista anterior   Z: Pista siguiente',
+    'text_media_repeat': 'X: Repetir',
     'text_pcm_promptb': 'B: Cerrar',
     'text_pcm_paused': 'En pausa',
     'text_pcm_erropen': 'No se pudo leer el archivo.',

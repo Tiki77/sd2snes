@@ -40,6 +40,20 @@ static unsigned nsf_gen(void *ctx, int16_t *pcm, unsigned frames)
   m->cyc += DWT_CYC - t0;
   m->frames += frames;
 #endif
+  /* The end of the song (nsfmod.h): every 4th frame is plenty to tell sound from silence,
+     and costs a quarter of the time on a CPU that renders with little to spare.  L = R. */
+  uint32_t q = m->quiet;
+  for(unsigned i = 0; i < frames; i += 4) {
+    int16_t s = pcm[2 * i];
+    if(s > NSFPLAY_QUIET_LEVEL || s < -NSFPLAY_QUIET_LEVEL) {
+      q = 0;
+      m->end_at = 0;                          /* sound again: that was a pause, not the end */
+    } else if((q += 4) == (uint32_t)44100 / 4 * 4 * NSFPLAY_QUIET_SEC) {
+      m->end_at = m->gen + (i + 4) * 4;
+    }
+  }
+  m->quiet = q;
+  m->gen += frames * 4;
   return frames;
 }
 
@@ -114,6 +128,8 @@ static void nsf_play(nsfmod_t *m, uint8_t song)
 {
   if(!song || song > m->n.info.songs) song = 1;
   m->song = song;
+  m->gen = m->quiet = m->end_at = 0;
+  m->flags &= ~NSFPLAY_FLAG_END;
   nsf_start(&m->n, song);
   m->api->music_play_gen(nsf_gen, m, SRAM_NSF_BK_ADDR - SRAM_ROM_ADDR);
   m->api->music_lock(1);              /* the FMV stop paths leave the DAC to us */
@@ -178,7 +194,19 @@ void nsfmod_idle(void *st)
     nsf_publish(m, 1);
     return;
   }
-  nsf_publish(m, 0);
+  /* The song is over (see NSFPLAY_QUIET_SEC) once the DAC played up to there.  Checked on
+     every pass, so Repeat turned on at the file's end still starts the last song again. */
+  int force = 0;
+  if(m->state == NSFPLAY_STATE_PLAYING && m->end_at && m->api->music_played() >= m->end_at) {
+    uint8_t repeat = 0;
+    unsigned song = m->song;
+    m->api->sram_read(&repeat, SRAM_CFG_PLAYER_REPEAT_ADDR, 1);
+    if(!repeat) song++;
+    force = !(m->flags & NSFPLAY_FLAG_END);
+    if(song <= m->n.info.songs) { nsf_play(m, song); force = 1; }
+    else m->flags |= NSFPLAY_FLAG_END;
+  }
+  nsf_publish(m, force);
 }
 
 void nsfmod_stop(void *st)

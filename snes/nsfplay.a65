@@ -11,8 +11,11 @@
 ;
 ; Layout: 0 title, 1 artist, 2 copyright (all three from the NSF header, through
 ; NSFPLAY_BLK), 3 "Song n/m  m:ss  Paused" (or an error), 4 blank or the expansion-chip
-; note, 5-6 keys.  A: pause, Left/Right: previous/next song (wrapping), L/R: the folder's
-; previous/next .nsf, B: close.  An NSF has no length: a song plays until changed.
+; note, 5-6 keys, 7 Repeat.  A: pause, Left/Right: previous/next song (wrapping), L/R: the
+; folder's previous/next .nsf, X: Repeat, B: close.  An NSF has no length: a song is over
+; when it falls silent (the module decides, nsfmod.h); then the next song plays, after the
+; file's last one the folder's next .nsf (nsf_check_end), or with Repeat the same song again.
+; A song that loops on its own plays until changed.
 ;
 ; THE PLAYER ONLY LIVES WHILE THIS SCREEN DOES.  The firmware lends the emulator the
 ; directory-sort cache, and any command other than CMD_MOD_OPEN / CMD_MOD_CTL unloads it
@@ -42,6 +45,7 @@ nsf_screen:
   sep #$20 : .as
   stz media_dark              ; (WRAM is $55 at boot: a gate has to be cleared before use)
   stz media_keys
+  jsr media_rep_begin
   jsl @ui_call_coversync      ; the cover-request hazard pcmplay.a65 describes
   jsr pcm_init_cur            ; pcm_cur = the browser's selection
   jsr pcm_prepare_audio       ; DSP out of reset, the menu music stopped (may warm-reset)
@@ -85,6 +89,7 @@ nsf_loop:
   beq nsf_loop
   stz isr_done
   jsr nsf_draw                ; self-gating: recomposes only when something changed
+  jsr nsf_check_end           ; the file's last song played out -> the folder's next .nsf
   jsl @mouse_playermode
   jsl @ui_call_pad
   lda media_keys
@@ -97,6 +102,12 @@ nsf_k_legend:
   bne nsf_scr_out
   lda pcm_nosup
   bne nsf_loop                ; no handler in this firmware: only B does anything
+  lda pad_x
+  beq nsf_k_notx
+  jsr media_rep_toggle        ; Repeat (pcmplay.a65): the module reads the byte itself
+  bra nsf_loop
+nsf_k_notx:
+  .as : .xl
   lda pad_a
   beq nsf_k_nota
   jsr nsf_toggle
@@ -144,6 +155,7 @@ nsf_scr_out:
   lda #$ff
   sta mouse_pbrow
   jsr pcm_restore_audio
+  jsr media_rep_save
   rep #$20 : .al
   lda pcm_cur
   jsr media_place_cursor      ; the browser comes back on the file that was playing
@@ -222,6 +234,7 @@ nsf_st_ok:
   .as : .xl
   stz pcm_paused
   stz pcm_nosup
+  stz pcm_last
   rts
 nsf_st_nosup:
   .as : .xl
@@ -354,6 +367,49 @@ nsf_fs_none:
   sep #$20 : .as
   rts
 
+; nsf_check_end: once per frame.  With Repeat off the module walks the songs of the file on
+; its own (a song is over when it falls silent, nsfmod.h) and flags the last one's end
+; (NSF_FLAG_END): then the folder's next .nsf starts, like the .pcm / .spc players' folder
+; walk, and after the last one the screen says "End" (pcm_last).  The flag going away again
+; (Repeat turned on there: the module starts that song over) takes the "End" off.
+nsf_check_end:
+  .as : .xl
+  jsr nsf_magic_ok
+  bcs nce_out
+  lda @NSFPLAY_BLK+NSF_FLAGS
+  and #NSF_FLAG_END
+  bne nce_end
+  lda pcm_last
+  beq nce_out
+  stz pcm_last
+  jmp nsf_redraw
+nce_end:
+  .as : .xl
+  lda pcm_last
+  bne nce_out                 ; already on "End"
+  lda @NSFPLAY_BLK+NSF_STATE
+  cmp #NSF_ST_PLAYING
+  bne nce_out
+  rep #$20 : .al
+  lda pcm_cur
+  ldx #TYPE_NSF
+  ldy #$0000                  ; forward
+  jsr media_find
+  bcc nce_last
+  sta pcm_cur
+  sep #$20 : .as
+  jsr nsf_start               ; CMD_MOD_OPEN unloads the old tune on the firmware side
+  jmp nsf_redraw
+nce_last:
+  .al : .xl
+  sep #$20 : .as
+  lda #$01
+  sta pcm_last
+  jmp nsf_redraw
+nce_out:
+  .as : .xl
+  rts
+
 nsf_ctl:
   .as : .xl
   sta @MCU_PARAM
@@ -463,11 +519,12 @@ nsf_dr_keys2:
   .as : .xl
   jsr pcm_row_str             ; row 6
   jsl @hint_keys
-  rts
+  jmp media_rep_row           ; row 7
 nsf_dr_nokeys:
   .as : .xl
   jsr pcm_row_blank           ; row 5
-  jmp pcm_row_blank           ; row 6
+  jsr pcm_row_blank           ; row 6
+  jmp pcm_row_blank           ; row 7
 
 ; No handler in this firmware: a static screen, composed once.
 nsf_dr_nosup:
@@ -551,6 +608,17 @@ nsf_rs_song:
   sta pcm_tmp
   sep #$20 : .as
   jsr pcm_put_time
+  lda pcm_last
+  beq nsf_rs_notend
+  lda #$20                    ; the folder's last file played out
+  jsr mt_emit
+  jsr mt_emit
+  lda #^text_pcm_ended
+  ldx #!text_pcm_ended
+  jsr mt_put_str
+  bra nsf_rs_flush
+nsf_rs_notend:
+  .as : .xl
   lda @NSFPLAY_BLK+NSF_STATE
   cmp #NSF_ST_PAUSED
   bne nsf_rs_flush

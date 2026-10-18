@@ -278,6 +278,10 @@
 
 #define SRAM_MENU_FILEPATH_ADDR      (0xFF0000L)
 #define SRAM_MENU_CFG_ADDR           (0xFF0100L)
+/* The live CFG byte the music players' card modules read (cfg_t.player_repeat, CFG @ $1D9;
+   checked against cfg_t in cfg.c). The menu flips it with X while a player is open and the
+   firmware's own copy only catches up at SNES_CMD_SAVE_CFG, so the modules read it here. */
+#define SRAM_CFG_PLAYER_REPEAT_ADDR  (0xFF02D9L)
 #define SRAM_CMD_ADDR                (0xFF1000L)
 #define SRAM_PARAM_ADDR              (0xFF1004L)
 #define SRAM_MCU_STATUS_ADDR         (0xFF1100L)

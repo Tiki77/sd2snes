@@ -417,6 +417,7 @@ TRANSLATIONS = {
     'text_spc_prompt': 'A: Volgend nummer   B: Sluit',
     'text_spc_prompt2': 'L/R: Vorig/volgend nummer',
     'text_media_mouse2': 'Y: Vorig nummer   Z: Volgend nummer',
+    'text_media_repeat': 'X: Herhalen',
     'text_pcm_promptb': 'B: Sluit',
     'text_pcm_paused': 'Pauzeer',
     'text_pcm_erropen': 'Bestand kan niet gelezen worden.',

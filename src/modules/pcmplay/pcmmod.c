@@ -28,6 +28,17 @@ void pcmmod_ctl(void *st, uint32_t param);
 void pcmmod_idle(void *st);
 void pcmmod_stop(void *st);
 
+/* The players' Repeat (CFG.player_repeat, the menu's X key): read from the live CFG byte, so
+   a toggle while the track plays counts at once.  On, the engine loops the track at the
+   header's loop point -- what an MSU-1 track is authored for, gapless, the way the game plays
+   it -- instead of stopping at EOF for the menu to move on.  One byte of SPI per pass. */
+static uint8_t pcm_repeat(pcmmod_t *m) {
+  uint8_t r = 0;
+  m->api->sram_read(&r, SRAM_CFG_PLAYER_REPEAT_ADDR, 1);
+  m->api->music_noloop(!r);
+  return r;
+}
+
 static void pcm_write_blk(pcmmod_t *m) {
   const module_api_t *api = m->api;
   pcmplay_blk_t blk;
@@ -82,7 +93,7 @@ int pcmmod_start(void *st, const module_api_t *api, const char *path) {
   if(res == 0xA0) {
     uint32_t size = api->music_size();
     api->music_lock(1);        /* the FMV stop paths must leave our track alone */
-    api->music_noloop(1);      /* play it once: at the end the menu moves to the next track */
+    pcm_repeat(m);             /* play it once (the menu then moves to the next track), or loop it */
     m->body_bytes = (size > PCM_HDR_BYTES) ? (size - PCM_HDR_BYTES) : 0;
     m->total_sec  = (uint16_t)(m->body_bytes / PCM_BYTES_PER_SEC);
     m->state      = PCMPLAY_STATE_PLAYING;
@@ -144,6 +155,11 @@ void pcmmod_ctl(void *st, uint32_t param) {
 void pcmmod_idle(void *st) {
   pcmmod_t *m = st;
   if(m->state == PCMPLAY_STATE_NONE) return;
+  if((m->state == PCMPLAY_STATE_PLAYING || m->state == PCMPLAY_STATE_PAUSED)
+     && pcm_repeat(m) && m->api->music_ended()) {
+    pcm_seek(m, 0);                      /* Repeat went on after the EOF read: from the top */
+    return;
+  }
   /* The clip dying under us -- an unreadable file makes the pump give up -- must not
      leave the screen showing a track that is no longer playing.  Reported as the READ
      error it is, rather than as plain "nothing playing". */

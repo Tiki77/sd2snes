@@ -4,13 +4,14 @@
 ; window (spcstart_win_*), the line engine (mt_* in memtest.a65, pcm_flush), the clock
 ; (pcm_put_time), the folder walk (media_find) and the cursor put back on the track at the
 ; end (media_place_cursor).  Layout: 0 title, 1 game - artist, 2 bar, 3 clock, 4 blank,
-; 5-6 keys.
+; 5-6 keys, 7 Repeat.
 ;
 ; WHAT AN SPC CANNOT DO.  Once uploaded, the S-SMP runs the game's own sound driver and
 ; nothing on the S-CPU side reaches the S-DSP: no pause, no seek, no fade, and the only way
 ; to stop it is to reset the console (a warm reset, the menu's usual trick: bgm_silence_reset).
 ; So the clock is the S-CPU's own frame count since the upload, and the length is what the
-; ID666 tag says (play time + fade).  When it runs out, the next .spc of the folder plays;
+; ID666 tag says (play time + fade).  When it runs out, the next .spc of the folder plays
+; (with Repeat on, X, the same one is loaded again);
 ; after the last one the console is silenced (the fade the tag asks for is out of reach, so
 ; that is a cut) and the screen stays on "End".  A: the next track (on "End": the first),
 ; L/R: previous / next, B: close.  Every change of track is a warm reset + a ~1 s upload.
@@ -83,6 +84,7 @@ spc_screen:
   sta mouse_pseek
   stz spc_open
   stz media_dark              ; (WRAM is $55 at boot: a gate has to be cleared before use)
+  jsr media_rep_begin
   lda $213f                   ; bit 4: a PAL console (50 frames per second)
   and #$10
   beq spc_scr_ntsc
@@ -126,6 +128,12 @@ spc_lp_legend:
   .as : .xl
   lda pad_b
   bne spc_out
+  lda pad_x
+  beq spc_lp_notx
+  jsr media_rep_toggle        ; Repeat (pcmplay.a65): spc_tick reads it at the track's end
+  bra spc_loop
+spc_lp_notx:
+  .as : .xl
   lda pad_a
   beq spc_lp_nota
   lda spc_state
@@ -165,6 +173,9 @@ spc_lp_notr:
 
 spc_out:
   .as : .xl
+  jsr media_rep_save          ; before the reset: the menu's reload pushes the firmware's CFG
+                              ; back, and a Repeat it was never told about would be lost (an
+                              ; SPC plays out of the APU's RAM, so this write holds nothing up)
   lda @BGM_STATE
   cmp #$01
   bne spc_out_close           ; "End": already silenced, nothing to hide
@@ -200,6 +211,7 @@ spc_out_quiet:
   sep #$20 : .as
 spc_scr_restore:
   .as : .xl
+  jsr media_rep_save          ; Repeat changed: into config.yml now that nothing plays
   lda #$ff
   sta mouse_pbrow
   pla
@@ -279,6 +291,13 @@ spc_tick:
   beq spc_tk_end
   bcs spc_tk_out16            ; total > sec: not yet
 spc_tk_end:
+  .al : .xl
+  lda @CFG_PLAYER_REPEAT
+  and #$00ff
+  beq spc_tk_next
+  lda spc_cur                 ; Repeat: the same track again (a reload: an SPC cannot seek)
+  jmp spc_goto
+spc_tk_next:
   .al : .xl
   lda spc_cur
   ldx #TYPE_SPC
@@ -489,11 +508,13 @@ spc_draw_all:
   ldx #!text_spc_prompt
   jsr pcm_row_str             ; row 5
   jsl @hint_keys
-  jmp media_keys2_spc         ; row 6 (with a mouse: its held buttons)
+  jsr media_keys2_spc         ; row 6 (with a mouse: its held buttons)
+  jmp media_rep_row           ; row 7
 spc_da_nokeys:
   .as : .xl
   jsr pcm_row_blank           ; row 5
-  jmp pcm_row_blank           ; row 6
+  jsr pcm_row_blank           ; row 6
+  jmp pcm_row_blank           ; row 7
 
 spc_draw_time:
   .as : .xl

@@ -414,6 +414,7 @@ TRANSLATIONS = {
     'text_spc_prompt': 'A: 次の曲   B: 閉じる',
     'text_spc_prompt2': 'L/R: 前/次の曲',
     'text_media_mouse2': 'Y: 前の曲   Z: 次の曲',
+    'text_media_repeat': 'X: リピート',
     'text_pcm_promptb': 'B: 閉じる',
     'text_pcm_paused': '一時停止中',
     'text_pcm_erropen': 'このファイルを読み込めません。',

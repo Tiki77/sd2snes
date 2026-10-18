@@ -30,7 +30,8 @@
 ; PCM_ST_ENDED, PCMPLAY_VERSION 2+); the next .pcm of the directory table -- the browser's
 ; own order, which puts the .pcm files last and in natural order (sort.c) -- starts on its
 ; own, and L/R step back and forth.  After the last one the screen stays on "End"; A then
-; starts over from the first.  The track being played is pcm_cur, a byte offset into the
+; starts over from the first.  With Repeat on (X, media_rep_toggle) the module loops the
+; track instead and it never ends.  The track being played is pcm_cur, a byte offset into the
 ; directory table, and closing the screen leaves the browser's cursor on it.
 ;
 ; SEEK.  Left/Right move -/+5 s, more per step the longer they are held (pcm_seek_key);
@@ -153,6 +154,7 @@ pcm_screen:
   ; hanging the console for good.
   stz media_dark              ; (WRAM is $55 at boot: a gate has to be cleared before use)
   stz media_keys              ; no key legend until the loop has read the pad
+  jsr media_rep_begin
   jsl @ui_call_coversync
   jsr pcm_init_cur            ; the track = the browser's selection (WRAM: survives the reset)
   jsr pcm_prepare_audio       ; may warm-reset; repaints the list itself if it does
@@ -218,6 +220,11 @@ pcm_k_legend:
   bne pcm_scr_out
   lda pcm_nosup
   bne pcm_loop                ; nothing is playing: no other key has anything to act on
+  lda pad_x
+  beq pcm_k_notx
+  jsr media_rep_toggle        ; Repeat: the module reads the byte on its own
+  bra pcm_loop
+pcm_k_notx:
   lda pad_a
   beq pcm_k_nota
   jsr pcm_key_a
@@ -266,6 +273,7 @@ pcm_scr_out:
   lda #$ff
   sta mouse_pbrow             ; no bar on screen any more
   jsr pcm_restore_audio
+  jsr media_rep_save
   rep #$20 : .al
   lda pcm_cur
   jsr media_place_cursor      ; the browser comes back on the track that was playing
@@ -845,6 +853,98 @@ mk2s_pad:
   bra mk2_put
 
 ; ----------------------------------------------------------------------
+;  Repeat (CFG_PLAYER_REPEAT), shared by the three players.  X flips it: off, a track that
+;  ends gives way to the next one (the folder's next .pcm / .spc, the next song of an NSF);
+;  on, the same track again, for as long as the screen stays open.  The .pcm and .nsf card
+;  modules read the byte themselves (the .pcm then loops at its header's loop point, the way
+;  the game plays it); the SPC player reloads the track (spc_tick).
+;  The byte is written straight into the menu's CFG and saved only when the player closes
+;  (media_rep_save): a config.yml write while a track streams would hold up the DAC.
+;  media_rep_row: layout row 7, "X: Repeat  On/Off" -- in green the key, as every legend
+;  (with a mouse, the both-buttons glyph: a two-button click is X, mouse_b_word).
+;  Entry/exit .as/.xl, DB=$00, DP=0.
+; ----------------------------------------------------------------------
+media_rep_begin:
+  .as : .xl
+  lda @CFG_PLAYER_REPEAT
+  sta @media_rep0
+  rts
+
+media_rep_toggle:
+  .as : .xl
+  lda @CFG_PLAYER_REPEAT
+  beq mrt_on
+  lda #$00
+  bra mrt_set
+mrt_on:
+  .as : .xl
+  lda #$01
+mrt_set:
+  .as : .xl
+  sta @CFG_PLAYER_REPEAT
+  jsr pcm_wait_frame          ; at the start of a frame: the row and its green key are done
+                              ; before the next NMI uploads them (pcm_draw has the story)
+media_rep_row:
+  .as : .xl
+  lda #$07
+  sta mt_row
+  jsr mt_blank
+  lda #^text_media_repeat
+  ldx #!text_media_repeat
+  jsr mt_put_str
+  lda #$20
+  jsr mt_emit
+  jsr mt_emit
+  lda @CFG_PLAYER_REPEAT
+  beq mrr_off
+  lda #^text_on
+  ldx #!text_on
+  bra mrr_put
+mrr_off:
+  .as : .xl
+  lda #^text_off
+  ldx #!text_off
+mrr_put:
+  .as : .xl
+  jsr mt_put_str
+  jsr pcm_flush
+  jsl @hint_keys
+  rts
+
+; media_rep_save: SAVE_CFG when Repeat changed since the player opened.  Sent once and
+; waited for the way onbg_save_cfg does (SNES_CMD back to $55: the menu loop acks before it
+; runs the command), but bounded: a wedged MCU leaves the byte unsaved, not the menu hung.
+media_rep_save:
+  .as : .xl
+  lda @CFG_PLAYER_REPEAT
+  cmp @media_rep0
+  beq mrs_out
+  lda #$00
+  sta @SNES_CMD
+  lda #CMD_SAVE_CFG
+  sta @MCU_CMD
+  ldx #PCM_TIMEOUT_HI
+mrs_outer:
+  .as : .xl
+  ldy #$0000
+mrs_inner:
+  .as : .xl
+  lda @SNES_CMD
+  cmp #CMD_MCU_RDY
+  beq mrs_done
+  dey
+  bne mrs_inner
+  dex
+  bne mrs_outer
+mrs_done:
+  .as : .xl
+  lda #$00
+  sta @MCU_CMD
+mrs_out:
+  .as : .xl
+  rts
+
+; ----------------------------------------------------------------------
 ;  media_dim / media_undim / media_regrey -- the browser behind a player is dimmed the way
 ;  every modal over it is (mainmenu, the context menus): its rectangle pushed and greyed,
 ;  and popped back bright at the end.  media_regrey greys it again after a warm reset has
@@ -1135,11 +1235,13 @@ pcm_dr_tail:
   jsr pcm_row_str             ; row 5
   jsl @hint_keys              ; keys in green (pcm_flush is a hiprint; manhost.a65)
   jsr media_keys2             ; row 6
+  jsr media_rep_row           ; row 7
   bra pcm_dr_done
 pcm_dr_nokeys:
   .as : .xl
   jsr pcm_row_blank           ; row 5
   jsr pcm_row_blank           ; row 6
+  jsr pcm_row_blank           ; row 7
 pcm_dr_done:
   plp
   .as : .xl

@@ -89,6 +89,7 @@
 #define CFG_BOOT_INTRO                   ("BootIntro")
 #define CFG_WARN_EXPERIMENTAL            ("WarnExperimental")
 #define CFG_BROWSER_ICONS                ("BrowserIcons")
+#define CFG_PLAYER_REPEAT                ("PlayerRepeat")
 
 #define CFG_MENU_COMBO_MIN_BUTTONS       (3)
 
@@ -267,6 +268,10 @@ typedef struct __attribute__ ((__packed__)) _cfg_block {
      browser row (snes/diricon.a65). Read only by the menu: with 0 the name starts in the icon's
      column again, as before 2.17. YAML BrowserIcons + menu "File type icons" (browser settings).
      Default 1. */
+  uint8_t  player_repeat;           /* CFG @ $1D9: the music players (.spc, .pcm, .nsf) repeat the
+     track that ends instead of moving on to the next one. Toggled with X on the player screens
+     (snes/pcmplay.a65 media_rep_toggle), saved when the player closes; the card modules read the
+     live byte (SRAM_CFG_PLAYER_REPEAT_ADDR). YAML PlayerRepeat, no menu entry. Default 0. */
 } cfg_t;
 
 int cfg_save(void);

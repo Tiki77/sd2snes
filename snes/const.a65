@@ -674,6 +674,7 @@ text_spc_prompt2  .byt "L/R: Prev/Next track", 0
 ; the players' second key row with a mouse in: Y = the right button held, Z = the left one
 ; held (mouselegend.a65 draws both as mouse glyphs); no seek keys, the bar takes a click
 text_media_mouse2 .byt "Y: Prev track   Z: Next track", 0
+text_media_repeat .byt "X: Repeat", 0
 text_pcm_promptb  .byt "B: Close", 0
 text_pcm_paused   .byt "Paused", 0
 text_pcm_erropen  .byt "Cannot read this file.", 0
@@ -784,7 +785,7 @@ text_spcload    .byt "Loading SPC data to SPC700", 127, 128, 0
 spcstart_win_x  .byt 10
 spcstart_win_y  .byt 13
 spcstart_win_w  .byt 44
-spcstart_win_h  .byt 10
+spcstart_win_h  .byt 11
 
 text_loading    .byt "Loading", 127, 128, "                        ",0
 loading_win_x   .byt 2

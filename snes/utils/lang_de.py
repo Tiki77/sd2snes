@@ -434,6 +434,7 @@ TRANSLATIONS = {
     'text_spc_prompt': 'A: Nächster Titel   B: Schließen',
     'text_spc_prompt2': 'L/R: Titel zurück/vor',
     'text_media_mouse2': 'Y: Vorheriger Titel   Z: Nächster Titel',
+    'text_media_repeat': 'X: Wiederholen',
     'text_pcm_promptb': 'B: Schließen',
     'text_pcm_paused': 'Pausiert',
     'text_pcm_erropen': 'Datei kann nicht gelesen werden.',

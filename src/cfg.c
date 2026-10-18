@@ -94,6 +94,9 @@ _Static_assert(offsetof(cfg_t, onboarding_version) == 0x1d5, "cfg_t.onboarding_v
 _Static_assert(offsetof(cfg_t, boot_intro) == 0x1d6, "cfg_t.boot_intro must stay at CFG_ADDR+$1D6");
 _Static_assert(offsetof(cfg_t, warn_experimental) == 0x1d7, "cfg_t.warn_experimental must stay at CFG_ADDR+$1D7");
 _Static_assert(offsetof(cfg_t, browser_icons) == 0x1d8, "cfg_t.browser_icons must stay at CFG_ADDR+$1D8");
+_Static_assert(offsetof(cfg_t, player_repeat) == 0x1d9, "cfg_t.player_repeat must stay at CFG_ADDR+$1D9");
+_Static_assert(SRAM_MENU_CFG_ADDR + offsetof(cfg_t, player_repeat) == SRAM_CFG_PLAYER_REPEAT_ADDR,
+               "SRAM_CFG_PLAYER_REPEAT_ADDR (memmap.h) must name cfg_t.player_repeat");
 
 const cfg_t CFG_DEFAULT = {
   .vidmode_menu = VIDMODE_60,
@@ -168,7 +171,8 @@ const cfg_t CFG_DEFAULT = {
   .onboarding_version = 0,   /* never seen: the first boot after an update shows the tour prompt */
   .boot_intro = 1,           /* the power-on screen is on out of the box */
   .warn_experimental = 1,    /* ask before an experimental console core starts */
-  .browser_icons = 1         /* the file-type icons in the browser */
+  .browser_icons = 1,        /* the file-type icons in the browser */
+  .player_repeat = 0         /* the music players move on to the next track */
 };
 
 cfg_t CFG;
@@ -339,7 +343,8 @@ static const cfg_item_t cfg_items[] = {
   CFGI(CFG_ONBOARDING_VERSION,          onboarding_version,         CK_NUM,     0),
   CFGI(CFG_BOOT_INTRO,                  boot_intro,                 CK_BOOL,    0),
   CFGI(CFG_WARN_EXPERIMENTAL,           warn_experimental,          CK_BOOL,    0),
-  CFGI(CFG_BROWSER_ICONS,               browser_icons,              CK_BOOL,    0)
+  CFGI(CFG_BROWSER_ICONS,               browser_icons,              CK_BOOL,    0),
+  CFGI(CFG_PLAYER_REPEAT,               player_repeat,              CK_BOOL,    0)
 };
 #undef CFGI
 

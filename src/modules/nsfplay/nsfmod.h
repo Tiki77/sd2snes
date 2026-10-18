@@ -30,6 +30,16 @@
 
 #define NSFPLAY_FLAG_PAL        (0x01)
 #define NSFPLAY_FLAG_EXPANSION  (0x02)  /* the tune wants expansion audio, which is not played */
+#define NSFPLAY_FLAG_END        (0x04)  /* the file's last song played out (Repeat off): the menu
+                                           moves to the folder's next .nsf */
+
+/* The end of a song: an NSF has no length, so a song that falls silent for NSFPLAY_QUIET_SEC
+   (every sample within +/-NSFPLAY_QUIET_LEVEL) is over -- what the common NSF players do.  It
+   counts once the DAC gets there, not when the core renders it (the ring runs up to a minute
+   ahead).  Then the song starts again (CFG.player_repeat, read live) or the next one does; a
+   song that loops on its own plays until changed. */
+#define NSFPLAY_QUIET_SEC       (3)
+#define NSFPLAY_QUIET_LEVEL     (64)
 
 /* Control codes in MCU_PARAM's low byte (SNES_CMD_NSF_CTL) */
 #define NSFPLAY_CTL_STOP        (0)
@@ -70,6 +80,9 @@ typedef struct {
   uint8_t  state, song, flags, load;
   uint16_t last_pos;
   uint32_t cyc, frames;     /* render cost meter: DWT cycles, and the frames they made */
+  uint32_t gen;             /* bytes rendered since the song started, in music_played's units */
+  uint32_t quiet;           /* frames in a row at silence */
+  uint32_t end_at;          /* where the song is over, in the same units (0 = not silent yet) */
   nsf_t    n;
 } nsfmod_t;
 
