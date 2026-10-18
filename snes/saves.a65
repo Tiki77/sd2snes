@@ -22,14 +22,15 @@
 ;
 ;  Runs with DBR = 0 and DP = 0 (the menu's variables are reached by long addressing, or
 ;  absolute through the low-RAM mirror; the pointers print_src and longptr through the
-;  direct page).  Bank $C1; the $C0 routines are reached through the ui_call_* / gi_call_*
+;  direct page).  Bank $C3, entered only through the fm_bank_ok gates of savesgate.a65 (a
+;  guide on the game info screen borrows the bank); the $C0 routines are reached through the ui_call_* / gi_call_*
 ;  trampolines.
 ; ======================================================================
-.link page $c1
+.link page $c3
 #include "memmap.i65"
 ; memmap.i65 re-asserts '.link page $c0' on include; re-declare $c1 AFTER it (the last
 ; '.link page' wins and they emit no bytes) so every byte lands in bank $C1.
-.link page $c1
+.link page $c3
 
 ; WRAM scratch: $7E9000-$7E93FF, the unused end of the iris block (memmap.i65), which only
 ; setup_gfx zeroes.  The screen is modal: nothing else runs while it is open.
@@ -67,17 +68,17 @@
 ;  The context menus' "Saves..." rows (MTYPE_FUNC_CLOSE): MCU_PARAM already holds the game,
 ;  the browser selection or the Recents/Favorites index, as for the rows around them.
 ; ======================================================================
-saves_ctx_browser:
+saves_ctx_browser_c3:
   php
   sep #$20 : .as
   lda #SVW_BROWSER
   bra sv_ctx
-saves_ctx_recent:
+saves_ctx_recent_c3:
   php
   sep #$20 : .as
   lda #SVW_RECENT
   bra sv_ctx
-saves_ctx_fav:
+saves_ctx_fav_c3:
   php
   sep #$20 : .as
   lda #SVW_FAV
@@ -123,7 +124,7 @@ sv_env:
 ;  context menu, and the info screen is queried and rebuilt on the way back.  MCU_PARAM
 ;  [0..3] is kept across (for Recents/Favorites its low byte IS the index the query needs).
 ; ----------------------------------------------------------------------
-saves_from_gi:
+saves_from_gi_c3:
   php
   phb
   phd

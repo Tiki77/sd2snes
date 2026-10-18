@@ -1,0 +1,25 @@
+.link page $c1
+#include "memmap.i65"
+; memmap.i65 re-asserts '.link page $c0' on include; re-declare $c1 AFTER it.
+.link page $c1
+
+; ===========================================================================
+; boot_intro: the gate of the power-on screen, called with jsl from every coldboot
+; (snes/main.a65). The screen itself (bootintro.a65) lives in bank $C3, which the
+; game-info guide viewer borrows in menu mode, so a RESET press after the viewer would
+; jump into whatever the viewer left there. The firmware sets BOOT_INTRO only right
+; after it has loaded the whole menu image, $C3 included, so the jump is taken only
+; then. Anything else returns without touching bank $C3.
+; ===========================================================================
+boot_intro:
+  php
+  sep #$20 : .as
+  lda @BOOT_INTRO
+  cmp #BOOT_INTRO_MAGIC
+  bne bg_out
+  plp
+  jmp @boot_intro_c3
+bg_out:
+  .as
+  plp
+  rtl

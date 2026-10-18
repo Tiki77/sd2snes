@@ -3,7 +3,7 @@
 ; reproduces Super Mario World's "- Nintendo - Presents" screen -- layout, pixel style,
 ; timing and sound, measured on the game (utils/gen_boot_intro.py has the numbers).
 ;
-; Called with jsl from snes/main.a65's coldboot, first thing after killdma and BEFORE
+; Called with jsl from snes/main.a65's coldboot (through the gate in bootgate.a65), first thing after killdma and BEFORE
 ; clear_wram / apu_ram_init / snes_init: the console is fresh out of reset, so this
 ; owns the whole machine -- the PPU (any register, any VRAM), the direct page (the
 ; $55 fill right after wipes what it used) and the S-SMP, still at its IPL. It hands
@@ -22,14 +22,17 @@
 ; Every wait on the S-SMP is bounded: if it does not answer, the screen still shows,
 ; silent.
 ;
-; WHY $C1: the $C0 page has a few hundred bytes left; only the `jsl` costs $C0.
-; Nothing here calls into $C0 (every routine it needs is its own).
+; WHY $C3: only the `jsl` costs $C0, and $C1/$C2 are full. The $C3 bank is lent to the
+; game-info guide viewer in menu mode (fmres.a65), but this runs only from the coldboot
+; of a menu image the firmware has just loaded in full, before any of that can happen.
+; Nothing here calls into another bank (every routine it needs is its own) and every
+; data access is long or through ^label, so the bank is free to change.
 ; ===========================================================================
 
-.link page $c1
+.link page $c3
 #include "memmap.i65"
-; memmap.i65 re-asserts '.link page $c0' on include; re-declare $c1 AFTER it.
-.link page $c1
+; memmap.i65 re-asserts '.link page $c0' on include; re-declare $c3 AFTER it.
+.link page $c3
 
 #include "bootintro_data.i65"
 
@@ -45,7 +48,7 @@
 #define BI_VRAM_MAP $7c00 /* BG1 tilemap, word address ($2107 = $7c) */
 #define BI_BLACK    30    /* frames of black before the picture (the S-DSP settles meanwhile) */
 
-boot_intro:
+boot_intro_c3:                ; entered from the gate in bootgate.a65 ($C1)
   php
   phb
   phd

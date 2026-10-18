@@ -1,0 +1,34 @@
+; ======================================================================
+;  The saves screen's entry points (saves.a65 lives in bank $C3, which the game info
+;  screen's guide viewer borrows): each one has fm_bank_ok put the bank back before it
+;  jumps in, or answers with the error blip when the bank cannot be had.  Same contract as
+;  the entries they stand for: the three context rows are show_menu FUNCs, saves_from_gi is
+;  a jsl from gameinfo.a65; every one rtl's back from saves.a65.
+; ======================================================================
+.link page $c0
+#include "memmap.i65"
+.link page $c0
+
+saves_ctx_browser:
+  jsl @fm_bank_ok
+  bcc svg_fail
+  jmp @saves_ctx_browser_c3
+saves_ctx_recent:
+  jsl @fm_bank_ok
+  bcc svg_fail
+  jmp @saves_ctx_recent_c3
+saves_ctx_fav:
+  jsl @fm_bank_ok
+  bcc svg_fail
+  jmp @saves_ctx_fav_c3
+saves_from_gi:
+  jsl @fm_bank_ok
+  bcc svg_fail
+  jmp @saves_from_gi_c3
+svg_fail:
+  php
+  sep #$20 : .as
+  lda #$04                  ; error blip
+  sta @SFX_MAILBOX
+  plp
+  rtl

@@ -1,12 +1,12 @@
 ; kv_* value tables: the preset lists behind every OPTTYPE_KVBYTE menu entry, on their
-; own in bank $C2 (they left $C0 for $C1 when $C0 ran out, and $C2 when $C1 did, for the
-; saves screen).  Any bank works: both readers take the bank from the entry's own pointer
-; (see below), never from DBR.
-.link page $c2
+; own in bank $C1 (they left $C0 for $C1 when $C0 ran out, $C2 when $C1 did, for the saves
+; screen, and came back when the power-on screen moved to $C3).  Any bank works: both
+; readers take the bank from the entry's own pointer (see below), never from DBR.
+.link page $c1
 #include "memmap.i65"
-; memmap.i65 re-asserts '.link page $c0' on include; re-declare $c2 AFTER it (last
-; '.link page' wins and they emit no bytes) so every byte of this object lands in $C2.
-.link page $c2
+; memmap.i65 re-asserts '.link page $c0' on include; re-declare $c1 AFTER it (last
+; '.link page' wins and they emit no bytes) so every byte of this object lands in $C1.
+.link page $c1
 
 ; ======================================================================
 ;  kv_* value tables -- the preset lists behind every OPTTYPE_KVBYTE menu
