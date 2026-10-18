@@ -541,3 +541,14 @@ set_global_assignment -name OPTIMIZATION_MODE "AGGRESSIVE PERFORMANCE"
 set_global_assignment -name PHYSICAL_SYNTHESIS_REGISTER_DUPLICATION ON
 set_global_assignment -name PHYSICAL_SYNTHESIS_COMBO_LOGIC ON
 set_global_assignment -name ROUTER_EFFORT_MULTIPLIER 2
+# The registers that sample the SNES bus sit in the pins' I/O blocks, so the pin-to-register delay is the same in
+# every fit. Without this the fitter could place them far from the SNES pins: fits that met timing froze the game
+# on some consoles (SNES inputs seen ~1.5 ns later, bus direction / output enable later); with it they did not.
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to SNES_ADDR_IN[*]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to SNES_READ_IN
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to SNES_WRITE_IN
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to SNES_CPU_CLK_IN
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to SNES_PARD_IN
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to SNES_PAWR_IN
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to SNES_PA_IN[*]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to SNES_DATA[*]

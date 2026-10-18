@@ -14,6 +14,12 @@ One source tree for both boards; the Mk.II differences are under `` `ifdef MK2 `
 `main.qsf`). Board-only sources: `xc_scratch.v` (Mk.II); `rtc.v`, `xc_brr.v`, `xc_tick.v`, `xc_decbox.v`,
 `xc_mk3_pll.v` (Mk.III).
 
+`main.qsf` puts the registers that sample the SNES bus (address, strobes, data) in the pins' I/O blocks
+(`FAST_INPUT_REGISTER`). Without it their placement changed from fit to fit, and fits that met timing froze the
+game on some consoles: in those fits the SNES inputs reached their registers ~1.5 ns later and the data bus
+direction / output enable changed later. With the registers in the I/O blocks the same fits ran. The outputs to
+the SNES are still unconstrained, so a change to this core needs a test on more than one console.
+
 ## On the card
 
 - `/sd2snes/fpga_xc.bi3` and/or `fpga_xc.bit`, and `/sd2snes/xc_soc.bin` (built with the firmware; the firmware

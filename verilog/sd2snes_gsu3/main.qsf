@@ -529,3 +529,14 @@ set_global_assignment -name QIP_FILE ../sd2snes_gsu/ip/mk3/gsu_fmult.qip
 set_global_assignment -name QIP_FILE ../sd2snes_gsu/ip/mk3/gsu_mult.qip
 set_global_assignment -name QIP_FILE ../sd2snes_gsu/ip/mk3/gsu_umult.qip
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top
+# The registers that sample the SNES bus sit in the pins' I/O blocks, so the pin-to-register delay is the same in
+# every fit (the Xeno Crisis core needed this to stop freezing on some consoles). SNES_ADDR_IN[11], [12] and
+# SNES_PARD_IN are on dedicated clock pins, which cannot take an input register.
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to SNES_ADDR_IN[*]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to SNES_READ_IN
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to SNES_WRITE_IN
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to SNES_CPU_CLK_IN
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to SNES_PARD_IN
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to SNES_PAWR_IN
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to SNES_PA_IN[*]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to SNES_DATA[*]
