@@ -90,6 +90,7 @@
 #define CFG_WARN_EXPERIMENTAL            ("WarnExperimental")
 #define CFG_BROWSER_ICONS                ("BrowserIcons")
 #define CFG_PLAYER_REPEAT                ("PlayerRepeat")
+#define CFG_GB_ROTATE_BUTTONS            ("GbRotateButtons")
 
 #define CFG_MENU_COMBO_MIN_BUTTONS       (3)
 
@@ -272,6 +273,14 @@ typedef struct __attribute__ ((__packed__)) _cfg_block {
      track that ends instead of moving on to the next one. Toggled with X on the player screens
      (snes/pcmplay.a65 media_rep_toggle), saved when the player closes; the card modules read the
      live byte (SRAM_CFG_PLAYER_REPEAT_ADDR). YAML PlayerRepeat, no menu entry. Default 0. */
+  uint8_t  gb_rotate_buttons;       /* CFG @ $1DA: Game Boy buttons "rotated" a quarter turn on the
+     SNES pad, for both Game Boy cores. 0 = as wired (SNES A = GB A, SNES B = GB B), 1 = SNES B
+     plays the GB's A and Y alone its B (A keeps the GB's A; X keeps what it did: nothing on the
+     SGB, the GB's A on the GBC core) -- the "type B" layout of the SGB's own controller set-up.
+     Read at game load, after the image is staged: on the SGB core sgb_stage_config() patches
+     the SNES BIOS in PSRAM (src/sgb.c), on the GBC core gbc_stage_config() writes it into the
+     player's "GBCF" block (+6). YAML GbRotateButtons + menu "Rotate Game Boy buttons" (SGB
+     menu). Default 0. */
 } cfg_t;
 
 int cfg_save(void);

@@ -703,6 +703,11 @@ endif
 !GBC_WHITE_CNT  = $7E1E11
 !GBC_WHITE_HOLD = 8     ; the cap: ~133 ms, then the picture whatever is owed
 !GBC_WHITE_FIRST = $7E1E12 ; F_FIRST while held, else 0: OR'd into the flags
+; GbRotateButtons, copied out of the GBCF block (+6) at boot: non-zero = SNES B
+; is the GB's A (Y alone stays the GB's B), 0 = the pad as wired.  Read by
+; the pad stores of the frame tail (GbcPadRot).  Absolute (DBR = 0) there.
+!GBC_PADROT     = $7E1E13
+!GBC_PADROT_W   = $1E13
 
 ; ---------------------------------------------------------------------------
 ; The framebuffer mode's policy (contract sec. 14.10, advisor A3).
@@ -1054,6 +1059,8 @@ GbcWaitWCopy:
 
     jsr GbcCtrClear
     jsr GbcFbInit       ; the framebuffer mode starts OFF, every row unmapped
+    lda.l GbcCfgRotate  ; GbRotateButtons (GBCF +6, written by the MCU)
+    sta.l !GBC_PADROT
     lda.b #$00          ; the V-IRQ gates on the LOCKED bit of the last status
     sta.l !GBC_SC+!GBC_ST_FLAGS0 ; copy, and WRAM holds whatever the menu left
                         ; ($55 has bit 4 set): no copy yet = not locked
@@ -1551,6 +1558,11 @@ GbcNmiNoDefer:
     ; $4218 mid auto-read is garbage, and a reset must never fire off a
     ; misread.  A frame with an empty backlog gets here early enough that the
     ; wait actually waits.
+    ; GbRotateButtons is tested BEFORE the wait, so the frames that get here
+    ; early pay nothing for it; the as-wired path below is otherwise the same
+    ; instructions it always was.
+    lda.w !GBC_PADROT_W
+    bne GbcPadRot
 GbcPadWait:
     lda.w $4212
     lsr a
@@ -1568,6 +1580,7 @@ GbcPadWait:
     sta.b $0F
     ldx.w #!GBC_EFO_PADH
     jsr GbcEfPut            ; $4219 = the HIGH byte, {B Y Sel St Up Dn Lf Rt}
+GbcPadDone:
 
     jsr GbcIgr
 
@@ -1586,6 +1599,39 @@ GbcPadWait:
 
     stz.b $03           ; body finished: the next NMI may own the direct page
     rts
+
+; ===========================================================================
+; GbcPadRot -- the pad stores of the frame tail with GbRotateButtons on.
+;
+; The bridge makes the GB's A out of SNES A|X ($4218 b7|b6) and the GB's B out
+; of SNES B|Y ($4219 b7|b6).  Rotated, SNES B moves to the A side: it is sent
+; as $4218 b6 and dropped from $4219 b7, so the GB's A is A|X|B and its B is Y
+; alone -- the same layout as the SGB's own "type B" controller set-up, which is
+; what the firmware turns on for the SGB core.  A and X keep what they do.
+; $0E/$0F keep the RAW pad: GbcIgr matches the in-game gestures on the buttons
+; the user actually holds, rotated or not.  Each byte is computed before its
+; store, so the bridge never sees an as-wired byte in between.
+; ===========================================================================
+GbcPadRot:
+GbcPadRotWait:
+    lda.w $4212
+    lsr a
+    bcs GbcPadRotWait
+    lda.w $4219
+    sta.b $0F
+    asl a                   ; C = SNES B
+    lda.w $4218
+    sta.b $0E
+    bcc GbcPadRotLo
+    ora.b #$40              ; B joins A/X on the GB's A
+GbcPadRotLo:
+    ldx.w #!GBC_EFO_PADL
+    jsr GbcEfPut
+    lda.b $0F
+    and.b #$7F              ; and leaves the GB's B to Y
+    ldx.w #!GBC_EFO_PADH
+    jsr GbcEfPut
+    jmp GbcPadDone
 
 ; ===========================================================================
 ; GbcEfPut -- A(8) = value, X(16) = offset inside the $EF write window.
@@ -9964,22 +10010,27 @@ endif
 
 ; ---- GBCF: the player's config block (image offset $7F80, 16 bytes) ----
 ; The MCU patches it in PSRAM after staging the image, before the reset:
-;   +0..+3 "GBCF"   +4 block version ($01)
+;   +0..+3 "GBCF"   +4 block version ($02)
 ;   +5     stretch: 0 = the FB mode's first stage (160x144), 1 = the second
-;          (256x192, THE SECOND STAGE) -- CFG GbcStretch
-;   +6..+15 reserved, $00
-; The MCU writes +5 only when it finds the magic and version 1, so an old
-; player (no block) is never touched, and an old MCU leaves the 0 assembled
-; here.  No wire bump: the bridge never sees any of it.  Read once, by
-; GbcFbInit.
+;          (256x192, THE SECOND STAGE) -- CFG GbcStretch          (version 1)
+;   +6     buttons: non-zero = SNES B is the GB's A and Y alone its B, 0 =
+;          as wired (the MCU writes 0/1) -- CFG GbRotateButtons   (version 2)
+;   +7..+15 reserved, $00
+; The block only grows at the end: the MCU writes a field only when it finds
+; the magic and a version that has it, so an old player (no block, or
+; version 1) is never handed a byte it does not know, and an old MCU leaves the
+; 0 assembled here.  No wire bump: the bridge never sees any of it.  Read once,
+; at boot (GbcFbInit for +5, Reset for +6).
 assert pc() <= $00FF80, "the player grew into the GBCF block"
 org $00FF80
 GbcCfg:
     db "GBCF"
-    db $01
+    db $02
 GbcCfgStretch:
     db $00
-    db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+GbcCfgRotate:
+    db $00
+    db $00, $00, $00, $00, $00, $00, $00, $00, $00
 
 ; ---- LoROM header (so smc_id detects LoROM) ----
 ; NO SaveRAM: sgb_update_romprops refuses a player image that declares one, and

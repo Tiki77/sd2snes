@@ -130,7 +130,12 @@ void gbc_stage_config(uint32_t image_addr) {
     return;
   }
   sram_writebyte(CFG.gbc_stretch ? 1 : 0, blk + GBC_CFG_BLK_STRETCH);
-  printf("GBC:  player config stretch=%d\n", CFG.gbc_stretch ? 1 : 0);
+  /* A version-1 player keeps +6 reserved: it is simply not handed the byte. */
+  if (hdr[4] >= GBC_CFG_BLK_V_ROTATE) {
+    sram_writebyte(CFG.gb_rotate_buttons ? 1 : 0, blk + GBC_CFG_BLK_ROTATE);
+  }
+  printf("GBC:  player config stretch=%d rotate=%d\n", CFG.gbc_stretch ? 1 : 0,
+    CFG.gb_rotate_buttons ? 1 : 0);
 }
 
 #else /* CONFIG_MK2: no-op stubs -- the GBC core is mk3-only (no Spartan-3 build of

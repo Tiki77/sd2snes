@@ -97,6 +97,7 @@ _Static_assert(offsetof(cfg_t, browser_icons) == 0x1d8, "cfg_t.browser_icons mus
 _Static_assert(offsetof(cfg_t, player_repeat) == 0x1d9, "cfg_t.player_repeat must stay at CFG_ADDR+$1D9");
 _Static_assert(SRAM_MENU_CFG_ADDR + offsetof(cfg_t, player_repeat) == SRAM_CFG_PLAYER_REPEAT_ADDR,
                "SRAM_CFG_PLAYER_REPEAT_ADDR (memmap.h) must name cfg_t.player_repeat");
+_Static_assert(offsetof(cfg_t, gb_rotate_buttons) == 0x1da, "cfg_t.gb_rotate_buttons must stay at CFG_ADDR+$1DA");
 
 const cfg_t CFG_DEFAULT = {
   .vidmode_menu = VIDMODE_60,
@@ -172,7 +173,8 @@ const cfg_t CFG_DEFAULT = {
   .boot_intro = 1,           /* the power-on screen is on out of the box */
   .warn_experimental = 1,    /* ask before an experimental console core starts */
   .browser_icons = 1,        /* the file-type icons in the browser */
-  .player_repeat = 0         /* the music players move on to the next track */
+  .player_repeat = 0,         /* the music players move on to the next track */
+  .gb_rotate_buttons = 0     /* Game Boy buttons as wired: SNES B = GB B */
 };
 
 cfg_t CFG;
@@ -344,7 +346,8 @@ static const cfg_item_t cfg_items[] = {
   CFGI(CFG_BOOT_INTRO,                  boot_intro,                 CK_BOOL,    0),
   CFGI(CFG_WARN_EXPERIMENTAL,           warn_experimental,          CK_BOOL,    0),
   CFGI(CFG_BROWSER_ICONS,               browser_icons,              CK_BOOL,    0),
-  CFGI(CFG_PLAYER_REPEAT,               player_repeat,              CK_BOOL,    0)
+  CFGI(CFG_PLAYER_REPEAT,               player_repeat,              CK_BOOL,    0),
+  CFGI(CFG_GB_ROTATE_BUTTONS,           gb_rotate_buttons,          CK_BOOL,    0)
 };
 #undef CFGI
 

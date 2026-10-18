@@ -282,6 +282,39 @@ void sgb_load_sram(uint8_t *sgb_filename) {
   }
 }
 
+/* GbRotateButtons on the SGB core.  The SNES BIOS (sgbN_snes.bin) turns each SNES pad
+   into its ICD2 joypad byte in one routine, the same 78 bytes in all four BIOS dumps
+   sgb_bios_state() accepts (image offset 0x3cde; 0x3ce1 in v1.0).  That routine already
+   knows the rotated layout: the SGB's own controller set-up screen sets a WRAM flag, and
+   with it set SNES B is shifted one bit further, onto the GB's A, while Y is the GB's B
+   in both layouts.  Rotating is therefore taking that test out -- the 5 bytes of
+   "is the flag set?" (load + branch) become NOPs, the shift always runs, and nothing
+   else in the BIOS changes.  The routine is identified by CRC32 before the write, so a
+   BIOS that is not one of the known dumps is never touched. */
+#define SGB_PADXLATE_LEN    0x4e
+#define SGB_PADXLATE_CRC    0x9402e61eUL
+#define SGB_PADXLATE_TEST   0x11       /* offset of the 5-byte flag test */
+#define SGB_PADXLATE_TESTN  5
+static const uint16_t sgb_padxlate_off[] = { 0x3cde, 0x3ce1 };
+
+void sgb_stage_config(uint32_t image_addr) {
+  if (!sgb_romprops.has_sgb || sgb_romprops.core_is_gbc || !CFG.gb_rotate_buttons) return;
+
+  uint8_t code[SGB_PADXLATE_LEN];
+  for (uint8_t i = 0; i < sizeof(sgb_padxlate_off) / sizeof(sgb_padxlate_off[0]); i++) {
+    uint32_t addr = image_addr + sgb_padxlate_off[i];
+    sram_readblock(code, addr, sizeof(code));
+    uint32_t crc = crc32_init();
+    for (uint8_t j = 0; j < sizeof(code); j++) crc = crc32_update(crc, code[j]);
+    if (crc32_finalize(crc) == SGB_PADXLATE_CRC) {
+      sram_memset(addr + SGB_PADXLATE_TEST, SGB_PADXLATE_TESTN, 0xea);  /* nop */
+      printf("SGB:  buttons rotated (BIOS +0x%04x)\n", sgb_padxlate_off[i]);
+      return;
+    }
+  }
+  printf("SGB:  unknown BIOS pad routine, buttons not rotated\n");
+}
+
 void sgb_cheat_program(void) {
   if (sgb_romprops.has_sgb) {
     /* The GBC core has none of this plumbing in v0: no 64 KB CTX (the CGB state does

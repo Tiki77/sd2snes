@@ -123,6 +123,12 @@
 #ifndef GBC_EFO_CONSUME
 #error "defina GBC_EFO_CONSUME via -D"
 #endif
+#ifndef GBC_EFO_PADL
+#error "defina GBC_EFO_PADL via -D"
+#endif
+#ifndef GBC_EFO_PADH
+#error "defina GBC_EFO_PADH via -D"
+#endif
 
 /* Transfer classes: GbcClsTab's own length, passed in from !GBC_CLS_N so that
  * splitting or merging a class moves this file with the player. */
@@ -672,6 +678,7 @@ static void load_harness_map(void) {
  * COMMIT before any view read.  The window is watched rather than inferred --
  * a second COMMIT is a bridge-level bug the picture would not show. */
 static unsigned ef_n[8], ef_total;
+static uint8_t  ef_pad[2];                     /* last $EF0000/$EF0001 written */
 static int      ef_commit_seen_this_frame, ef_read_before_commit;
 /* sec. 6/7 order the three strobes as SYNC -> COMMIT -> (all view reads) ->
  * CONSUMED.  "exactly once each" was already checked per frame; the ORDER was
@@ -790,6 +797,7 @@ static void ef_hook(uint32_t off, uint8_t v) {
     return;
   }
   if(mbx_armed) mbx_check();                   /* the previous frame's publish */
+  if(off == GBC_EFO_PADL || off == GBC_EFO_PADH) ef_pad[off - GBC_EFO_PADL] = v;
   ef_n[off]++;
   ef_total++;
   if(off == GBC_EFO_SYNC) ef_sync_seen_this_frame = 1;
@@ -2070,6 +2078,7 @@ int main(int argc, char **argv) {
   const char *pad_arg = NULL;
   uint16_t pads[64]; int npads = 0;
   int ver_late = 0, no_snap = 0, req_mcu_cmd = -1;
+  long req_ef_pad = -1;
   long req_go = -1;
   uint8_t  vram_init[0x10000];
   char    *specs[1024]; int nspecs = 0;
@@ -2097,6 +2106,8 @@ int main(int argc, char **argv) {
     else if(!strcmp(s, "--ver-late") && a + 1 < argc) ver_late = atoi(argv[++a]);
     else if(!strcmp(s, "--no-snap") && a + 1 < argc) no_snap = atoi(argv[++a]);
     else if(!strcmp(s, "--require-go") && a + 1 < argc) req_go = atol(argv[++a]);
+    else if(!strcmp(s, "--require-ef-pad") && a + 1 < argc)
+      req_ef_pad = (long)strtoul(argv[++a], NULL, 0);
     else if(!strcmp(s, "--require-mcu-cmd") && a + 1 < argc)
       req_mcu_cmd = (int)strtoul(argv[++a], NULL, 0);
     else if(!strcmp(s, "--no-poison")) poison = 0;
@@ -2767,6 +2778,13 @@ ck_done:
     fprintf(stderr, "FAIL: %u strobe(s) de GO, esperado %ld (sec. 10: GO e' "
             "idempotente, mas uma bridge que aparece tarde PRECISA de um)\n",
             ef_n[GBC_EFO_GO], req_go);
+    fail++;
+  }
+  /* --require-ef-pad: the pad word the bridge got last ($EF0000 low, $EF0001
+     high) -- what GbRotateButtons (GBCF +6) is allowed to change. */
+  if(req_ef_pad >= 0 && (((unsigned)ef_pad[1] << 8) | ef_pad[0]) != (unsigned)req_ef_pad) {
+    fprintf(stderr, "FAIL: pad na bridge = $%02X%02X, esperado $%04X\n",
+            ef_pad[1], ef_pad[0], (unsigned)req_ef_pad);
     fail++;
   }
   if(req_mcu_cmd >= 0) {

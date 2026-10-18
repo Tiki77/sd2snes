@@ -625,6 +625,23 @@ menu_enttab_sgb:
  .word !(mfunc_isenabled_gbc-1)
  .byt  ^(mfunc_isenabled_gbc-1)
 
+; GbRotateButtons (CFG+$1DA): SNES B plays the Game Boy's A, Y alone its B. Both
+; Game Boy cores honour it (the SGB through a patch of its BIOS, the GBC core through
+; its player), so unlike the three rows above it is NOT greyed on a Mk.II.
+ .byt  MTYPE_VALUE
+ .word !mtext_gb_rotate
+ .byt  ^mtext_gb_rotate
+ .word !kv_onoff
+ .byt  ^kv_onoff
+ .byt  OPTTYPE_KVBYTE
+ .word !CFG_GB_ROTATE_BUTTONS
+ .byt  ^CFG_GB_ROTATE_BUTTONS
+ .word !mdesc_gb_rotate
+ .byt  ^mdesc_gb_rotate
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+
  .byt 0
 
 ; Settings > "Tour of the new features": where the tour starts. One line per release

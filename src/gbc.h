@@ -87,6 +87,8 @@ typedef enum {
 #define GBC_CFG_BLK_OFFSET   0x7F80
 #define GBC_CFG_BLK_VERSION  0x01   /* lowest version that has every field below */
 #define GBC_CFG_BLK_STRETCH  5      /* +5: CFG.gbc_stretch (0/1) */
+#define GBC_CFG_BLK_V_ROTATE 0x02   /* first version that has the field below */
+#define GBC_CFG_BLK_ROTATE   6      /* +6: CFG.gb_rotate_buttons (0/1) */
 
 /* Policy pass over the romprops sgb_id() just filled in.  No-op unless has_sgb. */
 void gbc_id(sgb_romprops_t *props, uint8_t *filename);

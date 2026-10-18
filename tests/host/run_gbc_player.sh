@@ -119,6 +119,7 @@ for n in GBC_BUDGET GBC_DMACOST GBC_VER \
          GBC_T_W1 GBC_T_CH0 GBC_T_SLOT GBC_T_INIDISP \
          GBC_SETA_OFF GBC_SETB_OFF GBC_H_MASK GBC_H_CH \
          GBC_EFO_COMMIT GBC_EFO_GO GBC_EFO_SYNC GBC_EFO_CONSUME \
+         GBC_EFO_PADL GBC_EFO_PADH \
          GBC_EFO_MBX GBC_MBX_N \
          GBC_ST_C6FLAGS GBC_ST_ROWF GBC_ST_C6CL GBC_ST_C6DIRTY GBC_ST_RCLI \
          GBC_ST_COLWN GBC_EFO_C6CTL GBC_EFO_ROWDONE GBC_WHITE_HOLD; do
@@ -601,6 +602,53 @@ PEOF
       fail=$((fail+1))
     fi
   done
+
+  # -------------------------------------------------------------------------
+  # (R) GbRotateButtons: GBCF +6 (written by the MCU, src/gbc.c) turns SNES B
+  # into the GB's A.  The bridge makes the GB's A out of $EF0000 b7|b6 and its
+  # B out of $EF0001 b7|b6, so rotated, B ($4219 b7) has to reach the bridge as
+  # $EF0000 b6 and leave $EF0001 b7 -- every other button exactly as wired --
+  # while the IGR keeps matching the RAW pad.  The image copy gets its own map
+  # (the map carries the size + CRC32 of the image it names).
+  # -------------------------------------------------------------------------
+  ROT="$OUTDIR/rot"
+  if $PY - "$BIN" "$ROT.bin" <<'ROTEOF' >"$ROT.log" 2>&1 &&
+import sys
+d = bytearray(open(sys.argv[1], "rb").read())
+if bytes(d[0x7F80:0x7F84]) != b"GBCF" or d[0x7F84] < 2:
+    sys.exit("%s: no GBCF v2 block at $7F80" % sys.argv[1])
+d[0x7F86] = 1
+open(sys.argv[2], "wb").write(d)
+ROTEOF
+     $PY "$REPO_ROOT/snes/gbc/gen_map_asar.py" "${BIN%.bin}.sym" "$ROT.bin" "$ROT.map" >>"$ROT.log" 2>&1; then
+    # <image> <pad held> <word the bridge must get> <what it is>
+    for c in "0 8000 8000 B_como_ligado" "0 C0C0 C0C0 ABXY_como_ligado" \
+             "1 8000 0040 B_vira_o_A" "1 4000 4000 Y_continua_o_B" \
+             "1 0080 0080 A_continua_o_A" "1 0040 0040 X_continua_o_A" \
+             "1 C0C0 40C0 ABXY" "1 3F30 3F30 Select_Start_cruz_L_R"; do
+      set -- $c
+      if [ "$1" = 1 ]; then rb="$ROT.bin"; rm="$ROT.map"; else rb="$BIN"; rm="$MAP"; fi
+      if $CLI --rom "$rb" --map "$rm" --views "$VIEWS" --frames 2 --dirty 'none' \
+              --pad "0x$2" --require-ef-pad "0x$3" >"$OUTDIR/R.$1.$2.log" 2>&1; then
+        echo "PASS  (R) rotate=$1: pad \$$2 -> bridge \$$3 ($4)"
+        pass=$((pass+1))
+      else
+        echo "FAIL  (R) rotate=$1 pad \$$2 ($4):"; sed 's/^/      /' "$OUTDIR/R.$1.$2.log" | head -6
+        fail=$((fail+1))
+      fi
+    done
+    if $CLI --rom "$ROT.bin" --map "$ROT.map" --views "$VIEWS" --frames 4 --dirty 'none' \
+            --pad "0;0x2070;0x2070;0" --require-mcu-cmd "0x81" >"$OUTDIR/R.igr.log" 2>&1; then
+      echo "PASS  (R) rotate=1: o IGR \$2070 continua casando no pad cru (MCU_CMD \$81)"
+      pass=$((pass+1))
+    else
+      echo "FAIL  (R) rotate=1 IGR:"; sed 's/^/      /' "$OUTDIR/R.igr.log" | head -6
+      fail=$((fail+1))
+    fi
+  else
+    echo "FAIL  (R) a imagem com GBCF +6 = 1 nao saiu:"; sed 's/^/      /' "$ROT.log" | head -3
+    fail=$((fail+1))
+  fi
 
   # -------------------------------------------------------------------------
   # (B) carry-over: one window is NOT enough, and the backlog is what closes it
@@ -2637,16 +2685,16 @@ PYEOF
     }
     c6first() { grep -hE '^(FAIL|m65816)' "$@" 2>/dev/null | head -3 | sed 's/^/      /'; }
     # The FB mode's stage is a RUN-TIME choice: the GBCF block at image offset
-    # $7F80 ("GBCF", version $01, +5 = stretch).  This does to a COPY of an
-    # image what the MCU does to the staged one (src/gbc.c, CFG GbcStretch):
-    # +5 written only over the magic and version 1.  The copy gets a map of its
+    # $7F80 ("GBCF", version $01 or later, +5 = stretch).  This does to a COPY
+    # of an image what the MCU does to the staged one (src/gbc.c, CFG
+    # GbcStretch): +5 written only over the magic and a version >= 1.  The copy gets a map of its
     # own, because the map carries the size + CRC32 of the image it names.
     gbcf_set() { # <bin> <sym> <out.bin> <out.map> <stretch>
       $PY - "$1" "$3" "$5" <<'GBCFEOF' || return 1
 import sys
 d = bytearray(open(sys.argv[1], "rb").read())
-if bytes(d[0x7F80:0x7F85]) != b"GBCF\x01":
-    sys.exit("%s: no GBCF v1 block at $7F80" % sys.argv[1])
+if bytes(d[0x7F80:0x7F84]) != b"GBCF" or d[0x7F84] < 1:
+    sys.exit("%s: no GBCF block (v1 or later) at $7F80" % sys.argv[1])
 d[0x7F85] = int(sys.argv[3], 0)
 open(sys.argv[2], "wb").write(d)
 GBCFEOF

@@ -952,6 +952,9 @@ static void load_setup_masks(load_ctx_t *c) {
      in the user's options before the SNES leaves reset.  No-op unless this load
      boots the GBC core (and on the mk2, where gbc.c is stubs). */
   gbc_stage_config(c->base_addr + romprops.load_address);
+  /* SGB: the same staged image is the SNES BIOS there; GbRotateButtons patches it.
+     No-op on the GBC core and with the option off. */
+  sgb_stage_config(c->base_addr + romprops.load_address);
 
   /* SMS: stage the .sms ROM into PSRAM (FPGA Z80 fetches it) before the SNES boots */
   sms_load_rom();

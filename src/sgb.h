@@ -81,6 +81,10 @@ uint8_t sgb_update_file(uint8_t **);
 uint8_t sgb_update_romprops(snes_romprops_t*, uint8_t *filename);
 void sgb_cheat_program(void);
 void sgb_load_sram(uint8_t *);
+/* GbRotateButtons on the SGB core: patch the SNES BIOS image load_rom just streamed to
+   `image_addr` (PSRAM) so SNES B plays the GB's A.  No-op unless this load boots the SGB
+   core with the option on; a BIOS whose pad routine is not the known one is left alone. */
+void sgb_stage_config(uint32_t image_addr);
 uint8_t sgb_bios_state(void);
 void sgb_gtc_load(uint8_t* filename);
 void sgb_gtc_save(uint8_t* filename);
