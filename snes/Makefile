@@ -9,7 +9,7 @@ IPS = header.ips
 # fonts/misaki_gothic_2nd.hex. The CJK languages (ja, zh: LAST on the command line) do not
 # go into the image: each column, with its glyphs, is a lang_<code>.bin that ships in
 # /sd2snes/lang/ and that the menu loads into WRAM when the language is selected.
-O65 = reset.o65 main.o65 font.o65 palette.o65 data.o65 const_lang.o65 const_lang_str.o65 const_lang_tab.o65 const_lang_cjk.o65 cjk.o65 logo.o65 dma.o65 filesel.o65 cover.o65 gameinfo.o65 sfx.o65 pad.o65 time.o65 sysinfo.o65 sysinfo_render.o65 memtest.o65 saves.o65 pcmplay.o65 spcview.o65 nsfplay.o65 msufolder.o65 diricon.o65 spc700.o65 spcplay.o65 menu.o65 menudata.o65 contextdata.o65 kvdata.o65 ui.o65 nmihook.o65 hookxlate.o65 mouse.o65 mouselegend.o65 common.o65 savestate.o65 savestate_cx4.o65 cheatoverlay.o65 manhost.o65 near.o65 patch.o65 stdlg.o65 ghlaunch.o65 expwarn.o65 cheatmenu.o65 cheatedit.o65 iris.o65 bootintro.o65 onboarding/onboarding_gate.o65 # gfx.o65 # vars.o65
+O65 = reset.o65 main.o65 font.o65 palette.o65 data.o65 const_lang.o65 const_lang_str.o65 const_lang_tab.o65 const_lang_cjk.o65 cjk.o65 logo.o65 dma.o65 filesel.o65 cover.o65 gameinfo.o65 sfx.o65 pad.o65 time.o65 sysinfo.o65 sysinfo_render.o65 memtest.o65 saves.o65 pcmplay.o65 spcview.o65 nsfplay.o65 msufolder.o65 diricon.o65 fmres.o65 spc700.o65 spcplay.o65 menu.o65 menudata.o65 contextdata.o65 fileman.o65 const_lang_fm.o65 kvdata.o65 ui.o65 nmihook.o65 hookxlate.o65 mouse.o65 mouselegend.o65 common.o65 savestate.o65 savestate_cx4.o65 cheatoverlay.o65 manhost.o65 near.o65 patch.o65 stdlg.o65 ghlaunch.o65 expwarn.o65 cheatmenu.o65 cheatedit.o65 iris.o65 bootintro.o65 onboarding/onboarding_gate.o65 # gfx.o65 # vars.o65
 
 OBJS = $(IPS) $(O65)
 # stopgap measure to create both files as long as they are identical...
@@ -18,12 +18,17 @@ OUT = menu.bin m3nu.bin
 # igmenu.bin: the in-game TAB menu shell, linked SEPARATELY from the menu (org bank $C8,
 # loaded by the MCU to PSRAM $C80000 at game-load). NOT part of m3nu.bin.
 IGMENU = igmenu.bin
-# 3 banks ($C0-$C2). Lockstep with THEME_MENU_SIZE in src/theme.c. $C2 carries the
+# 4 banks ($C0-$C3). The font and the theme regions stay in $C0, which is what
+# THEME_MENU_SIZE in src/theme.c (3 banks) bounds. $C3 is the file manager's bank
+# (fileman.a65 + its strings, const_lang_fm): it is loaded with the rest at boot, but the
+# Ficha's guide viewer borrows $C3 for its tiles, so nothing outside $C3 may depend on it
+# being there -- fm_bank_ok (fmres.a65) checks its magic and the firmware restages it
+# (FM_OP_BANK). Before the file manager the menu was 3 banks: $C2 carries the
 # i18n string pool (const_lang_str, build_const.py; the dispatch tables that name
 # those strings live in $C1, const_lang_tab) and stays RESIDENT in-game
 # (igmenu moved to $C8, the dir buffer to $DB), so in-game readers like the cheat
 # overlay's (no name) lookup keep working.
-MENU_SIZE = 196608
+MENU_SIZE = 262144
 
 # onboarding.bin: the first-boot tour ROM (sources in onboarding/). A SEPARATE HiROM
 # image with its own $C0-$C2 namespace, booted by the firmware IN PLACE OF the menu
@@ -91,7 +96,7 @@ $(ONB_OUT): $(ONB_O65)
 # three files: const_lang.a65 (bank $C0: neutral data), const_lang_str.a65 (bank $C2:
 # the localized string pool) and const_lang_tab.a65 (bank $C1: the dispatch tables
 # resolve_str walks) -> m3nu.bin spans 3 banks.
-const_lang.a65 const_lang_str.a65 const_lang_tab.a65 const_lang_cjk.a65 lang_ja.bin lang_zh.bin &: const.a65 utils/build_const.py fonts/misaki_gothic_2nd.hex fonts/fusion8_zh_hans.hex utils/lang_ptbr.py utils/lang_es.py utils/lang_de.py utils/lang_fr.py utils/lang_it.py utils/lang_ru.py utils/lang_nl.py utils/lang_ja.py utils/lang_zh.py
+const_lang.a65 const_lang_str.a65 const_lang_tab.a65 const_lang_cjk.a65 const_lang_fm.a65 lang_ja.bin lang_zh.bin &: const.a65 utils/build_const.py fonts/misaki_gothic_2nd.hex fonts/fusion8_zh_hans.hex utils/lang_ptbr.py utils/lang_es.py utils/lang_de.py utils/lang_fr.py utils/lang_it.py utils/lang_ru.py utils/lang_nl.py utils/lang_ja.py utils/lang_zh.py
 	python3 utils/build_const.py const.a65 utils/lang_ptbr.py utils/lang_es.py utils/lang_de.py utils/lang_fr.py utils/lang_it.py utils/lang_ru.py utils/lang_nl.py utils/lang_ja.py utils/lang_zh.py -o const_lang.a65
 
 # The firmware's CJK fonts (src/gameinfo.c draws a game's Japanese/Chinese title and
@@ -165,7 +170,7 @@ link.log: $(OBJS)
 	  echo "*** snescom FAILED on $< (see $(@:.log=).log)"; rm -f $(@:.log=); exit 1; fi
 
 clean:
-	rm -f -- *~ *.ips *.o65 const_lang.a65 const_lang_str.a65 const_lang_tab.a65 const_lang_cjk.a65 lang_*.bin lang_*.fnt igmenu_lang.i65 $(OUT) *.o65.log *.ips.log $(IGMENU) igmenu_raw.smc igmenu.link.log
+	rm -f -- *~ *.ips *.o65 const_lang.a65 const_lang_str.a65 const_lang_tab.a65 const_lang_cjk.a65 const_lang_fm.a65 lang_*.bin lang_*.fnt igmenu_lang.i65 $(OUT) *.o65.log *.ips.log $(IGMENU) igmenu_raw.smc igmenu.link.log
 	rm -f -- onboarding/*.o65 onboarding/*.ips onboarding/*.o65.log onboarding/*.ips.log onboarding/onb_const_lang.a65 onboarding/onb_const_lang_b.a65 onboarding/onb_const_lang_t.a65 onboarding/onb_cjk_ja.a65 onboarding/onb_cjk_zh.a65 onboarding/onb_cjk_sheets.a65 onboarding/onb_cjk_sheets_zh.a65 onboarding/onb_font.a65 $(ONB_OUT) onb_link.log
 
 -include $(info $(DEPDIR)) $(shell mkdir $(DEPDIR) 2>/dev/null) $(wildcard $(DEPDIR)/*)

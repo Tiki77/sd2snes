@@ -15,6 +15,7 @@ Usage:
     python3 fontedit.py addgerman          Insert German chars (ä ö ß Ä Ö)
     python3 fontedit.py addtourglyphs      Insert the onboarding tour's glyphs (241-243)
     python3 fontedit.py addbrowsericons    Insert the browser's file-type icons
+    python3 fontedit.py addfmicons         Insert the file manager's icons (codes 4-11)
     python3 fontedit.py addmouseglyphs     Insert the mouse-button glyphs (250-253)
     python3 fontedit.py fixcircumflex      Redraw the 8 circumflex tiles
     python3 fontedit.py addrussian         Insert Cyrillic (codes 177-223)
@@ -908,6 +909,60 @@ def browser_icon_tiles(art):
     return left, right
 
 
+# The file manager's icons (snes/fmres.a65): the clipboard in the statusbar (copy / cut) and
+# the selection mode's check boxes. Codes 4-11 are inside RESERVED_CODES on purpose: they are
+# string bytes no text ever carries (sysinfo_render's placeholders are replaced before they
+# print), so the icons are reachable only by the code that writes these exact bytes, and the
+# freeslots count never offers them to a language.
+FM_ICONS = {
+    "copy": (4, [
+        "xxxx....",
+        "x##xxxx.",
+        "x#xx##x.",
+        "x#x###x.",
+        "xxx###x.",
+        "..x###x.",
+        "..xxxxx.",
+        "........"]),
+    "cut": (6, [
+        "x.....x.",
+        ".x...x..",
+        "..x.x...",
+        "...x....",
+        ".xx.xx..",
+        "x..x..x.",
+        ".xx.xx..",
+        "........"]),
+    "box": (8, [
+        "xxxxxxx.",
+        "x.....x.",
+        "x.....x.",
+        "x.....x.",
+        "x.....x.",
+        "x.....x.",
+        "xxxxxxx.",
+        "........"]),
+    "boxon": (10, [
+        "xxxxxxx.",
+        "x.....x.",
+        "x....xx.",
+        "xx..xxx.",
+        "xxxxx.x.",
+        "x.xx..x.",
+        "xxxxxxx.",
+        "........"]),
+}
+
+
+def add_fm_icons():
+    header, tiles = load_font()
+    new_tiles = dict(enumerate(tiles))
+    for name, (code, art) in FM_ICONS.items():
+        new_tiles[code], new_tiles[code + 1] = browser_icon_tiles(art)
+    write_font(header, new_tiles)
+    print(f"Updated {FONT}: {len(FM_ICONS)} file manager icons")
+
+
 def add_browser_icons():
     header, tiles = load_font()
     new_tiles = dict(enumerate(tiles))
@@ -1362,6 +1417,8 @@ def main():
         add_scrollbar()
     elif cmd == "addtourglyphs":
         add_tour_glyphs()
+    elif cmd == "addfmicons":
+        add_fm_icons()
     elif cmd == "addbrowsericons":
         add_browser_icons()
     elif cmd == "addmouseglyphs":

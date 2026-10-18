@@ -131,6 +131,7 @@ filesel_updates:
 ; get input
   jsr read_pad
   jsl @mouse_browser  ; fork: the SNES Mouse pointer turns into these same flags (mouse.a65)
+  jsl @fm_keys        ; fork: selection mode takes A/B/Y (fmres.a65)
   lda pad_down
   bne key_down
   lda pad_up
@@ -604,6 +605,8 @@ select_item:
   beq sel_is_pcm
   cmp #TYPE_NSF
   beq sel_is_pcm        ; .nsf: select_pcm hands it to the NSF player
+  cmp #TYPE_TEXT
+  beq sel_is_pcm        ; a text file: select_pcm hands it to the viewer (fileman.a65)
   cmp #TYPE_SKIN
   beq sel_is_theme
   cmp #TYPE_SUBDIR
@@ -1235,6 +1238,8 @@ filesel_key_y:
 
 open_context_menu:
   jsr cover_sync_before_cmd
+  lda #$01              ; fork: the file manager's rows join the menu show_menu opens next
+  sta @FM_ARM           ; (fm_menu_hook); A is 8-bit here (filesel_updates runs .as)
   rep #$20 : .al
   lda filesel_sel
   and #$00ff
@@ -1264,6 +1269,10 @@ open_context_menu:
   beq ctx_is_delonly
   cmp #TYPE_NSF
   beq ctx_is_delonly
+  cmp #TYPE_TEXT
+  beq ctx_is_delonly
+ctx_fm_only           ; fork: no menu of its own (folder, "..", a card file): the file
+  jsl @fm_ctx_only    ; manager's rows alone (fmres.a65)
 open_context_menu_cont
   rts
 ctx_is_file
@@ -1287,14 +1296,16 @@ ctx_is_file
   jsr filesel_contextmenu_file
   bra open_context_menu_cont
 ctx_is_parent
-  bra open_context_menu_cont
+  bra ctx_fm_only
 ctx_is_dir
 ; fork: a folder that opens as its MSU-1 game gets its ROM's context menu -- with
 ; OpenMsuFolders on, the user can never stand on that ROM to press Y. gnav_msu_dir probes
 ; (a plain folder costs no READDIR) and enters it, cursor on the ROM, msu_inside raised;
 ; filesel_key_y backs out afterwards (gisf_back).
   jsr gnav_msu_dir
-  bcc open_context_menu_cont
+  bcc ctx_fm_only
+  lda #$00              ; the context of the game the folder opens as: the file rows
+  sta @FM_ARM           ; would act on that ROM, not on the folder
   jsr cover_fill_param_for_current_sel ; MCU_PARAM exactly as ctx_is_file packs it
   jsr filesel_contextmenu_file
   bra open_context_menu_cont
@@ -1900,6 +1911,7 @@ filesel_statusbar
   sta @print_y
   jsr hiprint
   jsl @hint_keys          ; keys in green (manhost.a65)
+  jsl @fm_sb              ; fork: the clipboard / selection count (fmres.a65)
   plp
   plx
   pla

@@ -1,0 +1,240 @@
+; The file manager's resident part (the rest is bank $C3, fileman.a65).
+;
+; Bank $C3 is only borrowed: the Ficha's guide viewer stages its tiles there, so nothing the
+; browser does every frame may live in $C3 or depend on it.  What has to run with the plain
+; browser is here: the selection mode's keys (fm_keys, hooked into filesel_updates), its
+; check boxes (fm_marked, for dirent_icon), the clipboard's icon in the statusbar (fm_sb), and
+; the hooks that hand over to $C3 -- every one of them through fm_bank_ok, which checks the
+; bank's magic and asks the firmware to put the bank back (FM_OP_BANK) when a guide took it.
+;
+; The firmware side is src/fileman.c (SNES_CMD_FM), the work itself the card module
+; fileops.bin (src/modules/fileops/), the contract src/fileman.h.  A firmware without the
+; file manager never publishes FM_CLIPINFO, and then nothing here does anything.
+
+.link page $c2
+#include "memmap.i65"
+; memmap.i65 re-asserts '.link page $c0' on include; re-declare $c2 AFTER it.
+.link page $c2
+
+
+; ======================================================================
+;  fm_bank_ok: carry set when the file manager can run: the firmware has it (FM_CLIPINFO)
+;  and bank $C3 is the file manager's, restaged by the firmware if a guide took it.
+;  Any widths/DBR in, all registers but P kept.
+; ======================================================================
+fm_bank_ok:
+  php
+  phb
+  rep #$30 : .al : .xl
+  pha
+  phx
+  phy
+  sep #$20 : .as
+  jsr fmr_cap
+  bcc fbo_no
+  jsr fmr_magic
+  bcs fbo_yes
+  lda #FM_OP_BANK
+  jsl @fm_cmd
+  jsr fmr_magic
+  bcs fbo_yes
+fbo_no:
+  .as
+  rep #$30 : .al : .xl
+  ply
+  plx
+  pla
+  plb
+  plp
+  clc
+  rtl
+fbo_yes:
+  .as
+  rep #$30 : .al : .xl
+  ply
+  plx
+  pla
+  plb
+  plp
+  sec
+  rtl
+
+; carry set = the firmware published the clipboard block (it has the file manager)
+fmr_cap:
+  .as
+  lda @FM_CLIPINFO
+  cmp #$46                  ; 'F'
+  bne fmr_no
+  lda @FM_CLIPINFO+1
+  cmp #$43                  ; 'C'
+  bne fmr_no
+  lda @FM_CLIPINFO+2
+  cmp #FM_VERSION
+  bne fmr_no
+  sec
+  rts
+fmr_no:
+  .as
+  clc
+  rts
+
+; carry set = bank $C3 starts with "FMB1"
+fmr_magic:
+  .as
+  lda @FM_BANK_MAGIC
+  cmp #$46                  ; 'F'
+  bne fmr_no
+  lda @FM_BANK_MAGIC+1
+  cmp #$4d                  ; 'M'
+  bne fmr_no
+  lda @FM_BANK_MAGIC+2
+  cmp #$42                  ; 'B'
+  bne fmr_no
+  lda @FM_BANK_MAGIC+3
+  cmp #$31                  ; '1'
+  bne fmr_no
+  sec
+  rts
+
+; ======================================================================
+;  fm_cmd: CMD_FM with A = FM_OP_*, the rest of MCU_PARAM as the caller set it, and wait for
+;  the firmware's ready ($55 back in SNES_CMD: the echo comes first, the handler after).  A
+;  cover in flight answers $55 too, so it is drained first.  Any widths in, kept.
+; ======================================================================
+fm_cmd:
+  php
+  sep #$20 : .as
+  pha
+  jsl @ui_call_coversync
+  sep #$20 : .as
+  pla
+  sta @MCU_PARAM+8
+  lda #$00
+  sta @SNES_CMD
+  lda #CMD_FM
+  sta @MCU_CMD
+  bra fmc_wait
+
+; fm_ctl: CMD_MOD_CTL to fileops.bin, MCU_PARAM+0..3 as the caller set them.
+fm_ctl:
+  php
+  sep #$20 : .as
+  lda #$00
+  sta @SNES_CMD
+  lda #CMD_MOD_CTL
+  sta @MCU_CMD
+fmc_wait:
+  .as
+  lda @SNES_CMD
+  cmp #$55
+  beq fmc_done
+  cmp #$aa
+  bne fmc_wait
+fmc_done:
+  .as
+  lda #$00                  ; #$00, never #$55: the firmware would run a $55 as a command
+  sta @MCU_CMD
+  plp
+  rtl
+
+; ======================================================================
+;  fm_keys: filesel_updates, after the pad was read.  In selection mode A marks the entry
+;  under the cursor, B leaves the mode, Y opens its actions; X / Select / Start leave the
+;  mode and then do what they always do.  The keys it takes are zeroed for the browser.
+;  .as/.xl in (filesel_updates), kept.  The work is fm_keys_sel (fileman.a65).
+; ======================================================================
+fm_keys:
+  php
+  sep #$20 : .as
+  lda @FM_SELMODE
+  beq fks_out
+  jsl @fm_bank_ok
+  bcs fks_go
+  lda #$00                  ; no selection mode without its bank
+  sta @FM_SELMODE
+fks_out:
+  .as
+  plp
+  rtl
+fks_go:
+  .as
+  plp
+  jmp @fm_keys_sel          ; fileman.a65, rtl back to filesel_updates
+
+; ======================================================================
+;  fm_sb: filesel_statusbar's tail.  In selection mode the count and its keys (fileman.a65);
+;  otherwise, when the clipboard holds something, its icon and count just left of the
+;  clock.  .as/.xl in, kept.  The work is fm_sb_draw (fileman.a65).
+; ======================================================================
+fm_sb:
+  php
+  sep #$20 : .as
+  lda @FM_SELMODE
+  bne fsb_go
+  jsr fmr_cap
+  bcc fsb_out
+  lda @FM_CLIPINFO+3
+  beq fsb_out
+fsb_go:
+  .as
+  jsl @fm_bank_ok
+  bcc fsb_out
+  plp
+  jmp @fm_sb_draw           ; fileman.a65, rtl back to filesel_statusbar
+fsb_out:
+  .as
+  plp
+  rtl
+
+; ======================================================================
+;  fm_menu_hook: the first thing show_menu does.  Armed by open_context_menu: the browser's
+;  context menu gets the file rows (fm_ctx_build, fileman.a65), which rebuilds the table in
+;  WRAM and points X/DBR at it.  Unarmed (every other menu): nothing.
+; ======================================================================
+fm_menu_hook:
+  php
+  sep #$20 : .as
+  lda @FM_ARM
+  beq fmh_out
+  lda #$00
+  sta @FM_ARM
+  jsl @fm_bank_ok
+  bcc fmh_out
+  plp
+  jmp @fm_ctx_build         ; rtl straight back into show_menu
+fmh_out:
+  plp
+  rtl
+
+; ======================================================================
+;  fm_ctx_only: Y on an entry with no context menu of its own (a folder, "..", a card
+;  file): the file rows alone.  .as/.xl in (open_context_menu), FM_ARM still set.
+; ======================================================================
+fm_ctx_only:
+  php
+  sep #$20 : .as
+  jsl @fm_bank_ok
+  bcs fco_go
+  lda #$00
+  sta @FM_ARM
+  plp
+  rtl
+fco_go:
+  .as
+  plp
+  jmp @fm_ctx_alone         ; fileman.a65, rtl back to open_context_menu
+
+; A on a text file (select_pcm, pcmplay.a65): the viewer.
+fm_view_sel:
+  php
+  sep #$20 : .as
+  jsl @fm_bank_ok
+  bcs fvs_go
+  lda #$04                  ; error blip
+  sta @SFX_MAILBOX
+  plp
+  rtl
+fvs_go:
+  .as
+  plp
+  jmp @fm_view_alone        ; fileman.a65

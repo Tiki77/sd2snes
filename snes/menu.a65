@@ -963,6 +963,7 @@ show_menu:
 ; params:
 ; x: offset of menu structure
 ; db: bank of menu structure
+  jsl @fm_menu_hook     ; fork: the browser's context menu gets the file rows (fmres.a65)
 ; local vars:
 #define _locals         $0c
 #define w_numentries    $00

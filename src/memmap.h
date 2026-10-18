@@ -374,6 +374,23 @@
 #define BS_PACK_ADDR  0x900000
 #define BS_PACK_SIZE  0x100000
 
+/* ---- file manager (fileman.h): menu mode only ----------------------------------------
+   The BSRAM blocks sit in the free $FFA000.. stretch above MANUAL_GUIDES ($FF9000-$FF9103,
+   staged at game load -- the file manager never runs in game mode).  The PSRAM ones are in
+   $E1-$E7: SRAM_SAVE_ADDR's banks hold the game's save RAM in game mode only (the save is
+   written to the card before the menu loads), so in menu mode nothing else is there; a game
+   load overwrites them, which is fine because the clipboard is firmware RAM (fileman.h). */
+#define SRAM_FM_MARKS_ADDR           (0xFFA000L) /* 2048 B: selection bitmap, SNES-written, bit i = directory entry i. Lockstep with FM_MARKS in snes/memmap.i65. */
+#define FM_MARKS_BYTES               (2048)
+#define SRAM_FM_STAT_ADDR            (0xFFA800L) /* 256 B: fm_stat_t, written by fileops.bin. Lockstep with FM_STAT. */
+#define SRAM_FM_NAME_ADDR            (0xFFA900L) /* 256 B: the new name for rename / mkdir, SNES-written. Lockstep with FM_NAME. */
+#define SRAM_FM_CLIPINFO_ADDR        (0xFFAA00L) /* 8 B: what the clipboard icon shows, firmware-written. Lockstep with FM_CLIPINFO. */
+#define SRAM_FM_CLIP_ADDR            (0xE10000L) /* the clipboard: header + names (fileman.h), up to SRAM_FM_CLIP_END */
+#define SRAM_FM_CLIP_END             (0xE40000L)
+#define SRAM_FM_VIEW_ADDR            (0xE40000L) /* text viewer lines, FM_VIEW_MAXLINES x FM_VIEW_STRIDE. Lockstep with FM_VIEW. */
+#define SRAM_FM_WORK_ADDR            (0xE60000L) /* fileops.bin's own PSRAM: the folder-walk stack and the viewer's window offsets, up to SRAM_FM_WORK_END */
+#define SRAM_FM_WORK_END             (0xE80000L)
+
 /* Non-overlap guards: a region grown onto its neighbour becomes a build error.
    Only regions with a size stated in the comments above are covered. */
 _Static_assert(SRAM_SAVEINFO_ADDR + 48 <= SRAM_MANUAL_META_ADDR,
@@ -448,6 +465,17 @@ _Static_assert(SRAM_TRAINER_SNAP_HI_ADDR + 0x10000L <= SRAM_SPC_DATA_ADDR,
                "the trainer snapshot must stay below the menu SPC data bank");
 _Static_assert(SRAM_TRAINER_BITMAP_ADDR >= 0xF70000L + 0x30000L,
                "the trainer state must start at or above the end of init()'s mirror clear");
+
+_Static_assert(SRAM_MANUAL_GUIDES_ADDR + 260 <= SRAM_FM_MARKS_ADDR
+               && SRAM_FM_MARKS_ADDR + FM_MARKS_BYTES <= SRAM_FM_STAT_ADDR
+               && SRAM_FM_STAT_ADDR + 256 <= SRAM_FM_NAME_ADDR
+               && SRAM_FM_NAME_ADDR + 256 <= SRAM_FM_CLIPINFO_ADDR
+               && SRAM_FM_CLIPINFO_ADDR + 8 <= SRAM_SCRATCHPAD,
+               "the file manager's BSRAM blocks must stay in order between MANUAL_GUIDES and the scratchpad");
+_Static_assert(SRAM_FM_CLIP_ADDR >= SRAM_DIR_STRINGS_END && SRAM_FM_CLIP_END <= SRAM_FM_VIEW_ADDR
+               && SRAM_FM_VIEW_ADDR + 2048L * 64 <= SRAM_FM_WORK_ADDR
+               && SRAM_FM_WORK_END <= SUFAMI_SLOTB_SAVE_ADDR,
+               "the file manager's PSRAM regions must stay above the directory strings and below $E80000");
 
 /* address.v derives the Slot B window by ORing bit 19 into SAVERAM_ADDR: the two
    constants cannot drift apart without the FPGA and the MCU disagreeing. */

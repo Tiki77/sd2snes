@@ -1,6 +1,6 @@
 // ctxrows_favorites.i65 -- entry rows of the FAVORITES list context menu (Y on a row).
-// 5 entries: Remove from favorites / Cheats / Set as autoboot / Delete / Delete save
-// file. Like the recents rows these act on the list INDEX in MCU_PARAM.
+// 5 entries: Remove from favorites / Cheats / Set as autoboot / Saves... / Delete
+// (always last). Like the recents rows these act on the list INDEX in MCU_PARAM.
 //
 // Shared by the plain table in snes/menudata.a65 (bank $C0) and by the
 // ShowGameInfo == 2 variant in snes/contextdata.a65 (bank $C1), which prepends the
@@ -60,19 +60,6 @@
  .byt  0,0,0
 
  .byt  MTYPE_FUNC_CLOSE
- .word !text_filesel_context_delete_file
- .byt  ^text_filesel_context_delete_file
- .word !delete_favorite_file-1
- .byt  ^delete_favorite_file-1
- .byt  0
- .byt  0,0,0
- .word !mdesc_filesel_context_delete_file
- .byt  ^mdesc_filesel_context_delete_file
- .byt  0,0,0
- .byt  0,0,0
- .byt  0,0,0
-
- .byt  MTYPE_FUNC_CLOSE
  .word !text_filesel_context_saves
  .byt  ^text_filesel_context_saves
  .word !saves_ctx_fav-1
@@ -81,6 +68,19 @@
  .byt  0,0,0
  .word !mdesc_filesel_context_saves
  .byt  ^mdesc_filesel_context_saves
+ .byt  0,0,0
+ .byt  0,0,0
+ .byt  0,0,0
+
+ .byt  MTYPE_FUNC_CLOSE
+ .word !text_filesel_context_delete_file
+ .byt  ^text_filesel_context_delete_file
+ .word !delete_favorite_file-1
+ .byt  ^delete_favorite_file-1
+ .byt  0
+ .byt  0,0,0
+ .word !mdesc_filesel_context_delete_file
+ .byt  ^mdesc_filesel_context_delete_file
  .byt  0,0,0
  .byt  0,0,0
  .byt  0,0,0

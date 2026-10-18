@@ -27,6 +27,7 @@
 #include "pcmplay.h"
 #include "module.h"
 #include "menucmd.h"
+#include "fileman.h"
 #include "util.h"
 #include "timer.h"    /* getticks: seed for the random menu-music draw */
 #include "rtc.h"      /* get_bcdtime: mixed into that seed when the RTC is valid */
@@ -46,7 +47,7 @@ extern snes_romprops_t romprops;
    lists and hang the loader when opened.  The boot-time check (main) covers
    files removed on a PC between sessions.  cfg_validity_check rewrites a .cfg
    (keeping a .bak) only when something actually changed. */
-static void revalidate_game_lists(void) {
+void revalidate_game_lists(void) {
   cfg_validity_check_listed_games(LAST_FILE);
   STM.num_recent_games = cfg_dump_listed_games_for_snes(LAST_FILE, SRAM_LASTGAME_ADDR, 1);
   cfg_validity_check_listed_games(FAVORITES_FILE);
@@ -981,6 +982,9 @@ uint8_t menucmd_dispatch(uint8_t cmd, uint8_t *menu_reload) {
       return 0;
     case SNES_CMD_SAVES:
       saves_from();
+      return 0;
+    case SNES_CMD_FM:
+      fileman_command();
       return 0;
     case SNES_CMD_DELETE_FILE_FAV:
       delete_file_from(SEL_FAV);

@@ -91,7 +91,7 @@ SRC += dirindex.c
 SRC += memtest.c
 # Card modules (module.h): menu features whose code is a file on the card, loaded only while
 # their screen is open.  The images (modules/) are built below with every firmware.
-SRC += module.c
+SRC += module.c fileman.c
 # The SPC7110 RTC-4513 battery backup is a card module (modules/rtc7110/, rtc7110.bin):
 # load_rom opens it for SPC7110 games only.
 

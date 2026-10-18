@@ -194,6 +194,13 @@ ui_call_wdraw:
   jsr draw_window
   rtl
 
+; the file manager (fileman.a65, $C3): the folder re-read after a paste / rename, the cursor
+; kept near where it was
+ui_call_relist:
+  jsr filesel_request_filelist
+  jsr filesel_fix_pos_after_delete
+  rtl
+
 ; push without drawing: the players save the browser behind them and grey it, like a modal
 ui_call_wpush:
   jsr push_window

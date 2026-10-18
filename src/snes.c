@@ -660,7 +660,8 @@ uint8_t menu_main_loop() {
       cmd = 0;
     }
     gameinfo_fmv_idle_check();   /* stop a lingering FMV if its info screen closed quietly */
-    module_idle();               /* the open card module's status block: the PCM / NSF player (no-op when none) */
+    int mod_busy = module_idle(); /* the open card module: the PCM / NSF player's status block, a
+                                     file manager copy (no-op when none) */
     /* While an effect is playing the FPGA drains a DAC half-buffer every ~6 ms
        (44.1 kHz) - far faster than this 20 ms poll - so busy-service the DAC to
        the same ~20 ms budget instead of sleeping (verbatim pattern from the
@@ -675,8 +676,8 @@ uint8_t menu_main_loop() {
         menu_music_work();   /* a QOA clip: decode the next step ahead of the FPGA fetcher */
         if(!cmd && !get_snes_reset()) cmd = snes_get_mcu_cmd();
       } while(!cmd && getticks() < until);
-    } else {
-      sleep_ms(20);
+    } else if(!mod_busy) {
+      sleep_ms(20);              /* a module with work queued (a copy) runs again at once */
     }
     cli_entrycheck();
     if (!cmd) {

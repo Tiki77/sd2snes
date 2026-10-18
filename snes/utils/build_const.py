@@ -405,11 +405,19 @@ def main():
                  if not k.startswith(DROP_PREFIXES)}
     lines, en_args = parse_base(base)
 
-    out, order = [], []
+    # text_fm_* / mtext_fm_* / mdesc_fm_*: the file manager's strings live with its code in bank $C3
+    # (const_lang_fm.a65, its own tables + pool), so they cost nothing in the full $C0-$C2.
+    # The bank is not resident everywhere (the Ficha's guide viewer borrows it), so these
+    # labels must never be reached from code outside $C3: resolve_str would not know them.
+    FM_PREFIXES = ("text_fm_", "mtext_fm_", "mdesc_fm_")
+    out, order, fm_neutral = [], [], []
     for line in lines:
         m = LINE_RE.match(line)
         if m and m.group(2).startswith(DROP_PREFIXES):
             continue                            # igmenu-only label, dead in this link
+        if m and m.group(2).startswith(FM_PREFIXES) and m.group(2) not in localized:
+            fm_neutral.append(line)             # file manager, same in every language
+            continue
         if m and m.group(2) in localized:
             order.append(m.group(2))            # moved to the localized block below
         elif m and any(is_cjk(ch) for ch in m.group(4)):
@@ -571,6 +579,15 @@ def main():
 
     tabledefs = []
     plaindefs = []   # labels whose languages coincide -> plain string, no table
+    fm_tabledefs, fm_plaindefs = [], []
+    fm_pool, fm_pool_order = {}, []
+
+    def intern_fm(args):
+        if args not in fm_pool:
+            fm_pool[args] = f"fmpool_{len(fm_pool)}"
+            fm_pool_order.append(args)
+        return fm_pool[args]
+
     for label in order:
         en = en_args[label]
         # Language-neutral? Compare via normalized decode so a translation that
@@ -589,6 +606,14 @@ def main():
             norms.append(encode_string(text) if text else en_norm)
             strings.append(args)
         use(None)
+        if label.startswith(FM_PREFIXES):
+            if all(n == en_norm for n in norms):
+                fm_plaindefs.append((label, en))
+            else:
+                fm_tabledefs.append((label, [intern_ext(col_code[c], args) if col_code[c] in ext
+                                             else "!" + intern_fm(args)
+                                             for c, args in enumerate(strings)]))
+            continue
         if all(n == en_norm for n in norms):
             plaindefs.append((label, en))
             continue
@@ -697,6 +722,26 @@ def main():
         out_path.with_name(f"lang_{code}.bin").write_bytes(hdr + bytes(data) + sheet)
         print(f"  lang_{code}.bin: column {col}, {len(idx)} strings ({len(data)} B), "
               f"{len(lmap)} glyphs ({len(sheet)} B), {total} B of {CJK_FILE_MAX}")
+
+    # The file manager's bank ($C3): tables [fmtab_lo, fmtab_hi), its pool for the Latin
+    # columns, the CJK columns in lang_<code>.bin like the rest. fm_str (fileman.a65) reads
+    # table + fmpool_bank[lang]; a pointer outside the range is a plain string.
+    fmout = [".link page $c3", "",
+             "; ==== file manager strings (build_const.py: text_fm_* / mtext_fm_*) ====",
+             f"fmtab_nlang .byt {nlang}",
+             "fmpool_bank .byt " + ", ".join(
+                 "$7f" if col_code[c] in ext else "^fmpool_lo" for c in range(nlang)),
+             "fmtab_lo"]
+    for label, labels in fm_tabledefs:
+        fmout.append(f"{label} " + " : ".join(f".word {c}" for c in labels[:nlang]))
+    fmout += ["fmtab_hi", "fmpool_lo"]
+    for args in fm_pool_order:
+        fmout.append(f"{fm_pool[args]} .byt {args}")
+    for label, args in fm_plaindefs:
+        fmout.append(f"{label} .byt {args}")
+    fmout += fm_neutral
+    fm_path = out_path.with_name(out_path.stem + "_fm" + out_path.suffix)
+    fm_path.write_text("\n".join(fmout) + "\n")
 
     out_path.write_text("\n".join(out) + "\n")
     cjk_path = out_path.with_name(out_path.stem + "_cjk" + out_path.suffix)

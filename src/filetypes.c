@@ -107,6 +107,22 @@ static uint8_t is_card_data_ext(const char *name) {
   return 0;
 }
 
+/* The file manager's viewer (fileman.h) reads these as text.  Listed everywhere, so a .txt
+   next to a game can be opened with A; inside /sd2snes the card's own data keeps TYPE_DATA
+   (the viewer goes by the extension there). */
+static uint8_t is_text_ext(const char *name) {
+  static const char *const exts[] = {
+    "txt", "md", "nfo", "diz", "yml", "yaml", "cfg", "ini", "log", "json", "csv", "xml",
+    "htm", "html"
+  };
+  const char *ext = strrchr(name, '.');
+  if(!ext) return 0;
+  for(uint8_t i = 0; i < sizeof(exts) / sizeof(exts[0]); i++) {
+    if(!strcasecmp(ext + 1, exts[i])) return 1;
+  }
+  return 0;
+}
+
 static uint8_t path_is_sysdir(const uint8_t *path) {
   const char *p = (const char*)path;
   size_t n = strlen(SYS_DIR_NAME);
@@ -173,22 +189,25 @@ printf("start\n");
          still opening as a silent MSU-1 game.  Must stay AFTER the msu_seen probe above,
          which keys off TYPE_UNKNOWN. */
       if(type == TYPE_UNKNOWN && !(fno.fattrib & AM_DIR)) {
-        if(in_sysdir) type = is_card_data_ext(fn) ? TYPE_DATA : TYPE_FILE;
+        if(in_sysdir && is_card_data_ext(fn)) type = TYPE_DATA;
+        else if(is_text_ext(fn)) type = TYPE_TEXT;
+        else if(in_sysdir) type = TYPE_FILE;
         else {
           const char *e = strrchr(fn, '.');
           if(e && !strcasecmp(e + 1, "msu")) type = TYPE_DATA;
         }
       }
-      /* .nsf rides on the .pcm request: the menu's type list already runs past MCU_PARAM
+      /* .nsf and the text files ride on the .pcm request: the menu's type list already runs past MCU_PARAM
          (filesel_request_filelist), and a menu that plays .pcm is a menu that knows the
          player screens.  An older one shows the .nsf inert (unknown type, A blips). */
       if(is_requested_filetype(type, filetypes) || type == TYPE_FILE || type == TYPE_DATA
-         || (type == TYPE_NSF && is_requested_filetype(TYPE_PCM, filetypes))) {
+         || ((type == TYPE_NSF || type == TYPE_TEXT) && is_requested_filetype(TYPE_PCM, filetypes))) {
         switch(type) {
           case TYPE_ROM:
           case TYPE_SPC:
           case TYPE_PCM:    /* .pcm (MSU-1 track) -- listed like a .spc, played by the menu PCM player */
           case TYPE_NSF:    /* .nsf (NES music) -- listed like a .spc, played by the menu NSF player */
+          case TYPE_TEXT:   /* a text file -- the file manager's viewer */
           case TYPE_SKIN:   /* theme files (.thm/.skin) are listed like ROMs */
           case TYPE_NES:    /* .nes (core NES, mk3-only) -- listado como ROM */
           case TYPE_FILE:   /* system file inside /sd2snes -- shown with its size, inert */

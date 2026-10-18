@@ -123,6 +123,7 @@ typedef struct __attribute__((__packed__)) _gameinfo_meta {
  * Bounded; `out` holds at least outsize chars. On a path too long to fit, `out` is the EMPTY
  * STRING -- callers must cope with that rather than assume a usable path. */
 void gameinfo_info_base(const uint8_t *rom_path, char *out, int outsize);
+int  gameinfo_font_cp(uint32_t cp, uint8_t *out);   /* one code point -> menu font bytes */
 
 /* Parse /sd2snes/info/<rom>.yml (optional), stage the band image (<rom>.fmv animated,
  * else <rom>.gd static, else the sibling <rom>.cov OBJ fallback), write the meta

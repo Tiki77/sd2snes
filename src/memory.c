@@ -57,6 +57,7 @@ memory.c: RAM operations
 #include "savestate.h"
 #include "sgb.h"
 #include "gbc.h"
+#include "fileman.h"
 #include "module.h"
 #include "nes.h"
 #include "nesave.h"
@@ -1661,6 +1662,8 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
   /* Gated at the call site: this is the difference between a menu load and a game
      load, and between pass 1 and the recore reload. */
   if(!c.is_menu && (flags & LOADROM_WAIT_SNES) && !load_check_prereqs(&c)) return 0;
+  /* the game is going to run: the clipboard's names in $E1.. are about to be its save RAM */
+  if(!c.is_menu) fileman_forget();
   if(flags & LOADROM_WAIT_SNES) {
     printf("Setting cmd=0x55...");
     snes_set_snes_cmd(0x55);

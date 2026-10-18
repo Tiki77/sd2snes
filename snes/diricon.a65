@@ -30,6 +30,8 @@
 #define DI_THEME   11
 #define DI_FILE    12
 #define DI_MSU     13
+#define DI_BOX     14       ; the file manager's selection mode (fmres.a65): not marked...
+#define DI_BOXON   15       ; ...marked
 
 
 ; dirent_icon: print the icon of the current entry (dirent_type, name at dirent_addr+6 in
@@ -51,6 +53,8 @@ dirent_icon:
   sep #$20 : .as
   lda #51
   sta di_name_w
+  lda @FM_SELMODE           ; selection mode: a check box in the icon's place, icons on or off
+  bne di_sel
   lda @CFG_BROWSER_ICONS
   bne di_on
   stz di_name_off           ; ...or, with the icons off (BrowserIcons), the icon's column
@@ -77,6 +81,8 @@ di_on:
   cmp #TYPE_FILE
   beq di_file
   cmp #TYPE_DATA
+  beq di_file
+  cmp #TYPE_TEXT
   beq di_file
   cmp #TYPE_ROM
   beq di_rom
@@ -123,6 +129,29 @@ di_file:
 di_rom:
   .as : .xl
   jsr di_rom_kind
+  bra di_print
+di_sel:                     ; the row's entry = the page's first + (print_y - 9)
+  .as : .xl
+  ldx #DI_NONE
+  lda dirent_type
+  bit #TYPE_PARENT
+  bne di_print
+  rep #$20 : .al
+  lda dirptr_addr
+  lsr
+  lsr
+  sta print_ptr
+  lda print_y
+  and #$00ff
+  sec
+  sbc #$0009
+  clc
+  adc print_ptr
+  jsl @fm_marked            ; carry = marked
+  sep #$20 : .as
+  ldx #DI_BOX
+  bcc di_print
+  ldx #DI_BOXON
 di_print:
   .as : .xl
   lda @di_pal, x
@@ -261,7 +290,7 @@ di_rk_a:                    ; .a26
 ; the print palette per icon: 0 white, 1 yellow, 2 green, 3 blue, 6 grey. Hires splits
 ; the two glyphs between BG2 and BG1, and only these palettes are the same colours on both
 ; (BG1's 5 and 7 come out dark)
-di_pal  .byt 0, 1, 1, 0, 6, 3, 6, 3, 1, 2, 2, 0, 6, 1
+di_pal  .byt 0, 1, 1, 0, 6, 3, 6, 3, 1, 2, 2, 0, 6, 1, 0, 2
 
 ; the two glyphs per icon (utils/fontedit.py BROWSER_ICONS), two bytes each, no terminator:
 ; print_count = 2 stops hiprint
@@ -279,3 +308,5 @@ di_str  .byt 32, 32
         .byt 246, 247
         .byt 248, 249
         .byt 164, 165   ; MSU-1 folder: the SNES pad, in the folders' yellow
+        .byt 8, 9       ; selection mode: a box (utils/fontedit.py FM_ICONS)...
+        .byt 10, 11     ; ...ticked

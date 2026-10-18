@@ -1,0 +1,2457 @@
+; ======================================================================
+;  The browser's file manager: copy, cut, paste, rename, new folder and a text viewer, with
+;  a selection mode to act on several entries of a folder at once.
+;
+;  WHO DOES WHAT.  The card module fileops.bin does the work (src/modules/fileops/: trees,
+;  conflicts, a game's own files, the Recents/Favorites entries, the text pages); the
+;  firmware holds the clipboard and opens the module (src/fileman.c, SNES_CMD_FM); this
+;  bank only asks and shows.  The contract is src/fileman.h (FM_* in memmap.i65).
+;
+;  WHERE IT LIVES.  Bank $C3, which the Ficha's guide viewer borrows: nothing outside this
+;  bank may reach in without fm_bank_ok (fmres.a65, $C2), and that is also where the
+;  browser's every-frame parts are (the selection mode's keys and boxes, the clipboard's
+;  icon).  Its strings are its own too (const_lang_fm.a65: text_fm_* / mtext_fm_*, read
+;  through fm_str, never through resolve_str).
+;
+;  THE CONTEXT MENU.  open_context_menu arms FM_ARM and the first show_menu after it calls
+;  fm_ctx_build (fmres.a65's fm_menu_hook): the table it was given is copied into WRAM with
+;  the file rows after its own, and show_menu runs on the copy.  An entry with no menu of
+;  its own (a folder, "..", a card file) gets the rows alone (fm_ctx_alone).
+;
+;  Runs with DP = 0 and DB = $7E (fm_env); the $C0 routines through the ui_call_* /
+;  gi_call_* trampolines.
+; ======================================================================
+.link page $c3
+#include "memmap.i65"
+; memmap.i65 re-asserts '.link page $c0' on include; re-declare $c3 AFTER it.
+.link page $c3
+
+; the first bytes of the bank: fm_bank_ok (fmres.a65) checks them before calling in
+fm_bank_magic .byt "FMB1"
+
+#define FMX_TLEN    $7E9800     ; word: bytes written into the table being built
+#define FMX_T       $7E9802     ; word scratch
+#define FMX_T2      $7E9804     ; word scratch
+#define FMX_MODE    $7E9806     ; the clipboard mode of a copy / cut
+#define FMX_OP      $7E9807     ; the module op being run
+#define FMX_ANS     $7E9808     ; the conflict menu's answer: FM_ANS_* (+$80 = for all), 0 = B
+#define FMX_WIN     $7E9809     ; 1 = the progress window is up
+#define FMX_LASTP   $7E980A     ; word: what the progress window shows (redrawn on change)
+#define FMX_LASTI   $7E980C     ; word
+#define FMX_LASTS   $7E980E     ; the state shown
+#define FMX_L2      $7E980F     ; 1 = the popup has a second line (FMX_LINE)
+#define FMX_VTOP    $7E9810     ; word: the viewer's first line on screen
+#define FMX_VN      $7E9812     ; word: lines in the window loaded
+#define FMX_VWIN    $7E9814     ; word: that window's index
+#define FMX_BAR     $7E9816     ; 3 B: bar_xl/yl/wl kept across a popup
+#define FMX_STRT    $7E9819     ; word: fm_str's own scratch (its callers keep FMX_T across it)
+#define FMX_WSAVE   $7E981C     ; 4 B: window_x/y/w/h across a row handler (fm_enter / fm_wrest)
+#define FMX_DESC    $7E9822     ; word: the description label of the next fm_row (0 = none)
+#define FMX_TBL     $7E9820     ; the table the builders write into (FM_TAB or FMX_TAB2), word
+#define FMX_LINE    $7E9840     ; 96 B: a line being composed
+#define FMX_TAB2    $7E9A00     ; the selection / conflict menus' table (up to $7E9DFF)
+#define FMX_DEL     $7E9E80     ; 23 B: a context table's Delete row, held back (fm_ctx_copy)
+#define FMX_DELON   $7E9E97     ; 1 = FMX_DEL holds one
+
+#define FMV_ROWS    16          ; the viewer's text rows
+#define FMV_X       2           ; the browser area's own window (row 9: above it the logo
+#define FMV_Y       9           ; splits the screen and a border comes out torn)
+
+; ======================================================================
+;  fm_env: DP = 0, DB = $7E, .as/.xl
+; ======================================================================
+fm_env:
+  sep #$20 : .as
+  rep #$10 : .xl
+  lda #$7e
+  pha
+  plb
+  pea $0000
+  pld
+  rts
+
+; fm_enter: fm_env, and the window geometry the handler's caller (show_menu) pops with kept
+; for fm_wrest: the keyboard, the popups and the folder re-read leave theirs behind.
+fm_enter:
+  jsr fm_env
+  .as : .xl
+  lda window_x
+  sta FMX_WSAVE
+  lda window_y
+  sta FMX_WSAVE+1
+  lda window_w
+  sta FMX_WSAVE+2
+  lda window_h
+  sta FMX_WSAVE+3
+  rts
+
+fm_wrest:
+  .as : .xl
+  lda FMX_WSAVE
+  sta window_x
+  lda FMX_WSAVE+1
+  sta window_y
+  lda FMX_WSAVE+2
+  sta window_w
+  lda FMX_WSAVE+3
+  sta window_h
+  rts
+
+; ======================================================================
+;  fm_str: the string label X (bank $C3) names in the menu language -> print_src/bank.
+;  A label in [fmtab_lo, fmtab_hi) is a table of one word per language (build_const.py),
+;  the bank from fmpool_bank; any other label is the string itself.  .as/.xl, DB = $7E.
+; ======================================================================
+fm_str:
+  .as : .xl
+  cpx #!fmtab_lo
+  bcc fms_plain
+  cpx #!fmtab_hi
+  bcs fms_plain
+  lda cur_lang
+  cmp @fmtab_nlang
+  bcc fms_lang
+  lda #$00
+fms_lang:
+  .as
+  rep #$20 : .al
+  and #$00ff
+  pha
+  asl
+  sta FMX_STRT
+  txa
+  clc
+  adc FMX_STRT
+  tax
+  lda @$c30000, x
+  sta print_src
+  plx
+  sep #$20 : .as
+  lda @fmpool_bank, x
+  sta print_bank
+  rts
+fms_plain:
+  .as
+  stx print_src
+  lda #$c3
+  sta print_bank
+  rts
+
+; fm_print: label X at print_x/print_y, A = width, palette 0.  .as/.xl.
+fm_print:
+  .as : .xl
+  sta print_count
+  stz print_count+1
+  stz print_pal
+  stz print_pal+1
+  jsr fm_str
+  jsl @gi_call_hiprint
+  jmp fm_env
+
+; ======================================================================
+;  The tables.  A row is a show_menu entry (23 B, MTYPE_FUNC_CLOSE): its text already
+;  resolved for the language, the handler in this bank.  FMX_TBL = the table, FMX_TLEN =
+;  bytes in it.
+; ======================================================================
+
+; fm_row: append a row, X = the text label, Y = the handler - 1.  .as/.xl.
+fm_row:
+  .as : .xl
+  phy
+  jsr fm_str
+  rep #$20 : .al
+  lda FMX_TBL
+  clc
+  adc FMX_TLEN
+  tax
+  sep #$20 : .as
+  lda #MTYPE_FUNC_CLOSE
+  sta @$7e0000, x
+  lda print_bank
+  sta @$7e0003, x
+  lda #$c3
+  sta @$7e0006, x
+  rep #$20 : .al
+  lda print_src
+  sta @$7e0001, x
+  pla
+  sta @$7e0004, x
+  lda #$0000
+  sta @$7e0007, x           ; +7..+22: no value, no description, no greying predicate
+  sta @$7e0009, x
+  sta @$7e000b, x
+  sta @$7e000d, x
+  sta @$7e000f, x
+  sta @$7e0011, x
+  sta @$7e0013, x
+  sta @$7e0015, x
+  lda FMX_DESC              ; the description box under the menu (+11, menu_desc_draw)
+  beq fmr_nodesc
+  phx
+  tax
+  sep #$20 : .as
+  jsr fm_str
+  rep #$20 : .al
+  plx
+  lda print_src
+  sta @$7e000b, x
+  sep #$20 : .as
+  lda print_bank
+  sta @$7e000d, x
+  rep #$20 : .al
+  lda #$0000
+  sta FMX_DESC              ; one row only
+fmr_nodesc:
+  .al : .xl
+  lda FMX_TLEN
+  clc
+  adc #MENU_ENTRY_SIZE
+  sta FMX_TLEN
+  sep #$20 : .as
+  rts
+
+; fm_tab_head: a new table at FMX_TBL with the title label X.  .as/.xl.
+fm_tab_head:
+  .as : .xl
+  jsr fm_str
+  rep #$20 : .al
+  ldx !FMX_TBL
+  lda print_src
+  sta @$7e0001, x
+  lda #$0004
+  sta FMX_TLEN
+  sep #$20 : .as
+  lda #$01                  ; listsel_step
+  sta @$7e0000, x
+  lda print_bank
+  sta @$7e0003, x
+  rts
+
+; fm_tab_end: the terminator.  .as/.xl.
+fm_tab_end:
+  .as : .xl
+  rep #$20 : .al
+  lda FMX_TBL
+  clc
+  adc FMX_TLEN
+  tax
+  sep #$20 : .as
+  lda #$00
+  sta @$7e0000, x
+  rts
+
+; fm_show: show_menu on the table at FMX_TBL ($7E).  .as/.xl in and out.
+fm_show:
+  .as : .xl
+  ldx !FMX_TBL
+  lda #$7e
+  pha
+  plb
+  jsl @ui_call_show_menu
+  jmp fm_env
+
+; ======================================================================
+;  fm_ctx_build: show_menu's first act when armed (fm_menu_hook).  DBR:X = the table it was
+;  given; the same table goes to FM_TAB with the file rows after its own, and show_menu
+;  continues on FM_TAB.  Returns with DB = $7E, X = !FM_TAB (16 bits), everything else as
+;  show_menu's caller had it.
+; ======================================================================
+fm_ctx_build:
+  php
+  phd
+  sep #$20 : .as
+  rep #$10 : .xl
+  phb
+  pla                       ; A = the table's bank
+  pea $0000
+  pld
+  pea $7e7e
+  plb
+  plb
+  sta print_ptr+2           ; DP 0: [print_ptr] = the caller's table
+  stx print_ptr
+  rep #$20 : .al
+  lda #!FM_TAB
+  sta FMX_TBL
+  sep #$20 : .as
+  stz !FMX_DELON
+  ldy #$0000                ; the header, as given
+fcb_head:
+  .as : .xl
+  lda [print_ptr], y
+  tyx
+  sta @FM_TAB, x
+  iny
+  cpy #$0004
+  bne fcb_head
+  sty !FMX_TLEN
+fcb_entry:
+  .as : .xl
+  lda [print_ptr], y        ; type 0 = the end
+  beq fcb_copied
+  jsr fcb_is_del
+  bcc fcb_keep
+  ldx #!FMX_DEL
+  jsr fcb_copy1
+  lda #$01
+  sta !FMX_DELON
+  bra fcb_entry
+fcb_keep:
+  .as : .xl
+  rep #$20 : .al
+  lda !FMX_TLEN
+  clc
+  adc #!FM_TAB
+  tax
+  lda !FMX_TLEN
+  clc
+  adc #MENU_ENTRY_SIZE
+  sta !FMX_TLEN
+  sep #$20 : .as
+  jsr fcb_copy1
+  bra fcb_entry
+fcb_copied:
+  .as : .xl
+  lda print_ptr+2           ; the rows-only table (fm_ctx_alone): this bank's title
+  cmp #$c3
+  bne fcb_title_ok
+  ldx #!text_fm_title
+  jsr fm_str
+  rep #$20 : .al
+  lda print_src
+  sta @FM_TAB+1
+  sep #$20 : .as
+  lda print_bank
+  sta @FM_TAB+3
+fcb_title_ok:
+  .as : .xl
+  jsr fm_facts
+  jsr fm_ctx_rows
+  jsr fm_ctx_del
+  jsr fm_tab_end
+  pld
+  plp
+  pea $7e7e
+  plb
+  plb
+  rep #$10 : .xl
+  ldx #!FM_TAB
+  rtl
+
+; fcb_copy1: the entry at [print_ptr],Y to $7E:X; Y past it.  .as/.xl, DB $7E.
+fcb_copy1:
+  .as : .xl
+  lda #MENU_ENTRY_SIZE
+  sta !FMX_T
+fcc_l:
+  .as : .xl
+  lda [print_ptr], y
+  sta !$0000, x
+  iny
+  inx
+  dec !FMX_T
+  bne fcc_l
+  rts
+
+; fcb_is_del: carry set when the entry at [print_ptr],Y is the Delete row (its label).
+fcb_is_del:
+  .as : .xl
+  iny
+  rep #$20 : .al
+  lda [print_ptr], y
+  dey
+  cmp #!text_filesel_context_delete_file
+  sep #$20 : .as
+  bne fid_no
+  iny
+  iny
+  iny
+  lda [print_ptr], y
+  dey
+  dey
+  dey
+  cmp #^text_filesel_context_delete_file
+  bne fid_no
+  sec
+  rts
+fid_no:
+  .as : .xl
+  clc
+  rts
+
+; fm_ctx_del: the held-back Delete row after everything in the table.  .as/.xl, DB $7E.
+fm_ctx_del:
+  .as : .xl
+  lda !FMX_DELON
+  beq fcd_out
+  stz !FMX_DELON
+  rep #$20 : .al
+  lda FMX_TBL
+  clc
+  adc !FMX_TLEN
+  tax
+  lda !FMX_TLEN
+  clc
+  adc #MENU_ENTRY_SIZE
+  sta !FMX_TLEN
+  sep #$20 : .as
+  ldy #$0000
+fcd_l:
+  .as : .xl
+  lda !FMX_DEL, y
+  sta !$0000, x
+  inx
+  iny
+  cpy #MENU_ENTRY_SIZE
+  bne fcd_l
+fcd_out:
+  .as : .xl
+  rts
+
+; fm_facts: FM_IDX / FM_TYPE = the browser's entry under the cursor.  .as/.xl, DP 0.
+fm_facts:
+  .as : .xl
+  rep #$20 : .al
+  lda filesel_sel
+  and #$00ff
+  sta FMX_T
+  lda dirptr_addr
+  lsr
+  lsr
+  clc
+  adc FMX_T
+  sta FM_IDX
+  asl
+  asl
+  tax
+  sep #$20 : .as
+  lda @ROOT_DIR+3, x
+  sta FM_TYPE
+  rts
+
+; fm_ctx_rows: the file rows, after whatever FMX_TBL already holds.  .as/.xl.
+fm_ctx_rows:
+  .as : .xl
+  lda FM_TYPE
+  bit #TYPE_PARENT
+  bne fcr_place
+  ldx #!mdesc_fm_copy
+  stx !FMX_DESC
+  ldx #!mtext_fm_copy
+  ldy #!fm_h_copy-1
+  jsr fm_row
+  ldx #!mdesc_fm_cut
+  stx !FMX_DESC
+  ldx #!mtext_fm_cut
+  ldy #!fm_h_cut-1
+  jsr fm_row
+  ldx #!mdesc_fm_rename
+  stx !FMX_DESC
+  ldx #!mtext_fm_rename
+  ldy #!fm_h_rename-1
+  jsr fm_row
+  jsr fm_is_text
+  bcc fcr_place
+  ldx #!mdesc_fm_view
+  stx !FMX_DESC
+  ldx #!mtext_fm_view
+  ldy #!fm_h_view-1
+  jsr fm_row
+fcr_place:
+  .as : .xl
+  rep #$20 : .al
+  lda @FM_CLIPINFO+4        ; the clipboard's count
+  sep #$20 : .as
+  beq fcr_noclip
+  lda @FM_CLIPINFO+3
+  beq fcr_noclip
+  ldx #!mdesc_fm_paste
+  stx !FMX_DESC
+  ldx #!mtext_fm_paste
+  ldy #!fm_h_paste-1
+  jsr fm_row
+  ldx #!mdesc_fm_clear
+  stx !FMX_DESC
+  ldx #!mtext_fm_clear
+  ldy #!fm_h_clear-1
+  jsr fm_row
+fcr_noclip:
+  .as : .xl
+  ldx #!mdesc_fm_mkdir
+  stx !FMX_DESC
+  ldx #!mtext_fm_mkdir
+  ldy #!fm_h_mkdir-1
+  jsr fm_row
+  ldx #!mdesc_fm_select
+  stx !FMX_DESC
+  ldx #!mtext_fm_select
+  ldy #!fm_h_select-1
+  jmp fm_row
+
+; fm_is_text: carry set when the FM_IDX entry's extension is one the viewer takes (the
+; firmware's is_text_ext, src/filetypes.c).  .as/.xl, DP 0.
+fm_is_text:
+  .as : .xl
+  jsr fm_name_ptr           ; [print_ptr] = the name
+  ldy #$0000
+  ldx #$ffff                ; X = past the last '.', $ffff = none yet
+fit_scan:
+  .as : .xl
+  lda [print_ptr], y
+  beq fit_end
+  iny
+  cmp #$2e                  ; '.'
+  beq fit_dot
+  cmp #$01                  ; a hidden extension's dot (scan_dir, HideExtensions)
+  bne fit_scan
+fit_dot:
+  .as : .xl
+  tyx
+  bra fit_scan
+fit_end:
+  .as : .xl
+  cpx #$ffff
+  beq fit_no
+  txy                       ; Y = the extension
+  ldx #$0000                ; X = fm_text_exts
+fit_try:
+  .as : .xl
+  lda @fm_text_exts, x
+  beq fit_no                ; end of the list
+  phy
+fit_cmp:
+  .as : .xl
+  lda [print_ptr], y
+  cmp #$61
+  bcc fit_up
+  cmp #$7b
+  bcs fit_up
+  and #$df
+fit_up:
+  .as : .xl
+  cmp @fm_text_exts, x
+  bne fit_skip
+  cmp #$00
+  beq fit_yes
+  iny
+  inx
+  bra fit_cmp
+fit_skip:
+  .as : .xl
+  lda @fm_text_exts, x      ; to the next word
+  beq fit_next
+  inx
+  bra fit_skip
+fit_next:
+  .as : .xl
+  inx
+  ply
+  bra fit_try
+fit_yes:
+  .as : .xl
+  ply
+  sec
+  rts
+fit_no:
+  .as : .xl
+  clc
+  rts
+
+fm_text_exts .byt "TXT", 0, "MD", 0, "NFO", 0, "DIZ", 0, "YML", 0, "YAML", 0, "CFG", 0
+             .byt "INI", 0, "LOG", 0, "JSON", 0, "CSV", 0, "XML", 0, "HTM", 0, "HTML", 0, 0
+
+; fm_name_ptr: [print_ptr] (DP 0) = the FM_IDX entry's name.  .as/.xl.
+fm_name_ptr:
+  .as : .xl
+  rep #$20 : .al
+  lda FM_IDX
+  asl
+  asl
+  tax
+  lda @ROOT_DIR, x
+  clc
+  adc #$0006                ; past the size string
+  sta print_ptr
+  sep #$20 : .as
+  lda @ROOT_DIR+2, x
+  clc
+  adc #$c0
+  sta print_ptr+2
+  rts
+
+; ======================================================================
+;  fm_ctx_alone: Y on an entry with no context menu of its own: the rows alone, in the
+;  window filesel_contextmenu_file uses.  FM_ARM is still set, so show_menu's hook fills the
+;  empty table.
+; ======================================================================
+fm_ctx_alone:
+  php
+  phb
+  phd
+  jsr fm_env
+  .as : .xl
+  jsr fm_backdrop
+  jsl @ui_call_wpush
+  jsl @ui_call_greyout
+  jsr fm_env
+  .as : .xl
+  lda #$06
+  sta window_x
+  lda #$0b
+  sta window_y
+  phk
+  plb
+  ldx #!fm_tab_empty
+  jsl @ui_call_show_menu
+  jsr fm_env
+  .as : .xl
+  jsr fm_backdrop
+  jsl @ui_call_wclose
+  pld
+  plb
+  plp
+  rtl
+
+fm_tab_empty .byt 1 : .word !zero : .byt ^zero : .byt 0
+
+; the browser area the context menus dim
+fm_backdrop:
+  .as : .xl
+  lda #$02
+  sta window_x
+  lda #$09
+  sta window_y
+  lda #60
+  sta window_w
+  lda #18
+  sta window_h
+  rts
+
+; ======================================================================
+;  The selection mode (fmres.a65 fm_keys runs the keys).
+; ======================================================================
+
+; Y in selection mode: what to do with the marked entries.
+fm_sel_menu:
+  php
+  phb
+  phd
+  jsr fm_env
+  .as : .xl
+  jsr fm_backdrop
+  jsl @ui_call_wpush
+  jsl @ui_call_greyout
+  jsr fm_env
+  .as : .xl
+  lda #$06
+  sta window_x
+  lda #$0b
+  sta window_y
+  rep #$20 : .al
+  lda #!FMX_TAB2
+  sta FMX_TBL
+  sep #$20 : .as
+  ldx #!text_fm_title
+  jsr fm_tab_head
+  rep #$20 : .al
+  lda FM_NMARK
+  sep #$20 : .as
+  beq fsm_none
+  ldx #!mdesc_fm_scopy
+  stx !FMX_DESC
+  ldx #!mtext_fm_copy
+  ldy #!fm_s_copy-1
+  jsr fm_row
+  ldx #!mdesc_fm_scut
+  stx !FMX_DESC
+  ldx #!mtext_fm_cut
+  ldy #!fm_s_cut-1
+  jsr fm_row
+fsm_none:
+  .as : .xl
+  ldx #!mdesc_fm_selall
+  stx !FMX_DESC
+  ldx #!mtext_fm_selall
+  ldy #!fm_s_all-1
+  jsr fm_row
+  ldx #!mdesc_fm_selnone
+  stx !FMX_DESC
+  ldx #!mtext_fm_selnone
+  ldy #!fm_s_none-1
+  jsr fm_row
+  ldx #!mdesc_fm_selexit
+  stx !FMX_DESC
+  ldx #!mtext_fm_selexit
+  ldy #!fm_s_exit-1
+  jsr fm_row
+  jsr fm_tab_end
+  jsr fm_show
+  jsr fm_backdrop
+  jsl @ui_call_wclose
+  pld
+  plb
+  plp
+  rtl
+
+; the statusbar in selection mode: a ticked box, the count, the keys (fmres.a65 fm_sb).
+; DP 0, DB $7E, .as/.xl.
+fm_sb_sel:
+  php
+  jsr fm_env
+  .as : .xl
+  lda #10                   ; utils/fontedit.py FM_ICONS: the ticked box
+  sta FMX_LINE
+  lda #11
+  sta FMX_LINE+1
+  rep #$20 : .al
+  lda FM_NMARK
+  ldx #!FMX_LINE+2
+  jsl @fm_dec
+  sep #$20 : .as             ; fm_dec returns .as/.xl
+  dex                       ; over the NUL
+  lda #$20
+  sta @$7e0000, x
+  inx
+  stx !FMX_T                 ; where the keys go
+  ldx #!text_fm_sel_keys
+  jsr fm_str
+  jsr fm_cat
+  lda #$02
+  sta print_x
+  stz print_x+1
+  lda listdisp
+  clc
+  adc #$0a
+  sta print_y
+  stz print_y+1
+  lda #$29
+  sta print_count
+  stz print_count+1
+  stz print_pal
+  stz print_pal+1
+  ldx #!FMX_LINE
+  stx print_src
+  lda #$7e
+  sta print_bank
+  jsl @gi_call_hiprint
+  jsl @hint_keys
+  plp
+  rtl
+
+; fm_cat: the string at print_src/print_bank to $7E:FMX_T, NUL-terminated.  .as/.xl, DP 0.
+fm_cat:
+  .as : .xl
+  rep #$20 : .al
+  lda print_src
+  sta print_ptr
+  sep #$20 : .as
+  lda print_bank
+  sta print_ptr+2
+  ldy #$0000
+  ldx !FMX_T
+fct_loop:
+  .as : .xl
+  lda [print_ptr], y
+  sta @$7e0000, x
+  beq fct_out
+  iny
+  inx
+  cpx #!FMX_LINE+94
+  bcc fct_loop
+  lda #$00
+  sta @$7e0000, x
+fct_out:
+  .as : .xl
+  stx !FMX_T
+  rts
+
+; ======================================================================
+;  Row handlers (show_menu's MTYPE_FUNC_CLOSE: any DP/DB in, rtl out).
+; ======================================================================
+fm_h_copy:
+  php
+  phb
+  phd
+  jsr fm_enter
+  .as : .xl
+  lda #FM_CLIP_COPY
+  bra fhc_one
+fm_h_cut:
+  php
+  phb
+  phd
+  jsr fm_enter
+  .as : .xl
+  lda #FM_CLIP_CUT
+fhc_one:
+  .as : .xl
+  sta FMX_MODE
+  jsr fm_marks_clear
+  rep #$20 : .al
+  lda FM_IDX
+  jsl @fm_mark_flip
+  jsr fm_env
+  .as : .xl
+  jsr fm_clip_send
+  jmp fm_h_out
+
+fm_h_paste:
+  php
+  phb
+  phd
+  jsr fm_enter
+  .as : .xl
+  lda #FM_OP_PASTE
+  jsr fm_run
+  jmp fm_h_out
+
+fm_h_clear:
+  php
+  phb
+  phd
+  jsr fm_enter
+  .as : .xl
+  lda #FM_OP_UNCLIP
+  jsl @fm_cmd
+  lda #$02                  ; confirm blip
+  sta @SFX_MAILBOX
+  lda #$01
+  sta filesel_dirty
+fm_h_out:
+  .as : .xl
+  jsr fm_wrest
+  pld
+  plb
+  plp
+  rtl
+
+fm_h_select:
+  php
+  phb
+  phd
+  jsr fm_enter
+  .as : .xl
+  jsr fm_marks_clear
+  lda #$01
+  sta FM_SELMODE
+  sta filesel_dirty
+  lda FM_TYPE
+  bit #TYPE_PARENT
+  bne fm_h_out
+  rep #$20 : .al
+  lda FM_IDX
+  jsl @fm_mark_flip
+  jsr fm_env
+  .as : .xl
+  jmp fm_h_out
+
+fm_h_rename:
+  php
+  phb
+  phd
+  jsr fm_enter
+  .as : .xl
+  jsr fm_name_ptr           ; FM_NAME = the entry's name: the extension a hidden one
+  ldy #$0000                ; puts back, a folder's trailing '/' gone
+fhr_copy:
+  .as : .xl
+  tyx                       ; before the load: tyx sets Z from Y
+  lda [print_ptr], y
+  cmp #$01
+  bne fhr_dot
+  lda #$2e
+fhr_dot:
+  .as : .xl
+  sta @FM_NAME, x
+  cmp #$00
+  beq fhr_copied
+  iny
+  cpy #$00ff
+  bcc fhr_copy
+  lda #$00
+  sta @FM_NAME, x
+fhr_copied:
+  .as : .xl
+  cpx #$0000
+  beq fhr_kbd
+  dex
+  lda @FM_NAME, x
+  cmp #$2f                  ; '/'
+  bne fhr_kbd
+  lda #$00
+  sta @FM_NAME, x
+fhr_kbd:
+  .as : .xl
+  lda #FM_OP_RENAME
+  bra fhn_kbd
+
+fm_h_mkdir:
+  php
+  phb
+  phd
+  jsr fm_enter
+  .as : .xl
+  lda #$00
+  sta @FM_NAME
+  lda #FM_OP_MKDIR
+fhn_kbd:
+  .as : .xl
+  sta FMX_OP
+  lda #120                  ; the most bytes the keyboard takes
+  ldx #!FM_NAME
+  jsl @ce_kbd_field         ; cheatedit.a65: the name keyboard
+  jsr fm_env
+  .as : .xl
+  bcs fhn_go
+  jmp fm_h_out
+fhn_go:
+  .as : .xl
+  lda FMX_OP
+  jsr fm_run
+  jmp fm_h_out
+
+fm_h_view:
+  php
+  phb
+  phd
+  jsr fm_enter
+  .as : .xl
+  jsr fm_view
+  jmp fm_h_out
+
+; A on a text file (fmres.a65 fm_view_sel, from select_pcm)
+fm_view_alone:
+  php
+  phb
+  phd
+  jsr fm_enter
+  .as : .xl
+  jsr fm_facts
+  jsr fm_view
+  jmp fm_h_out
+
+; --- the selection menu's rows ---
+fm_s_copy:
+  php
+  phb
+  phd
+  jsr fm_enter
+  .as : .xl
+  lda #FM_CLIP_COPY
+  bra fsc_go
+fm_s_cut:
+  php
+  phb
+  phd
+  jsr fm_enter
+  .as : .xl
+  lda #FM_CLIP_CUT
+fsc_go:
+  .as : .xl
+  sta FMX_MODE
+  jsr fm_clip_send
+fm_s_leave:
+  .as : .xl
+  lda #$00
+  sta FM_SELMODE
+  lda #$01
+  sta filesel_dirty
+  jmp fm_h_out
+
+fm_s_exit:
+  php
+  phb
+  phd
+  jsr fm_enter
+  .as : .xl
+  lda #$03                  ; back blip
+  sta @SFX_MAILBOX
+  bra fm_s_leave
+
+fm_s_none:
+  php
+  phb
+  phd
+  jsr fm_enter
+  .as : .xl
+  jsr fm_marks_clear
+  lda #$01
+  sta filesel_dirty
+  jmp fm_h_out
+
+; every entry but "..": the bitmap's whole bytes, the last one's low bits, then entry 0
+; again when it is the parent (the sort puts ".." first)
+fm_s_all:
+  php
+  phb
+  phd
+  jsr fm_enter
+  .as : .xl
+  jsr fm_marks_clear
+  rep #$20 : .al
+  lda dirend_addr
+  lsr
+  lsr
+  sta FM_NMARK
+  lsr
+  lsr
+  lsr
+  tax                       ; X = whole bytes
+  sep #$20 : .as
+  ldy #$0000
+fsa_bytes:
+  .as : .xl
+  cpx #$0000
+  beq fsa_part
+  lda #$ff
+  phx
+  tyx
+  sta @FM_MARKS, x
+  plx
+  iny
+  dex
+  bra fsa_bytes
+fsa_part:
+  .as : .xl
+  lda FM_NMARK
+  and #$07
+  tax
+  lda @fsa_low, x
+  tyx
+  sta @FM_MARKS, x
+  lda @ROOT_DIR+3
+  bit #TYPE_PARENT
+  beq fsa_out
+  lda @FM_MARKS
+  and #$fe
+  sta @FM_MARKS
+  rep #$20 : .al
+  lda FM_NMARK
+  dec
+  sta FM_NMARK
+  sep #$20 : .as
+fsa_out:
+  .as : .xl
+  lda #$01
+  sta filesel_dirty
+  brl fm_h_out
+
+fsa_low .byt $00, $01, $03, $07, $0f, $1f, $3f, $7f
+
+; FM_MARKS and FM_NMARK zeroed.  .as/.xl.
+fm_marks_clear:
+  .as : .xl
+  rep #$20 : .al
+  lda #$0000
+  sta FM_NMARK
+  ldx #$07fe
+fmc_loop:
+  .al : .xl
+  sta @FM_MARKS, x
+  dex
+  dex
+  bpl fmc_loop
+  sep #$20 : .as
+  rts
+
+; fm_clip_send: the marked entries become the clipboard (FMX_MODE).  .as/.xl.
+fm_clip_send:
+  .as : .xl
+  jsr fm_param_cwd
+  lda FMX_MODE
+  sta @MCU_PARAM+9
+  rep #$20 : .al
+  lda dirend_addr
+  lsr
+  lsr
+  sta @MCU_PARAM+10
+  sep #$20 : .as
+  lda #FM_OP_CLIP
+  jsl @fm_cmd
+  lda #$01
+  sta filesel_dirty         ; the statusbar's icon
+  lda @FM_CLIPINFO+6
+  beq fcs_ok
+  lda #$04
+  sta @SFX_MAILBOX
+  ldx #!text_fm_err_full
+  stz !FMX_L2
+  jmp fm_popup
+fcs_ok:
+  .as : .xl
+  lda #$02                  ; confirm blip
+  sta @SFX_MAILBOX
+  rts
+
+; MCU_PARAM+0..3 = the folder the browser shows (FILESEL_CWD)
+fm_param_cwd:
+  .as : .xl
+  rep #$20 : .al
+  lda #!FILESEL_CWD
+  sta @MCU_PARAM
+  sep #$20 : .as
+  lda #^FILESEL_CWD
+  sta @MCU_PARAM+2
+  lda #$00
+  sta @MCU_PARAM+3
+  rts
+
+; ... and +4..7 = the FM_IDX entry, as ctx_is_file packs it (get_selected_name)
+fm_param_entry:
+  .as : .xl
+  jsr fm_param_cwd
+  rep #$20 : .al
+  lda FM_IDX
+  asl
+  asl
+  tax
+  lda @ROOT_DIR, x
+  sta @MCU_PARAM+4
+  lda @ROOT_DIR+2, x
+  and #$00ff
+  sta @MCU_PARAM+6
+  sep #$20 : .as
+  rts
+
+; ======================================================================
+;  fm_run: the module op A (paste, rename, new folder) to its end: the progress window
+;  while it copies, the conflict questions, the popup when something went wrong, and the
+;  folder re-read.  .as/.xl.
+; ======================================================================
+fm_run:
+  .as : .xl
+  sta FMX_OP
+  jsr fm_param_entry
+  lda #$00
+  sta @FM_STAT
+  sta @FM_STAT+1
+  sta @MODULE_STATUS
+  sta FMX_WIN
+  lda #$ff
+  sta FMX_LASTS
+  lda FMX_OP
+  jsl @fm_cmd
+  jsr fm_started
+  bcc frn_relist
+frn_loop:
+  .as : .xl
+  lda @FM_STAT+FMS_STATE
+  cmp #FM_ST_DONE
+  bcs frn_end               ; DONE, ERROR (and the viewer's, which fm_run never asks for)
+  cmp #FM_ST_ASK
+  bne frn_progress
+  jsr fm_ask
+  bra frn_loop
+frn_progress:
+  .as : .xl
+  jsr fm_prog_draw
+  jsr fm_frame
+  jsl @ui_call_pad
+  jsr fm_env
+  .as : .xl
+  lda pad_b
+  beq frn_loop
+  lda #FM_CTL_CANCEL
+  jsr fm_ctl1
+  bra frn_loop
+frn_end:
+  .as : .xl
+  jsr fm_prog_close
+  jsr fm_result
+frn_relist:
+  .as : .xl
+  jsl @ui_call_relist
+  jsr fm_env
+  .as : .xl
+  lda #$00
+  sta direntry_xscroll
+  sta direntry_xscroll_state
+  lda #$01
+  sta filesel_dirty
+  rts
+
+; fm_started: carry set when the module took the op; else the popup that says why.
+fm_started:
+  .as : .xl
+  lda @MODULE_STATUS
+  cmp #MODULE_ST_MISSING
+  beq fst_nomod
+  lda @FM_STAT
+  cmp #$46                  ; 'F'
+  bne fst_nofw
+  lda @FM_STAT+1
+  cmp #$53                  ; 'S'
+  bne fst_nofw
+  sec
+  rts
+fst_nomod:
+  .as : .xl
+  ldx #!text_fm_err_nomod
+  bra fst_pop
+fst_nofw:
+  .as : .xl
+  ldx #!text_fm_err_nofw
+fst_pop:
+  .as : .xl
+  lda #$04
+  sta @SFX_MAILBOX
+  stz !FMX_L2
+  jsr fm_popup
+  clc
+  rts
+
+; fm_ctl1: CMD_MOD_CTL with control A, no argument
+fm_ctl1:
+  .as : .xl
+  sta @MCU_PARAM
+  lda #$00
+  sta @MCU_PARAM+1
+  sta @MCU_PARAM+2
+  sta @MCU_PARAM+3
+  jsl @fm_ctl
+  jmp fm_env
+
+; one frame
+fm_frame:
+  .as : .xl
+  lda isr_done
+  beq fm_frame
+  stz isr_done
+  rts
+
+; ----------------------------------------------------------------------
+;  The progress window: the item, a bar over the bytes, "done / total"; B cancels.
+; ----------------------------------------------------------------------
+#define FMP_X       8
+#define FMP_Y       11
+#define FMP_W       48
+#define FMP_H       6
+
+fm_prog_draw:
+  .as : .xl
+  lda FMX_WIN
+  bne fpd_up
+  jsr fm_bar_park
+  lda #FMP_X
+  sta window_x
+  lda #FMP_Y
+  sta window_y
+  lda #FMP_W
+  sta window_w
+  lda #FMP_H
+  sta window_h
+  lda @FM_CLIP_MODE         ; the clipboard says copy or move
+  ldx #!text_fm_copying
+  cmp #FM_CLIP_CUT
+  bne fpd_title
+  ldx #!text_fm_moving
+fpd_title:
+  .as : .xl
+  jsr fm_str
+  lda print_bank
+  sta window_tbank
+  ldx print_src
+  stx window_taddr
+  jsl @ui_call_wopen
+  jsr fm_env
+  .as : .xl
+  lda #FMP_Y+FMP_H-1        ; the hint on the bottom border
+  sta print_y
+  lda #FMP_X+2
+  sta print_x
+  ldx #!text_fm_cancel
+  lda #20
+  jsr fm_print
+  jsl @hint_keys
+  jsr fm_env
+  .as : .xl
+  lda #$01
+  sta FMX_WIN
+  rep #$20 : .al
+  lda #$ffff
+  sta FMX_LASTP
+  sta FMX_LASTI
+  sep #$20 : .as
+fpd_up:
+  .as : .xl
+  rep #$20 : .al            ; redraw on a change only (hiprint is NMI tile traffic)
+  lda @FM_STAT+FMS_ITEMS_DONE
+  cmp FMX_LASTI
+  bne fpd_draw
+  lda @FM_STAT+FMS_PROGRESS
+  and #$00ff
+  cmp FMX_LASTP
+  bne fpd_draw
+  sep #$20 : .as
+  lda @FM_STAT+FMS_STATE
+  cmp FMX_LASTS
+  bne fpd_draw8
+  rts
+fpd_draw:
+  .al
+  sep #$20 : .as
+fpd_draw8:
+  .as : .xl
+  lda @FM_STAT+FMS_STATE
+  sta FMX_LASTS
+  rep #$20 : .al
+  lda @FM_STAT+FMS_ITEMS_DONE
+  sta FMX_LASTI
+  lda @FM_STAT+FMS_PROGRESS
+  and #$00ff
+  sta FMX_LASTP
+  sep #$20 : .as
+  ; the item's name
+  lda #FMP_Y+1
+  sta print_y
+  lda #FMP_X+2
+  sta print_x
+  ldx #!space64
+  lda #^space64
+  sta print_bank
+  stx print_src
+  lda #FMP_W-4
+  sta print_count
+  stz print_count+1
+  stz print_pal
+  stz print_pal+1
+  jsl @gi_call_hiprint
+  jsr fm_env
+  .as : .xl
+  lda #FMP_X+2
+  sta print_x
+  lda #^FM_STAT
+  sta print_bank
+  ldx #!FM_STAT+FMS_NAME
+  stx print_src
+  lda #FMP_W-4
+  sta print_count
+  jsl @gi_call_hiprint
+  jsr fm_env
+  .as : .xl
+  ; the bar: progress * 44 / 256 cells of 19, the rest 18
+  lda #FMP_Y+2
+  sta print_y
+  rep #$20 : .al
+  lda FMX_LASTP
+  sta FMX_T
+  asl
+  asl
+  asl                       ; *8
+  clc
+  adc FMX_T                 ; *9
+  asl
+  asl                       ; *36
+  sta FMX_T2
+  lda FMX_T
+  asl
+  asl
+  asl                       ; *8
+  clc
+  adc FMX_T2                ; *44
+  xba
+  and #$00ff                ; /256
+  sta FMX_T
+  sep #$20 : .as
+  ldx #$0000
+fpd_bar:
+  .as : .xl
+  lda #19
+  cpx !FMX_T
+  bcc fpd_cell
+  lda #18
+fpd_cell:
+  .as : .xl
+  sta FMX_LINE, x
+  inx
+  cpx #FMP_W-4
+  bcc fpd_bar
+  lda #$00
+  sta FMX_LINE, x
+  lda #FMP_X+2
+  sta print_x
+  ldx #!FMX_LINE
+  stx print_src
+  lda #$7e
+  sta print_bank
+  lda #FMP_W-4
+  sta print_count
+  jsl @gi_call_hiprint
+  jsr fm_env
+  .as : .xl
+  ; "done / total", or the counting note while the module scans
+  lda #FMP_Y+3
+  sta print_y
+  lda #FMP_X+2
+  sta print_x
+  ldx #!space64
+  lda #^space64
+  sta print_bank
+  stx print_src
+  lda #FMP_W-4
+  sta print_count
+  jsl @gi_call_hiprint
+  jsr fm_env
+  .as : .xl
+  lda #FMP_X+2
+  sta print_x
+  lda @FM_STAT+FMS_STATE
+  cmp #FM_ST_SCAN
+  bne fpd_count
+  ldx #!text_fm_counting
+  lda #FMP_W-4
+  jmp fm_print
+fpd_count:
+  .as : .xl
+  rep #$20 : .al
+  lda @FM_STAT+FMS_ITEMS_DONE
+  ldx #!FMX_LINE
+  jsl @fm_dec
+  sep #$20 : .as             ; fm_dec returns .as/.xl
+  dex
+  lda #$20
+  sta @$7e0000, x
+  inx
+  lda #$2f                  ; '/'
+  sta @$7e0000, x
+  inx
+  lda #$20
+  sta @$7e0000, x
+  inx
+  rep #$20 : .al
+  lda @FM_STAT+FMS_ITEMS_TOTAL
+  jsl @fm_dec
+  sep #$20 : .as             ; fm_dec returns .as/.xl
+  lda #FMP_X+2
+  sta print_x
+  ldx #!FMX_LINE
+  stx print_src
+  lda #$7e
+  sta print_bank
+  lda #FMP_W-4
+  sta print_count
+  jsl @gi_call_hiprint
+  jmp fm_env
+
+fm_prog_close:
+  .as : .xl
+  lda FMX_WIN
+  beq fpc_out
+  stz !FMX_WIN
+  lda #FMP_H
+  sta window_h
+  jsl @ui_call_wclose
+  jsr fm_env
+  .as : .xl
+  jsr fm_bar_back
+fpc_out:
+  .as : .xl
+  rts
+
+; the selection bar off the screen while a window of ours is up, and back
+fm_bar_park:
+  .as : .xl
+  lda bar_xl
+  sta FMX_BAR
+  lda bar_yl
+  sta FMX_BAR+1
+  lda bar_wl
+  sta FMX_BAR+2
+  lda #$ff
+  sta bar_xl
+  sta bar_yl
+  sta bar_wl
+  rts
+fm_bar_back:
+  .as : .xl
+  lda FMX_BAR
+  sta bar_xl
+  lda FMX_BAR+1
+  sta bar_yl
+  lda FMX_BAR+2
+  sta bar_wl
+  rts
+
+; ----------------------------------------------------------------------
+;  fm_ask: the module waits on a name that is taken.  A menu of answers under the
+;  progress window (which names the item); B there cancels the paste.
+; ----------------------------------------------------------------------
+fm_ask:
+  .as : .xl
+  jsr fm_prog_draw          ; the window up with the name asked about
+  stz !FMX_ANS
+  lda window_x
+  pha
+  lda window_y
+  pha
+  lda #FMP_X+4
+  sta window_x
+  lda #FMP_Y+FMP_H
+  sta window_y
+  rep #$20 : .al
+  lda #!FMX_TAB2
+  sta FMX_TBL
+  sep #$20 : .as
+  ldx #!text_fm_conflict
+  jsr fm_tab_head
+  lda @FM_STAT+FMS_ASK
+  cmp #FM_ASK_MIXED
+  beq fak_mixed
+  ldx #!mtext_fm_replace
+  cmp #FM_ASK_DIR
+  bne fak_rep
+  ldx #!mtext_fm_merge
+fak_rep:
+  .as : .xl
+  ldy #!fm_a_replace-1
+  jsr fm_row
+fak_mixed:
+  .as : .xl
+  ldx #!mtext_fm_skip
+  ldy #!fm_a_skip-1
+  jsr fm_row
+  ldx #!mtext_fm_keep
+  ldy #!fm_a_keep-1
+  jsr fm_row
+  lda @FM_STAT+FMS_ASK
+  cmp #FM_ASK_MIXED
+  beq fak_mixed_all
+  ldx #!mtext_fm_replace_all
+  cmp #FM_ASK_DIR
+  bne fak_repall
+  ldx #!mtext_fm_merge_all
+fak_repall:
+  .as : .xl
+  ldy #!fm_a_replace_all-1
+  jsr fm_row
+fak_mixed_all:
+  .as : .xl
+  ldx #!mtext_fm_skip_all
+  ldy #!fm_a_skip_all-1
+  jsr fm_row
+  ldx #!mtext_fm_keep_all
+  ldy #!fm_a_keep_all-1
+  jsr fm_row
+  jsr fm_tab_end
+  jsr fm_show
+  pla
+  sta window_y
+  pla
+  sta window_x
+  lda #FMP_H                ; the progress window is the current one again
+  sta window_h
+  lda #FMP_W
+  sta window_w
+  lda FMX_ANS
+  bne fak_answer
+  lda #FM_CTL_CANCEL        ; B: the paste stops
+  jmp fm_ctl1
+fak_answer:
+  .as : .xl
+  and #$7f
+  sta @MCU_PARAM+1
+  lda FMX_ANS
+  rol
+  rol
+  and #$01
+  sta @MCU_PARAM+2          ; 1 = the same for every later one
+  lda #FM_CTL_ANSWER
+  sta @MCU_PARAM
+  lda #$00
+  sta @MCU_PARAM+3
+  jsl @fm_ctl
+  jsr fm_env
+  .as : .xl
+  ldx #120                  ; the module leaves the question on its next pass: until then
+fak_wait:                   ; FM_STAT still says ASK, and that is no new question
+  .as : .xl
+  lda @FM_STAT+FMS_STATE
+  cmp #FM_ST_ASK
+  bne fak_out
+  jsr fm_frame
+  dex
+  bne fak_wait
+fak_out:
+  .as : .xl
+  rts
+
+fm_a_replace:
+  .as : .xl
+  lda #FM_ANS_REPLACE
+  bra fma_set
+fm_a_skip:
+  .as : .xl
+  lda #FM_ANS_SKIP
+  bra fma_set
+fm_a_keep:
+  .as : .xl
+  lda #FM_ANS_KEEPBOTH
+  bra fma_set
+fm_a_replace_all:
+  .as : .xl
+  lda #FM_ANS_REPLACE+$80
+  bra fma_set
+fm_a_skip_all:
+  .as : .xl
+  lda #FM_ANS_SKIP+$80
+  bra fma_set
+fm_a_keep_all:
+  .as : .xl
+  lda #FM_ANS_KEEPBOTH+$80
+fma_set:
+  php
+  sep #$20 : .as
+  sta @FMX_ANS
+  plp
+  rtl
+
+; ----------------------------------------------------------------------
+;  fm_result: after DONE / ERROR.  Silent when everything went; otherwise the reason and,
+;  for a paste, the counts.
+; ----------------------------------------------------------------------
+fm_result:
+  .as : .xl
+  lda @FM_STAT+FMS_STATE
+  cmp #FM_ST_ERROR
+  beq frs_err
+  rep #$20 : .al
+  lda @FM_STAT+FMS_NSKIP
+  ora @FM_STAT+FMS_NFAIL
+  sep #$20 : .as
+  bne frs_counts
+  lda #$02                  ; confirm blip
+  sta @SFX_MAILBOX
+  rts
+frs_counts:
+  .as : .xl
+  lda @FM_STAT+FMS_ERR      ; a failure leaves its reason; skips alone say "done"
+  bne frs_err
+  ldx #!text_fm_done
+  bra frs_pop
+frs_err:
+  .as : .xl
+  lda #$04
+  sta @SFX_MAILBOX
+  lda @FM_STAT+FMS_ERR
+  cmp #FM_ERR_MAX+1
+  bcc frs_known
+  lda #FM_ERR_IO
+frs_known:
+  .as : .xl
+  rep #$20 : .al
+  and #$00ff
+  asl
+  tax
+  lda @fm_err_text, x
+  tax
+  sep #$20 : .as
+frs_pop:
+  .as : .xl
+  stz !FMX_L2
+  lda FMX_OP
+  cmp #FM_OP_PASTE
+  bne frs_go
+  phx
+  jsr fm_counts             ; FMX_LINE = "N done, N skipped, N failed"
+  plx
+  lda #$01
+  sta FMX_L2
+frs_go:
+  .as : .xl
+  jmp fm_popup
+
+fm_err_text .word !text_fm_done, !text_fm_err_nospace, !text_fm_err_into, !text_fm_err_path
+            .word !text_fm_err_io, !text_fm_err_exists, !text_fm_err_cancel, !text_fm_err_badname
+            .word !text_fm_err_noclip, !text_fm_err_notfound, !text_fm_err_full
+
+; FMX_LINE = "<done> <text>, <skipped> <text>, <failed> <text>".  .as/.xl.
+fm_counts:
+  .as : .xl
+  rep #$20 : .al
+  lda #!FMX_LINE
+  sta FMX_T
+  lda @FM_STAT+FMS_NDONE
+  ldy #!text_fm_res_done
+  jsr fm_count_one
+  rep #$20 : .al
+  lda @FM_STAT+FMS_NSKIP
+  ldy #!text_fm_res_skip
+  jsr fm_count_one
+  rep #$20 : .al
+  lda @FM_STAT+FMS_NFAIL
+  ldy #!text_fm_res_fail
+fm_count_one:               ; A (16) = n, Y = its label; ", " before all but the first
+  .al : .xl
+  pha
+  phy
+  ldx !FMX_T
+  cpx #!FMX_LINE
+  beq fco_first
+  sep #$20 : .as
+  lda #$2c                  ; ','
+  sta @$7e0000, x
+  inx
+  lda #$20
+  sta @$7e0000, x
+  inx
+fco_first:
+  rep #$20 : .al
+  ply
+  pla
+  phy
+  jsl @fm_dec
+  sep #$20 : .as             ; fm_dec returns .as/.xl
+  dex
+  lda #$20
+  sta @$7e0000, x
+  inx
+  stx !FMX_T
+  plx
+  jsr fm_str
+  jmp fm_cat
+
+; ----------------------------------------------------------------------
+;  fm_popup: a closed box with the message label X and, with FMX_L2, FMX_LINE under it;
+;  A / B / Start close it.  .as/.xl.
+; ----------------------------------------------------------------------
+#define FMQ_X       6
+#define FMQ_Y       12
+#define FMQ_W       52
+
+fm_popup:
+  .as : .xl
+  phx
+  jsr fm_bar_park
+  lda #FMQ_X
+  sta window_x
+  lda #FMQ_Y
+  sta window_y
+  lda #FMQ_W
+  sta window_w
+  lda #$04
+  clc
+  adc FMX_L2
+  sta window_h
+  lda #^zero
+  sta window_tbank
+  ldx #!zero
+  stx window_taddr
+  jsl @ui_call_wopen
+  jsr fm_env
+  .as : .xl
+  plx
+  lda #FMQ_Y+1
+  sta print_y
+  lda #FMQ_X+2
+  sta print_x
+  lda #FMQ_W-4
+  jsr fm_print
+  lda FMX_L2
+  beq fpp_wait
+  lda #FMQ_Y+2
+  sta print_y
+  lda #FMQ_X+2
+  sta print_x
+  ldx #!FMX_LINE
+  stx print_src
+  lda #$7e
+  sta print_bank
+  lda #FMQ_W-4
+  sta print_count
+  jsl @gi_call_hiprint
+  jsr fm_env
+  .as : .xl
+fpp_wait:
+  .as : .xl
+  jsr fm_frame
+  jsl @ui_call_pad
+  jsr fm_env
+  .as : .xl
+  lda pad_a
+  ora pad_b
+  ora pad_start
+  beq fpp_wait
+  lda #$03
+  sta @SFX_MAILBOX
+  lda #$04
+  clc
+  adc FMX_L2
+  sta window_h
+  jsl @ui_call_wclose
+  jsr fm_env
+  .as : .xl
+  jmp fm_bar_back
+
+; ======================================================================
+;  fm_view: the FM_IDX entry as text, page by page.  The module renders a window of the
+;  file into FM_VIEW (lines of FM_VIEW_STRIDE bytes) and the next one on request; this only
+;  scrolls through it.  Up / Down a line, Left / Right / L / R a screen, B back.
+; ======================================================================
+fm_view:
+  .as : .xl
+  jsr fm_param_entry
+  lda #$00
+  sta @FM_STAT
+  sta @FM_STAT+1
+  sta @MODULE_STATUS
+  lda #FM_OP_VIEW
+  sta FMX_OP
+  jsl @fm_cmd
+  jsr fm_started
+  bcs fvw_go
+  rts
+fvw_go:
+  .as : .xl
+  jsr fm_view_wait
+  lda @FM_STAT+FMS_STATE
+  cmp #FM_ST_VIEW
+  beq fvw_open
+  jmp fm_result             ; the module could not read it
+fvw_open:
+  .as : .xl
+  jsr fm_bar_park
+  lda #FMV_X
+  sta window_x
+  lda #FMV_Y
+  sta window_y
+  lda #60
+  sta window_w
+  lda #FMV_ROWS+2
+  sta window_h
+  jsr fm_name_ptr           ; the title: the file's name
+  lda print_ptr+2
+  sta window_tbank
+  ldx print_ptr
+  stx window_taddr
+  jsl @ui_call_wopen
+  jsr fm_env
+  .as : .xl
+  rep #$20 : .al
+  stz !FMX_VTOP
+  sep #$20 : .as
+  jsr fm_view_latch
+  jsr fm_view_draw
+fvw_loop:
+  .as : .xl
+  jsr fm_frame
+  jsl @ui_call_pad
+  jsr fm_env
+  .as : .xl
+  lda pad_b
+  bne fvw_close
+  lda pad_down
+  bne fvk_down1
+  lda pad_right
+  ora pad_r
+  bne fvk_downp
+  lda pad_up
+  bne fvk_up1
+  lda pad_left
+  ora pad_l
+  bne fvk_upp
+  bra fvw_loop
+fvk_down1:
+  .as : .xl
+  rep #$20 : .al
+  lda #$0001
+  bra fvw_down
+fvk_downp:
+  .as : .xl
+  rep #$20 : .al
+  lda #FMV_ROWS
+  bra fvw_down
+fvk_up1:
+  .as : .xl
+  rep #$20 : .al
+  lda #$0001
+  bra fvw_up
+fvk_upp:
+  .as : .xl
+  rep #$20 : .al
+  lda #FMV_ROWS
+  bra fvw_up
+fvw_close:
+  .as : .xl
+  lda #$03
+  sta @SFX_MAILBOX
+  lda #FMV_ROWS+2
+  sta window_h
+  lda #60
+  sta window_w
+  jsl @ui_call_wclose
+  jsr fm_env
+  .as : .xl
+  jmp fm_bar_back
+
+; down A lines (16 bits): past the window's end, the next window from its top
+fvw_down:
+  .al : .xl
+  clc
+  adc FMX_VTOP
+  sta FMX_T
+  clc
+  adc #FMV_ROWS
+  cmp FMX_VN
+  bcc fvd_in
+  beq fvd_in
+  lda FMX_VN                ; the last screen of this window
+  sec
+  sbc #FMV_ROWS
+  bcs fvd_last
+  lda #$0000
+fvd_last:
+  .al : .xl
+  cmp FMX_VTOP
+  bne fvd_set               ; first move to the window's end
+  sep #$20 : .as
+  lda @FM_STAT+FMS_VLAST
+  bne fvd_none
+  rep #$20 : .al
+  lda FMX_VWIN
+  inc
+  jsr fm_view_load
+  bcc fvd_none8
+  rep #$20 : .al
+  lda #$0000
+  bra fvd_set
+fvd_in:
+  .al : .xl
+  lda FMX_T
+fvd_set:
+  .al : .xl
+  sta FMX_VTOP
+  sep #$20 : .as
+  lda #$01
+  sta @SFX_MAILBOX
+  jsr fm_view_draw
+  brl fvw_loop
+fvd_none:
+  .as : .xl
+fvd_none8:
+  .as : .xl
+  brl fvw_loop
+
+; up A lines: before the window's top, the previous window's last screen
+fvw_up:
+  .al : .xl
+  sta FMX_T
+  lda FMX_VTOP
+  beq fvu_prev
+  sec
+  sbc FMX_T
+  bcs fvd_set
+  lda #$0000
+  bra fvd_set
+fvu_prev:
+  .al : .xl
+  lda FMX_VWIN
+  beq fvu_none
+  dec
+  jsr fm_view_load
+  bcc fvd_none8
+  rep #$20 : .al
+  lda FMX_VN
+  sec
+  sbc #FMV_ROWS
+  bcs fvd_set
+  lda #$0000
+  bra fvd_set
+fvu_none:
+  .al : .xl
+  sep #$20 : .as
+  brl fvw_loop
+
+; fm_view_load: window A (16 bits) from the module.  Carry set = it is in.
+fm_view_load:
+  .al : .xl
+  sta @MCU_PARAM+1
+  sep #$20 : .as
+  lda #FM_CTL_VIEW_WIN
+  sta @MCU_PARAM
+  lda #$00
+  sta @MCU_PARAM+3
+  lda #FM_ST_BUSY           ; until the module says otherwise
+  sta @FM_STAT+FMS_STATE
+  jsl @fm_ctl
+  jsr fm_env
+  .as : .xl
+  jsr fm_view_wait
+  lda @FM_STAT+FMS_STATE
+  cmp #FM_ST_VIEW
+  bne fvl_no
+  jsr fm_view_latch
+  sec
+  rts
+fvl_no:
+  .as : .xl
+  lda #$04
+  sta @SFX_MAILBOX
+  clc
+  rts
+
+; until the module is done with a window (bounded: ~10 s of frames)
+fm_view_wait:
+  .as : .xl
+  ldx #600
+fvt_loop:
+  .as : .xl
+  lda @FM_STAT+FMS_STATE
+  cmp #FM_ST_BUSY
+  bne fvt_out
+  jsr fm_frame
+  dex
+  bne fvt_loop
+fvt_out:
+  .as : .xl
+  rts
+
+fm_view_latch:
+  .as : .xl
+  rep #$20 : .al
+  lda @FM_STAT+FMS_VLINES
+  sta FMX_VN
+  lda @FM_STAT+FMS_VWIN
+  sta FMX_VWIN
+  sep #$20 : .as
+  rts
+
+; every row of the window, and the position on the bottom border
+fm_view_draw:
+  .as : .xl
+  lda #$00
+  sta FMX_T2                ; row
+fvdr_row:
+  .as : .xl
+  lda FMX_T2
+  cmp #FMV_ROWS
+  bcs fvdr_pos
+  clc
+  adc #FMV_Y+1
+  sta print_y
+  lda #FMV_X+1
+  sta print_x
+  lda #FM_VIEW_COLS
+  sta print_count
+  stz print_count+1
+  stz print_pal
+  stz print_pal+1
+  ldx #!space64             ; blank first: a short line leaves the last one's tail
+  stx print_src
+  lda #^space64
+  sta print_bank
+  jsl @gi_call_hiprint
+  jsr fm_env
+  .as : .xl
+  rep #$20 : .al
+  lda FMX_T2
+  and #$00ff
+  clc
+  adc FMX_VTOP
+  cmp FMX_VN
+  bcs fvdr_next
+  pha                       ; line -> FM_VIEW + line * 64: bank $E4 + line / 1024
+  and #$03ff
+  asl
+  asl
+  asl
+  asl
+  asl
+  asl
+  sta print_src
+  pla
+  xba
+  lsr
+  lsr
+  and #$003f
+  clc
+  adc #$00e4                ; ^FM_VIEW (snescom takes no #^ with A in 16 bits)
+  sep #$20 : .as
+  sta print_bank
+  lda #FMV_X+1
+  sta print_x
+  lda #FM_VIEW_COLS
+  sta print_count
+  jsl @gi_call_hiprint
+  jsr fm_env
+  .as : .xl
+fvdr_next:
+  .al : .xl
+  sep #$20 : .as
+  inc !FMX_T2
+  bra fvdr_row
+fvdr_pos:
+  .as : .xl
+  lda #$00                  ; "NN%" (where the top line starts in the file, from its
+  rep #$20 : .al            ; record's FM_VIEW_PCT byte) + the keys on the bottom border
+  lda FMX_VN
+  beq fvdr_pct
+  lda FMX_VTOP
+  and #$03ff
+  asl
+  asl
+  asl
+  asl
+  asl
+  asl
+  ora #FM_VIEW_PCT
+  sta print_ptr
+  lda FMX_VTOP
+  xba
+  lsr
+  lsr
+  and #$003f
+  clc
+  adc #$00e4                ; ^FM_VIEW
+  sep #$20 : .as
+  sta print_ptr+2
+  lda [print_ptr]
+  rep #$20 : .al
+fvdr_pct:
+  .al : .xl
+  and #$00ff
+  ldx #!FMX_LINE
+  jsl @fm_dec
+  sep #$20 : .as             ; fm_dec returns .as/.xl
+  dex
+  lda #$25                  ; '%'
+  sta @$7e0000, x
+  inx
+  lda #$20
+  sta @$7e0000, x
+  inx
+  sta @$7e0000, x
+  inx
+  stx !FMX_T
+  ldx #!text_fm_view_keys
+  jsr fm_str
+  jsr fm_cat
+  lda #FMV_Y+FMV_ROWS+1
+  sta print_y
+  lda #FMV_X+3
+  sta print_x
+  ldx #!FMX_LINE
+  stx print_src
+  lda #$7e
+  sta print_bank
+  lda #50
+  sta print_count
+  jsl @gi_call_hiprint
+  jsl @hint_keys
+  jmp fm_env
+
+; ======================================================================
+;  The browser's own parts, run while the file manager is in use (fmres.a65 checks the bank
+;  and jumps in): the selection mode's keys, the statusbar, the marks.
+; ======================================================================
+#define FMR_BUF     $7E9410     ; 8 B: the statusbar's icon + count, being composed
+#define FMR_BIT     $7E9418     ; the bit of the entry fmm_addr found
+#define FMR_VAL     $7E941A     ; fm_dec: what is left of the value
+#define FMR_DIG     $7E941C     ; fm_dec: the digit being counted (word)
+#define FMR_LEAD    $7E941E     ; fm_dec: 1 once a digit was written
+
+;  fm_keys_sel: filesel_updates in selection mode.  A marks the entry under the cursor, B
+;  leaves the mode, Y opens its actions; X / Select / Start leave the mode and then do what
+;  they always do.  The keys it takes are zeroed for the browser.
+fm_keys_sel:
+  php
+  phb
+  phd
+  sep #$20 : .as
+  rep #$10 : .xl
+  lda #$7e
+  pha
+  plb
+  pea $0000
+  pld
+  lda pad_x
+  ora pad_select
+  ora pad_start
+  beq fk_keys
+  jsr fmr_selexit
+  bra fk_out
+fk_keys:
+  .as
+  lda pad_b
+  beq fk_nb
+  stz pad_b
+  jsr fmr_selexit
+  lda #$03                  ; back blip
+  sta @SFX_MAILBOX
+  bra fk_out
+fk_nb:
+  .as
+  lda pad_a
+  beq fk_na
+  stz pad_a
+  jsr fmr_toggle
+  bra fk_out
+fk_na:
+  .as
+  lda pad_y
+  beq fk_out
+  stz pad_y
+  jsl @fm_sel_menu
+  ldx #$000b                ; the menu leaves its last keys (the A that picked a row) in
+fk_clear:                   ; pad_*, and filesel_updates dispatches them right after this
+  .as
+  stz pad_b, x              ; pad_b .. pad_r, adjacent (data.a65)
+  dex
+  bpl fk_clear
+fk_out:
+  .as
+  pld
+  plb
+  plp
+  rtl
+
+fmr_selexit:
+  .as
+  lda #$00
+  sta @FM_SELMODE
+  lda #$01
+  sta filesel_dirty
+  rts
+
+; A on a row: flip its mark ("..": the error blip).  DP = 0, DB = $7E.
+fmr_toggle:
+  .as
+  rep #$20 : .al
+  lda filesel_sel
+  and #$00ff
+  pha
+  asl
+  asl
+  tay
+  iny
+  iny
+  iny
+  sep #$20 : .as
+  lda [dirptr_addr], y
+  bit #TYPE_PARENT
+  beq fmt_go
+  rep #$20 : .al
+  pla
+  sep #$20 : .as
+  lda #$04                  ; error blip
+  sta @SFX_MAILBOX
+  rts
+fmt_go:
+  .as
+  rep #$20 : .al
+  lda dirptr_addr
+  lsr
+  lsr
+  clc
+  adc $01, s
+  sta $01, s
+  pla
+  jsl @fm_mark_flip
+  sep #$20 : .as
+  lda #$01                  ; cursor blip
+  sta @SFX_MAILBOX
+  lda #$01
+  sta filesel_dirty
+  rts
+
+
+;  fm_sb_draw: filesel_statusbar's tail: the selection count and keys, or the clipboard's
+;  icon and count just left of the clock.
+fm_sb_draw:
+  php
+  phb
+  phd
+  sep #$20 : .as
+  rep #$10 : .xl
+  lda #$7e
+  pha
+  plb
+  pea $0000
+  pld
+  lda @FM_SELMODE
+  beq fsd_clip
+  jsl @fm_sb_sel
+  bra fsd_out
+fsd_clip:
+  .as
+  lda @FM_CLIPINFO+3
+  ldy #$0403                ; copy: glyphs 4/5 (utils/fontedit.py FM_ICONS), blue
+  cmp #FM_CLIP_CUT
+  bne fsd_icon
+  ldy #$0601                ; cut: glyphs 6/7, yellow
+fsd_icon:
+  .as
+  rep #$20 : .al
+  tya
+  and #$00ff
+  sta print_pal
+  tya
+  xba
+  sep #$20 : .as
+  sta @FMR_BUF
+  inc
+  sta @FMR_BUF+1
+  rep #$20 : .al
+  lda @FM_CLIPINFO+4
+  ldx #!FMR_BUF+2
+  jsl @fm_dec               ; digits + NUL, X past the NUL
+  rep #$20 : .al
+  txa
+  sec
+  sbc #!FMR_BUF+1           ; = the text's length
+  sta print_count
+  eor #$ffff
+  sec
+  adc #$002a                ; ends one cell before the clock at $2b
+  sta print_x
+  sep #$20 : .as
+  lda listdisp
+  clc
+  adc #$0a
+  sta print_y
+  stz print_y+1
+  ldx #!FMR_BUF
+  stx print_src
+  lda #$7e
+  sta print_bank
+  jsl @gi_call_hiprint
+fsd_out:
+  .as
+  pld
+  plb
+  plp
+  rtl
+
+
+; ======================================================================
+;  fm_marked: A (16 bits) = a directory entry; carry set when FM_MARKS has it.
+;  fm_mark_flip: the same entry's bit inverted, FM_NMARK counting; carry = marked now.
+;  Any widths in; A/X/Y not kept.
+; ======================================================================
+fm_marked:
+  php
+  jsr fmm_addr
+  lda @FM_MARKS, x
+  and @FMR_BIT
+  bra fmm_test
+
+fm_mark_flip:
+  php
+  jsr fmm_addr
+  lda @FM_MARKS, x
+  eor @FMR_BIT              ; the bit (fmm_addr parked it there)
+  sta @FM_MARKS, x
+  and @FMR_BIT
+  rep #$20 : .al
+  beq fmf_off
+  lda @FM_NMARK
+  inc
+  sta @FM_NMARK
+  plp
+  sec
+  rtl
+fmf_off:
+  .al
+  lda @FM_NMARK
+  dec
+  sta @FM_NMARK
+  plp
+  clc
+  rtl
+
+fmm_test:
+  .as
+  beq fmm_no
+  plp
+  sec
+  rtl
+fmm_no:
+  .as
+  plp
+  clc
+  rtl
+
+; X = the entry's byte in FM_MARKS, FMR_BIT = its bit; .as/.xl out.  A (16) = the entry.
+fmm_addr:
+  rep #$30 : .al : .xl
+  pha
+  and #$0007
+  tax
+  sep #$20 : .as
+  lda @fmr_bitmask, x
+  sta @FMR_BIT
+  rep #$20 : .al
+  pla
+  lsr
+  lsr
+  lsr
+  tax
+  sep #$20 : .as
+  rts
+
+fmr_bitmask .byt $01, $02, $04, $08, $10, $20, $40, $80
+
+; ======================================================================
+
+;  fm_dec: A (16 bits) in decimal at $7E:X, no leading zeros, NUL-terminated; X past the
+;  NUL.  Any widths in; .as/.xl out.
+; ======================================================================
+fm_dec:
+  rep #$30 : .al : .xl
+  phb
+  phk
+  plb                       ; DB = this bank (fmr_pow)
+  phy
+  sta @FMR_VAL
+  lda #$0000
+  sta @FMR_LEAD
+  ldy #$0008                ; fmr_pow index: 10000 first
+fmd_loop:
+  .al
+  lda #$0030                ; '0'
+  sta @FMR_DIG
+  lda @FMR_VAL
+fmd_sub:
+  .al
+  cmp fmr_pow, y
+  bcc fmd_have
+  sbc fmr_pow, y            ; carry set by the cmp
+  sta @FMR_VAL
+  lda @FMR_DIG
+  inc
+  sta @FMR_DIG
+  lda @FMR_VAL
+  bra fmd_sub
+fmd_have:
+  .al
+  lda @FMR_DIG
+  cmp #$0030
+  bne fmd_store
+  cpy #$0000                ; the units always show
+  beq fmd_store
+  lda @FMR_LEAD
+  beq fmd_next              ; a leading zero
+  lda #$0030
+fmd_store:
+  .al
+  sep #$20 : .as
+  sta @$7e0000, x
+  inx
+  rep #$20 : .al
+  lda #$0001
+  sta @FMR_LEAD
+fmd_next:
+  .al
+  dey
+  dey
+  bpl fmd_loop
+  sep #$20 : .as
+  lda #$00
+  sta @$7e0000, x
+  inx
+  ply
+  plb
+  rtl
+
+fmr_pow .word 1, 10, 100, 1000, 10000
+
+

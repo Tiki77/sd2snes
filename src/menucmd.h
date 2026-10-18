@@ -33,6 +33,8 @@ void menucmd_export_boot_nav(uint8_t firstboot);
    browser is currently sitting in with no item selected.  Public because the
    SAVE_CFG handler (main.c) reloads too, when a font-edge toggle moved. */
 void browser_pos_save(const char *path);
+/* drop dead Recents / Favorites entries and republish both lists to the menu */
+void revalidate_game_lists(void);
 
 /* 1 = the next menu load boots ONBOARDING_FILENAME (the first-boot tour ROM). */
 extern uint8_t onboarding_pending;

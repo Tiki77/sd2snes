@@ -178,6 +178,17 @@ static int gi_cp_emit(uint32_t cp, uint8_t *out) {
   return 1;
 }
 
+/* gi_cp_emit for the file manager's text viewer (module api font_cp): no CJK glyphs, those
+ * belong to the Ficha's sheet. */
+int gameinfo_font_cp(uint32_t cp, uint8_t *out) {
+  const char *code = gi_cjk_code;
+  int n;
+  gi_cjk_code = NULL;
+  n = gi_cp_emit(cp, out);
+  gi_cjk_code = code;
+  return n;
+}
+
 /* Copy src -> dst (NUL-terminated, bounded), decoding UTF-8 to font byte codes.
  * Plain ASCII is copied verbatim; mapped accents and Cyrillic become their font codes;
  * anything else becomes '?'. Bounded by dstsize; safe on truncated/invalid UTF-8. */

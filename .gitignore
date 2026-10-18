@@ -166,6 +166,7 @@ snes/const_lang.a65
 snes/const_lang_str.a65
 snes/const_lang_tab.a65
 snes/const_lang_cjk.a65
+snes/const_lang_fm.a65
 snes/lang_*.bin
 snes/lang_*.fnt
 # generated in-game HELP tab i18n tables (snes/utils/gen_igmenu_lang.py)

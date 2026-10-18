@@ -31,14 +31,15 @@
 #include "ff.h"
 
 #define MODULE_MAGIC   0x444f4d53UL   /* "SMOD" */
-#define MODULE_ABI     3
+#define MODULE_ABI     4
 
 /* the modules, and the file each one is */
 #define MODULE_ID_NSF      1          /* nsfplay.bin: the NSF player (SNES_CMD_MOD_OPEN) */
 #define MODULE_ID_MEMTEST  2          /* memtest.bin: the RAM test (SNES_CMD_MEMTEST) */
 #define MODULE_ID_PCM      3          /* pcmplay.bin: the .pcm player (SNES_CMD_PLAY_PCM) */
 #define MODULE_ID_RTC7110  4          /* rtc7110.bin: the SPC7110 RTC battery (session) */
-#define MODULE_COUNT       4
+#define MODULE_ID_FILEOP   5          /* fileops.bin: the browser's file manager (SNES_CMD_FM) */
+#define MODULE_COUNT       5
 
 /* What start() returns when the module could not be loaded at all */
 #define MODULE_MISSING     (-1)
@@ -103,6 +104,25 @@ typedef struct {
   void     (*fpga_time)(uint64_t time);
   void     (*s7rtc_get)(uint8_t *state);
   void     (*s7rtc_set)(const uint8_t *state);
+  /* the rest of the file system, for the file manager (any FIL / DIR the module owns) */
+  FRESULT  (*f_lseek)(FIL *fp, DWORD ofs);
+  FRESULT  (*f_unlink)(const TCHAR *path);
+  FRESULT  (*f_rename)(const TCHAR *from, const TCHAR *to);
+  FRESULT  (*f_mkdir)(const TCHAR *path);
+  FRESULT  (*f_opendir)(DIR *dp, const TCHAR *path);
+  FRESULT  (*f_readdir)(DIR *dp, FILINFO *fno);
+  FRESULT  (*f_closedir)(DIR *dp);
+  FRESULT  (*f_stat)(const TCHAR *path, FILINFO *fno);
+  FRESULT  (*f_getfree)(const TCHAR *path, DWORD *nclst, FATFS **fs);
+  /* one Unicode code point (>= 0x80) -> 1..3 menu font bytes ('?' when there is no glyph
+     nor a stand-in); the Ficha's table (gameinfo.c), without its CJK glyphs */
+  int      (*font_cp)(uint32_t cp, uint8_t *out);
+  /* Recents / Favorites: drop dead entries and republish both lists to the menu, after
+     the module rewrote lastgame.cfg / favorites.cfg */
+  void     (*lists_refresh)(void);
+  /* the module has work queued: the menu loop runs the next idle() right away instead of
+     sleeping its 20 ms first (call it from idle(), every pass that leaves work) */
+  void     (*hurry)(void);
   /* the board */
   uint32_t cpu_hz;
   const uint8_t *ram0_base;           /* the first cell of each PSRAM chip... */
@@ -150,6 +170,7 @@ int  module_session(uint8_t id, const char *path);/* the same, for a module that
 void module_drop(void);                           /* stop and forget whatever is open */
 void module_ctl(uint32_t param);
 void module_gate(uint8_t cmd);                    /* before every menu command */
-void module_idle(void);                           /* once per menu- or game-loop pass */
+int  module_idle(void);                           /* once per menu- or game-loop pass; 1 = the
+                                                     module asked to be called again at once */
 
 #endif

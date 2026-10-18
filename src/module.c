@@ -15,6 +15,8 @@
 #include "memtest.h"
 #include "rtc.h"
 #include "module.h"
+#include "gameinfo.h"
+#include "menucmd.h"
 
 /* sort.c: the READDIR sort cache, idle while a module's screen is open (module_gate) */
 extern uint32_t ptrcache[QSORT_MAXELEM];
@@ -51,6 +53,12 @@ static uint32_t module_ticks(void)
   return getticks();
 }
 
+static uint8_t mod_hurry;           /* the module asked for its next idle() at once */
+static void module_hurry(void)
+{
+  mod_hurry = 1;
+}
+
 static const uint8_t ram0_bases[] = RAM0_BASES;
 
 static const module_api_t mod_api = {
@@ -64,6 +72,8 @@ static const module_api_t mod_api = {
   module_spare,
   path_asset, path_asset_mkdir, f_write,
   get_bcdtime, set_fpga_time, get_spc7110_rtc, set_spc7110_rtc,
+  f_lseek, f_unlink, f_rename, f_mkdir, f_opendir, f_readdir, f_closedir, f_stat, f_getfree,
+  gameinfo_font_cp, revalidate_game_lists, module_hurry,
   CONFIG_CPU_FREQUENCY, ram0_bases, RAM0_NUM_CHIPS, RAM0_SECOND_ADDR, MEMTEST_ITERATIONS
 };
 
@@ -74,10 +84,10 @@ static uint8_t mod_id;              /* the module in ptrcache, 0 = none (or gone
 #ifdef MODULE_HOST_LINKED
 /* Host builds of the firmware (the Ciclone) cannot run an ARM image: there the modules are
    linked in and nothing is loaded. */
-extern const module_fns_t nsfmod_fns, mtmod_fns, pcmmod_fns, rtcmod_fns;
+extern const module_fns_t nsfmod_fns, mtmod_fns, pcmmod_fns, rtcmod_fns, fopmod_fns;
 static int module_load(uint8_t id)
 {
-  static const module_fns_t *const fns[MODULE_COUNT] = { &nsfmod_fns, &mtmod_fns, &pcmmod_fns, &rtcmod_fns };
+  static const module_fns_t *const fns[MODULE_COUNT] = { &nsfmod_fns, &mtmod_fns, &pcmmod_fns, &rtcmod_fns, &fopmod_fns };
   if(!id || id > MODULE_COUNT) return 0;
   mod = *fns[id - 1];
   return 1;
@@ -87,7 +97,7 @@ static int module_load(uint8_t id)
 {
   static const char *const file[MODULE_COUNT] = {
     "/sd2snes/nsfplay.bin", "/sd2snes/memtest.bin", "/sd2snes/pcmplay.bin",
-    "/sd2snes/rtc7110.bin"
+    "/sd2snes/rtc7110.bin", "/sd2snes/fileops.bin"
   };
   uint8_t *img = (uint8_t *)ptrcache;
   const module_hdr_t *h = (const module_hdr_t *)img;
@@ -165,7 +175,9 @@ void module_gate(uint8_t cmd)
   mod_id = 0;                       /* ptrcache and the FRAME are someone else's from here */
 }
 
-void module_idle(void)
+int module_idle(void)
 {
+  mod_hurry = 0;
   if(mod_live) mod.idle(scratch_frame);
+  return mod_hurry;
 }

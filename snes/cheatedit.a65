@@ -1043,6 +1043,13 @@ ce_kbd_code:
   jmp ce_kbd_run
 
 ce_kbd_run:
+  ; dim the window behind the keyboard -- the editor when typing a code, or the cheat
+  ; list when typing the first code of a new cheat.  Both occupy cheat_win_*, so grey
+  ; that rectangle (like the browser's submenus grey their parent) before pushing the
+  ; keyboard on top.  It is repainted bright when the keyboard closes.
+  jsr ce_editor_geom          ; window_* = cheat_win_*
+  jsl @ui_call_greyout
+ce_kbd_open:                  ; the file manager comes in here: its caller already dimmed
   lda bar_xl
   pha
   lda bar_yl
@@ -1053,12 +1060,6 @@ ce_kbd_run:
   stz ce_krow
   stz ce_kcol
   jsr ce_field_len
-  ; dim the window behind the keyboard -- the editor when typing a code, or the cheat
-  ; list when typing the first code of a new cheat.  Both occupy cheat_win_*, so grey
-  ; that rectangle (like the browser's submenus grey their parent) before pushing the
-  ; keyboard on top.  It is repainted bright when the keyboard closes.
-  jsr ce_editor_geom          ; window_* = cheat_win_*
-  jsl @ui_call_greyout
   lda #CEK_X
   sta window_x
   lda #CEK_Y
@@ -1144,6 +1145,34 @@ ce_kbd_out:
   lda ce_kok
   lsr                         ; -> carry
   rts
+
+; ce_kbd_field: the name keyboard on a field of bank $FF, for the file manager's rename and
+; new folder (fileman.a65, bank $C3).  X = the field's offset in $FF, A = the most bytes it
+; takes.  Carry set = OK (the field holds the text).  Any DBR/DP in.
+ce_kbd_field:
+  php
+  phb
+  phd
+  rep #$30 : .al : .xl
+  pea $0000
+  pld
+  sep #$20 : .as
+  pha
+  lda #$7e
+  pha
+  plb
+  pla
+  sta ce_kmax
+  stx ce_kfield
+  lda #$01
+  sta ce_kmode
+  jsr ce_kbd_open
+  pld
+  plb
+  plp
+  lda @ce_kok
+  lsr
+  rtl
 
 ; ce_klen = strlen(field), capped at ce_kmax (the block is NUL-terminated, but never
 ; trust a stale byte past the cap)

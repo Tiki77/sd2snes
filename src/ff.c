@@ -2616,8 +2616,6 @@ static FRESULT f_read_body (
 	UINT rcnt, cc;
 	BYTE csect, *rbuff = (BYTE*)buff;
 
-	if(btr>512 && !ff_sd_offload) printf("WARNING: read >512 bytes but offloading is inactive!!\n");
-
 	*br = 0;	/* Clear read byte counter */
 
 	res = validate(fp);							/* Check validity */

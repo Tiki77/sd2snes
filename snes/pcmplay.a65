@@ -104,6 +104,12 @@ select_pcm:
   iny                         ; +3: the entry's type
   sep #$20 : .as
   lda [dirstart_addr], y
+  cmp #TYPE_TEXT
+  bne select_pcm_ntext
+  jsl @fm_view_sel            ; a text file: the file manager's viewer (fmres.a65)
+  bra select_pcm_done
+select_pcm_ntext:
+  .as : .xl
   cmp #TYPE_NSF
   bne select_pcm_pcm
   jsr nsf_screen

@@ -41,6 +41,7 @@
 #include "usbhw.h"
 #include "cdcuser.h"
 #include "usbinterface.h"
+#include "fileman.h"
 
 int sd_offload = 0, ff_sd_offload = 0, sd_offload_tgt = 0;
 int sd_offload_partial = 0;
@@ -358,6 +359,7 @@ int main(void) {
     }
     STM.autoboot_enabled = cfg_is_autoboot_enabled();
     status_load_to_menu();
+    fileman_publish();             /* the clipboard icon: what survived in this firmware's RAM */
     STM.reset_to_menu_active = 0;  /* SRAM now holds the flag for the SNES; zero in RAM so later status_load_to_menu() calls don't re-broadcast it */
     STM.restore_browser = 0;       /* same one-shot contract: this boot consumes it (see browser_pos_save) */
 

@@ -836,6 +836,7 @@
 #define MODULE_ID_NSF               1   /* src/module.h */
 #define MODULE_STATUS               $FF4E80 /* what the last CMD_MOD_OPEN did: 0 ok, MODULE_ST_MISSING = no usable module file. Lockstep with SRAM_MODULE_STATUS in src/memmap.h */
 #define MODULE_ST_MISSING           1
+#define CMD_FM                      $50 /* the browser's file manager: MCU_PARAM+8 = FM_OP_*. Lockstep with SNES_CMD_FM in src/snes.h and with src/fileman.h */
 #define CMD_SAVES                   $4f /* the saves screen (snes/saves.a65): MCU_PARAM+8 = SVW_* (where the game is; +0..7 as for that family's other commands), +9 = SVOP_*, +10 = kind << 4 | slot, +11 = the destination slot of a copy. The answer is SAVES_BLK. Lockstep with SNES_CMD_SAVES in src/snes.h. */
 #define SVW_BROWSER                 0
 #define SVW_RECENT                  1
@@ -1102,8 +1103,81 @@
 #define TYPE_PCM                    $08 /* .pcm (MSU-1 audio track, menu PCM player); lockstep com filetypes.h */
 #define TYPE_FILE                   $09 /* arquivo de SISTEMA dentro de /sd2snes (scan_dir): firmware.im3, m3nu.bin, fpga_*.bi3, menu.spc. Mostrado com tamanho mas NAO acionavel e SEM excluir -- nao ha case para ele em select_item nem em open_context_menu, entao A da o blip de erro e o Y nao abre nada. E isso que impede um Y perdido de levar os arquivos de boot do cartao. Lockstep com filetypes.h */
 #define TYPE_DATA                   $0A /* arquivo de DADOS do usuario (is_card_data_ext): saves (.srm/.slot/.mpk/.rtc), savestates (.state), sidecars (.yml/.cov/.gcv/.gss/.fmv/.man), .cfg das listas e .msu. Listado como o TYPE_FILE mas o menu de contexto (Y) oferece Excluir, reusando ctx_is_delonly. Lockstep com filetypes.h */
+#define TYPE_TEXT                   $0C /* a text file (.txt .md .nfo .diz .yml .yaml .cfg .ini .log .json .csv .xml .htm .html outside the card's own data): A opens the file manager's viewer. Listed with the .pcm request, like the .nsf. Lockstep com filetypes.h */
 #define TYPE_NSF                    $0B /* .nsf (NES music): played by the menu NSF player (snes/nsfplay.a65). Lockstep com filetypes.h */
 #define TYPE_SUBDIR                 $40
 #define TYPE_PARENT                 $80
 
 #define DIM_BRIGHTNESS              $03
+/* ---- the browser's file manager (src/fileman.h; menu side: fmres.a65 resident in $C2,
+   fileman.a65 in $C3) ---------------------------------------------------------------- */
+#define FM_MARKS                    $FFA000 /* 2048 B: bit i = directory entry i marked (SNES-written). Lockstep with SRAM_FM_MARKS_ADDR */
+#define FM_STAT                     $FFA800 /* fm_stat_t (fileops.bin). Lockstep with SRAM_FM_STAT_ADDR */
+#define FM_NAME                     $FFA900 /* the new name for rename / new folder (SNES-written). Lockstep with SRAM_FM_NAME_ADDR */
+#define FM_CLIPINFO                 $FFAA00 /* 'F','C',version,mode,count(u16),err. Lockstep with SRAM_FM_CLIPINFO_ADDR */
+#define FM_VIEW                     $E40000 /* the viewer's lines, 64 B each. Lockstep with SRAM_FM_VIEW_ADDR */
+#define FM_VERSION                  1
+#define FM_VIEW_STRIDE              64
+#define FM_VIEW_COLS                56
+#define FM_VIEW_PCT                 63 /* the line record's byte: where it starts in the file, 0..100 */
+/* fm_stat_t offsets */
+#define FMS_STATE                   3
+#define FMS_OP                      4
+#define FMS_ERR                     5
+#define FMS_ASK                     6
+#define FMS_FLAGS                   7
+#define FMS_ITEMS_DONE              16
+#define FMS_ITEMS_TOTAL             18
+#define FMS_NDONE                   20
+#define FMS_NSKIP                   22
+#define FMS_NFAIL                   24
+#define FMS_PROGRESS                26
+#define FMS_VPCT                    27
+#define FMS_VLINES                  28
+#define FMS_VWIN                    30
+#define FMS_VLAST                   32
+#define FMS_NAME                    40
+/* ops (MCU_PARAM+8 of CMD_FM) */
+#define FM_OP_PROBE                 0
+#define FM_OP_BANK                  1
+#define FM_OP_CLIP                  2
+#define FM_OP_UNCLIP                3
+#define FM_OP_PASTE                 4
+#define FM_OP_RENAME                5
+#define FM_OP_VIEW                  6
+#define FM_OP_MKDIR                 7
+#define FM_CLIP_COPY                1
+#define FM_CLIP_CUT                 2
+/* CMD_MOD_CTL to fileops.bin */
+#define FM_CTL_CANCEL               1
+#define FM_CTL_ANSWER               2
+#define FM_CTL_VIEW_WIN             3
+#define FM_ANS_REPLACE              1
+#define FM_ANS_SKIP                 2
+#define FM_ANS_KEEPBOTH             3
+/* states / errors / conflict kinds */
+#define FM_ST_SCAN                  1
+#define FM_ST_RUN                   2
+#define FM_ST_ASK                   3
+#define FM_ST_DONE                  4
+#define FM_ST_ERROR                 5
+#define FM_ST_VIEW                  6
+#define FM_ST_BUSY                  7
+#define FM_ERR_IO                   4
+#define FM_ERR_CANCELLED            6
+#define FM_ERR_MAX                  10
+#define FM_CLIP_MODE                $E10000 /* the clipboard's first byte: FM_CLIP_* (src/fileman.h) */
+#define FM_ASK_DIR                  2
+#define FM_ASK_MIXED                3
+#define MODULE_ST_MISSING           1
+/* WRAM: $7E9400-$7E9FFF, the free tail of the iris block (the saves screen has $7E9000-$7E93FF,
+   the Ficha $7E8800-$7E8BFF).  setup_gfx zeroes it at every boot, so the flags start at 0
+   without anyone clearing them (the $55 of clear_wram never survives here). */
+#define FM_SELMODE                  $7E9400 /* 1 = the browser is in selection mode */
+#define FM_NMARK                    $7E9402 /* word: entries marked */
+#define FM_ARM                      $7E9404 /* 1 = the next show_menu is the browser's context menu: fm_menu_hook appends the file rows */
+#define FM_IDX                      $7E9406 /* word: the directory entry the context menu was opened on */
+#define FM_TYPE                     $7E9408 /* its type */
+#define FM_TAB                      $7E9500 /* the context table fm_ctx_build writes (up to 24 entries) */
+#define FM_SCR                      $7E9800 /* bank $C3's own scratch, up to $7E9FFF */
+#define FM_BANK_MAGIC               $C30000 /* "FMB1": bank $C3 is the file manager's (fileman.a65) */
