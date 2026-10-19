@@ -371,6 +371,18 @@
    ($FF75C5, once publisher[40] was appended) and before SRAM_SCRATCHPAD ($FFFF00); lockstep with GI_DESC_EXT in
    snes/memmap.i65. */
 #define SRAM_GAMEINFO_DESCEXT_ADDR   (0xFF7600L)
+/* The ROM's CRC32 on the info screen's title row (gameinfo_crc_*): 12 bytes right after
+   gameinfo_meta_t -- the 8 hex digits + NUL, then the state, then the magic 'C','R' (both
+   written LAST, so the menu never sees "ready" over a half-written text). Lockstep with
+   GI_CRC in snes/memmap.i65. */
+#define SRAM_GAMEINFO_CRC_ADDR       (0xFF75C8L)
+/* The full title (char[128], font-encoded, NUL-terminated) the title row scrolls: the struct's
+   title[40] stays for older menus. Valid only with the GI_CRC magic. Lockstep with GI_TITLEX. */
+#define SRAM_GAMEINFO_TITLEX_ADDR    (0xFF7E00L)
+/* The last 8 ROM CRCs as {key, crc} pairs (MCU-only, gameinfo.c), so revisiting a game is
+   instant. The key carries ff_wgen and the mount id: a write to the card or another card makes
+   every entry stale. */
+#define SRAM_GAMEINFO_CRCCACHE_ADDR  (0xFF7E80L)
 #define SRAM_SCRATCHPAD              (0xFFFF00L)
 #define SRAM_DIRID                   (0xFFFFF0L)
 #define SRAM_RELIABILITY_SCORE       (0x100)
@@ -451,8 +463,11 @@ _Static_assert(SRAM_SAVES_ADDR + 264 <= SRAM_IPS_LIST_ADDR,
                "SAVES (264 B) must stay below IPS_LIST");
 _Static_assert(SRAM_NSF_BK_SIZE >= 0x2800L + 256L * 4096,
                "the NSF backing store holds RAM + 256 banks (nsf.h)");
-_Static_assert(SRAM_GAMEINFO_DESCEXT_ADDR + 2048 <= SRAM_CHEAT_NAMES_ADDR,
-               "GI_DESC_EXT (2048 B) must stay below CHEAT_NAMES");
+_Static_assert(SRAM_GAMEINFO_CRC_ADDR + 12 <= SRAM_GAMEINFO_DESCEXT_ADDR
+               && SRAM_GAMEINFO_DESCEXT_ADDR + 2048 <= SRAM_GAMEINFO_TITLEX_ADDR
+               && SRAM_GAMEINFO_TITLEX_ADDR + 128 <= SRAM_GAMEINFO_CRCCACHE_ADDR
+               && SRAM_GAMEINFO_CRCCACHE_ADDR + 64 <= SRAM_CHEAT_NAMES_ADDR,
+               "GI_CRC / GI_DESC_EXT (2048 B) / GI_TITLEX (128 B) / the CRC cache (64 B) must stay below CHEAT_NAMES");
 _Static_assert(SRAM_SYSINFO_ADDR + 128 <= SRAM_LASTGAME_ADDR,
                "the sysinfo block (128 B) must stay below LAST_GAME");
 _Static_assert(SRAM_WIFI_ADDR + 437 <= SRAM_LASTGAME_FILE_ADDR,

@@ -573,9 +573,14 @@ void menucmd_fmv_gate(uint8_t cmd) {
      player is live" rather than listing its opcodes also keeps the gate correct for the
      CMD_PLAY_PCM that STARTS it: at that point the player is not active yet, so a real
      FMV still gets stopped, which is exactly what should happen. */
+  int keep = cmd_keeps_fmv(cmd);
+  /* the ROM CRC job of the info screen: before the lock test, since the PCM player that holds
+     the lock is a card module, and its state takes the FRAME the job's file lives in */
+  if(!keep)
+    gameinfo_crc_cancel();
   if(menu_music_locked())
     return;
-  if(!cmd_keeps_fmv(cmd))
+  if(!keep)
     gameinfo_fmv_stop();
 }
 

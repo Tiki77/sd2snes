@@ -17,6 +17,7 @@
 #include "dirindex.h"
 #include "scratch.h"  /* gameinfo_load FRAME + three LEAF helpers (see scratch.h) */
 #include "cjkglyph.h" /* a Japanese/Chinese title or description: the glyphs it needs */
+#include "crc32.h"    /* the ROM's CRC32 on the title row (gameinfo_crc_*) */
 
 extern cfg_t CFG;   /* game info "Show video" / "Play video music" toggles (game_info_video/_music) */
 
@@ -24,8 +25,8 @@ extern cfg_t CFG;   /* game info "Show video" / "Play video music" toggles (game
    starts right after it, so a field added to gameinfo_meta_t writes over the text the
    same screen reads back -- silently, neither side bounds-checks the other.  The other
    end of the block is asserted in cfg.c, where MAX_FAVORITE_GAMES lives. */
-_Static_assert(SRAM_GAMEINFO_ADDR + sizeof(gameinfo_meta_t) <= SRAM_GAMEINFO_DESCEXT_ADDR,
-               "gameinfo_meta_t runs into SRAM_GAMEINFO_DESCEXT_ADDR");
+_Static_assert(SRAM_GAMEINFO_ADDR + sizeof(gameinfo_meta_t) <= SRAM_GAMEINFO_CRC_ADDR,
+               "gameinfo_meta_t runs into SRAM_GAMEINFO_CRC_ADDR");
 
 /* UTF-8 codepoint -> sd2snes font byte. Every glyph entry MUST match ENCODE (ACCENTS +
  * HOMOGLYPHS) in snes/utils/build_const.py -- guarded by tests/test_i18n_parity.py, which parses
@@ -629,6 +630,117 @@ void gameinfo_fmv_idle_check(void) {
     gameinfo_fmv_stop();
 }
 
+/* ---- The ROM's CRC32 on the title row ----------------------------------------------------
+ * The bytes hashed are the ones the catalog (the Manager, the GameDB) indexes, the same rule as
+ * the Manager's romSpan(): an .sfrom = the image inside the container (sfrom_span, what a load
+ * stages); an .nes that starts with the iNES magic = the file minus its 16-byte header; any other
+ * file = minus a 512-byte copier header when size % 1024 == 512, else whole. A list entry with a
+ * patch is the BASE ROM's (sel_name cuts the tag), an MSU-1 folder the ROM inside it.
+ * Reading a whole ROM takes seconds, so it never runs inside a command: gameinfo_load publishes
+ * "pending" (or the cached value) and the menu loop hashes one 512-byte sector per step between
+ * its other work (snes.c), so a command waits at most one sector. Any command the info screen
+ * does not send cancels it (menucmd_fmv_gate); so does a write to the card (ff_wgen). The job
+ * keeps its file in the FRAME, which is free from the end of gameinfo_load to the next FRAME
+ * owner, and every owner is reached through a command -- the cancel comes first. */
+uint8_t sfrom_span(FIL *fp, uint32_t *rom_offset, uint32_t *rom_size);   /* memory.c */
+
+#define GI_CRC_PENDING 1
+#define GI_CRC_READY   2
+#define GI_CRC_FAILED  3        /* shown as the dashes too */
+#define GI_CRC_CACHE_N 8
+
+typedef struct {
+  FIL      fil;
+  uint32_t key;                 /* the cache key (gi_crc_start), then... */
+  uint32_t crc;                 /* ...the running value: the two make the cache entry */
+  uint32_t left;                /* bytes still to hash; 0 = the file is not open yet */
+  uint32_t gen;                 /* ff_wgen when the job started */
+  char     path[256];
+} gi_crc_frame_t;
+SCRATCH_FITS(gi_crc_frame_t, SCRATCH_FRAME_BYTES);
+
+/* The cache at SRAM_GAMEINFO_CRCCACHE_ADDR: GI_CRC_CACHE_N {key, crc} pairs, filled round
+   robin. The key mixes the write generation and the mount id into the path's hash, so an entry
+   from before a write to the card, or from another card, simply never matches again. */
+static uint8_t gi_crc_slot;
+
+uint8_t gameinfo_crc_on;        /* 1 = a job owns the FRAME */
+
+/* The 12-byte GI_CRC block: 8 hex digits (or dashes) + NUL, state, 'C','R' (state and magic
+   last). */
+static void gi_crc_publish(uint8_t state, uint32_t crc) {
+  uint8_t b[12];
+  for(int i = 0; i < 8; i++, crc <<= 4)
+    b[i] = state == GI_CRC_READY ? "0123456789ABCDEF"[crc >> 28] : '-';
+  b[8]  = 0;
+  b[9]  = state;
+  b[10] = 'C';
+  b[11] = 'R';
+  sram_writeblock(b, SRAM_GAMEINFO_CRC_ADDR, sizeof(b));
+}
+
+/* noinline: its cache copy stays out of gameinfo_load's frame */
+static __attribute__((noinline)) void gi_crc_start(const uint8_t *rom_path) {
+  gi_crc_frame_t *const j = SCRATCH_FRAME(gi_crc_frame_t);
+  uint32_t c[2 * GI_CRC_CACHE_N];
+  uint32_t key = ff_wgen ^ ((uint32_t)ff_vol_id() << 16);
+  for(const uint8_t *p = rom_path; *p; p++) key = crc32_update(key, *p);
+  sram_readblock(c, SRAM_GAMEINFO_CRCCACHE_ADDR, sizeof(c));
+  for(int i = 0; i < 2 * GI_CRC_CACHE_N; i += 2) {
+    if(c[i] == key) { gi_crc_publish(GI_CRC_READY, c[i + 1]); return; }
+  }
+  gi_crc_publish(GI_CRC_PENDING, 0);
+  j->key  = key;
+  j->left = 0;
+  j->gen  = ff_wgen;
+  strlcpy_nul(j->path, (const char *)rom_path, sizeof(j->path));
+  gameinfo_crc_on = 1;
+}
+
+void gameinfo_crc_cancel(void) {
+  gameinfo_crc_on = 0;                       /* the FIL is read-only: nothing to close */
+}
+
+/* One step of the job: open + find the span, or hash one sector. Bounded (one SD read).
+   noinline: inlined into the menu loop it made the compiler duplicate that loop. */
+__attribute__((noinline)) void gameinfo_crc_step(void) {
+  gi_crc_frame_t *const j = SCRATCH_FRAME(gi_crc_frame_t);
+  UINT got;
+  if(!gameinfo_crc_on) return;
+  if(j->gen != ff_wgen) goto fail;           /* the card changed under the file */
+  if(!j->left) {
+    uint32_t off = 0, len;
+    if(f_open(&j->fil, j->path, FA_READ) != FR_OK) goto fail;
+    const char *dot = strrchr(j->path, '.');
+    if(!(dot && !strcasecmp(dot + 1, "sfrom") && sfrom_span(&j->fil, &off, &len))) {
+      off = 0;
+      len = j->fil.fsize;
+      if(dot && !strcasecmp(dot + 1, "nes")
+         && f_read(&j->fil, file_buf, 4, &got) == FR_OK && got == 4
+         && *(uint32_t *)file_buf == 0x1a53454eu)          /* "NES" $1A, the iNES magic */
+        off = 16;
+      if(!off && (len & 1023) == 512) off = 512;
+      len -= off;
+    }
+    if(!len || f_lseek(&j->fil, off) != FR_OK) goto fail;
+    j->left = len;
+    j->crc  = crc32_init();
+    return;
+  }
+  UINT want = j->left < sizeof(file_buf) ? (UINT)j->left : sizeof(file_buf);
+  if(f_read(&j->fil, file_buf, want, &got) != FR_OK || got != want) goto fail;
+  for(UINT i = 0; i < got; i++) j->crc = crc32_update(j->crc, file_buf[i]);
+  if((j->left -= got)) return;
+  j->crc = crc32_finalize(j->crc);           /* {key, crc}: one cache entry */
+  sram_writeblock(&j->key, SRAM_GAMEINFO_CRCCACHE_ADDR + (gi_crc_slot++ % GI_CRC_CACHE_N) * 8u, 8);
+  gi_crc_publish(GI_CRC_READY, j->crc);
+  gameinfo_crc_on = 0;
+  return;
+fail:
+  gi_crc_publish(GI_CRC_FAILED, 0);
+  gameinfo_crc_on = 0;
+}
+
 /* gameinfo_load's working set, in the shared FRAME scratch (scratch.h) -- not the stack (the menu
  * loop is single-threaded and non-reentrant, and the LPC stack is tight) and not .bss (main SRAM
  * is tight; growing it can silently corrupt a global). Every call's first access is a write
@@ -642,6 +754,7 @@ SCRATCH_FITS(gi_load_frame_t, SCRATCH_FRAME_BYTES);
 
 void gameinfo_load(uint8_t *rom_path) {
   gi_load_frame_t *const f = SCRATCH_FRAME(gi_load_frame_t);
+  gameinfo_crc_on = 0;                       /* a CRC still running owned the FRAME */
   /* Silence the previous game's clip FIRST. Everything below reads the card (the .yml, the
    * localized description scan, the cover transcode) without pumping the DAC, and a clip left
    * playing through that loops the last 2 KB of its buffer -- the "zeet" heard on every Up/Down
@@ -684,8 +797,13 @@ void gameinfo_load(uint8_t *rom_path) {
   strlcpy_nul(gi_yml_path, f->path, sizeof(gi_yml_path));
   sram_writebyte(0, SRAM_GAMEINFO_DESCEXT_ADDR);
   yaml_file_open(f->path, FA_READ);
+  /* The title is read at full length (GI_TITLEX_LEN) into f->path, free from here on (the .yml
+     path is in gi_yml_path), and cut down to meta.title further below; the title row scrolls
+     the long one. */
+  char *const lt = f->path;
+  lt[0] = 0;
   if(!file_res) {
-    gi_field("title",        f->meta.title,        sizeof(f->meta.title));
+    gi_field("title",        lt,                   GI_TITLEX_LEN);
     gi_field("developer",    f->meta.developer,    sizeof(f->meta.developer));
     gi_field("publisher",    f->meta.publisher,    sizeof(f->meta.publisher));
     gi_field("release_year", f->meta.year,         sizeof(f->meta.year));
@@ -711,7 +829,7 @@ void gameinfo_load(uint8_t *rom_path) {
         char tkey[] = "title_xx";
         tkey[6] = gi_cjk_code[0];
         tkey[7] = gi_cjk_code[1];
-        gi_value_scan(tkey, f->meta.title, sizeof(f->meta.title));
+        gi_value_scan(tkey, lt, GI_TITLEX_LEN);
       }
       file_res = 0;                  /* soft, like a missing .yml: the English stays */
     }
@@ -723,8 +841,10 @@ void gameinfo_load(uint8_t *rom_path) {
    * Applied unconditionally so the .yml-less screen is filled. Uses the offset path_asset
    * returned -- the old code hardcoded sizeof(GAMEINFO_DIR)-1+2 for a ONE-char bucket, which is
    * exactly the kind of arithmetic that silently shifts when the layout changes. */
-  if(!f->meta.title[0])
-    gi_utf8_to_font(f->base + stem_off, f->meta.title, sizeof(f->meta.title));
+  if(!lt[0])
+    gi_utf8_to_font(f->base + stem_off, lt, GI_TITLEX_LEN);
+  sram_writeblock(lt, SRAM_GAMEINFO_TITLEX_ADDR, GI_TITLEX_LEN);   /* past the NUL: unread */
+  strlcpy_nul(f->meta.title, lt, sizeof(f->meta.title));          /* for an older menu */
   gi_dash(f->meta.developer);
   gi_dash(f->meta.publisher);
   gi_dash(f->meta.year);
@@ -777,6 +897,7 @@ void gameinfo_load(uint8_t *rom_path) {
 
   gi_cjk_sheet();                        /* the glyphs the text above indexed */
   sram_writeblock(&f->meta, SRAM_GAMEINFO_ADDR, sizeof(f->meta));
+  gi_crc_start(rom_path);                /* takes the FRAME over: last */
 }
 
 /* Scan the last-loaded .yml for `key:` and stage its COMPLETE value, font-encoded, into

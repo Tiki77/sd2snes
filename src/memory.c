@@ -1096,9 +1096,9 @@ static uint32_t load_reopen_player(uint8_t *filename, uint8_t flags, const char 
   return 1;
 }
 
-/* SFROM logical ROM extractor.
-   Returns 1 when filename is an SFROM and fills rom_offset/rom_size.
-   Returns 0 for a normal ROM or an invalid SFROM. */
+/* SFROM logical ROM extractor: the open file fp is an SFROM container -> 1 and its image's
+   offset/size. 0 = not a valid SFROM. Also the info screen's CRC32 (gameinfo.c), which has to
+   hash exactly the bytes a load would stage. */
 
 static uint32_t rd32le(const uint8_t *p) {
   return (uint32_t)p[0]
@@ -1107,18 +1107,15 @@ static uint32_t rd32le(const uint8_t *p) {
        | ((uint32_t)p[3] << 24);
 }
 
-static uint8_t load_sfrom_info(uint32_t *rom_offset,
-                               uint32_t *rom_size,
-                               uint32_t physical_size) {
+uint8_t sfrom_span(FIL *fp, uint32_t *rom_offset, uint32_t *rom_size) {
   uint8_t hdr[0x50];
   UINT br;
+  uint32_t physical_size = fp->fsize;
 
-  if(file_res) return 0;
-
-  if(f_lseek(&file_handle, 0) != FR_OK)
+  if(f_lseek(fp, 0) != FR_OK)
     return 0;
 
-  if(f_read(&file_handle, hdr, sizeof(hdr), &br) != FR_OK || br < 0x30)
+  if(f_read(fp, hdr, sizeof(hdr), &br) != FR_OK || br < 0x30)
     return 0;
 
   /* SFROM magic */
@@ -1142,10 +1139,10 @@ static uint8_t load_sfrom_info(uint32_t *rom_offset,
   if(footer && footer < physical_size && footer + 5 <= physical_size) {
     uint8_t foot[5];
 
-    if(f_lseek(&file_handle, footer) != FR_OK)
+    if(f_lseek(fp, footer) != FR_OK)
       return 0;
 
-    if(f_read(&file_handle, foot, sizeof(foot), &br) != FR_OK || br != sizeof(foot))
+    if(f_read(fp, foot, sizeof(foot), &br) != FR_OK || br != sizeof(foot))
       return 0;
 
     size = rd32le(foot + 1);
@@ -1191,7 +1188,7 @@ static uint32_t load_open(load_ctx_t *c) {
   const char *dot = strrchr((const char*)filename, '.');
   if(dot && !strcasecmp(dot + 1, "sfrom")) {
     uint32_t rom_off, rom_size;
-    if(!load_sfrom_info(&rom_off, &rom_size, file_handle.fsize)) {
+    if(!sfrom_span(&file_handle, &rom_off, &rom_size)) {
       file_close();
       return load_abort_missing(flags, MENU_ERR_FS, path_leaf((const char*)filename));
     }

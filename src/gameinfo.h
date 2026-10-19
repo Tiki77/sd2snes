@@ -27,6 +27,8 @@
  * SRAM_GAMEINFO_DESCEXT_ADDR (including the NUL terminator). The struct's
  * description[256] above is capped by YAML_BUFLEN; this carries the whole text. */
 #define GAMEINFO_DESCEXT_LEN 2048
+/* the full title the title row scrolls (SRAM_GAMEINFO_TITLEX_ADDR), including the NUL */
+#define GI_TITLEX_LEN        128
 
 #define GAMEINFO_MAGIC0     ('G')
 #define GAMEINFO_MAGIC1     ('I')
@@ -149,5 +151,13 @@ void gameinfo_fmv_touch(void);
    COMPLETE font-encoded text into SRAM_GAMEINFO_DESCEXT_ADDR. Bounded + fail-safe; on ANY error
    the region is left invalid (1st byte 0) so the menu keeps the struct's description[256]. */
 void gameinfo_desc_full(void);
+
+/* The ROM's CRC32 on the title row (SRAM_GAMEINFO_CRC_ADDR). gameinfo_load publishes it (from the
+   cache) or "pending" and arms a job; the menu loop runs gameinfo_crc_step while gameinfo_crc_on
+   (one 512-byte sector per call, bounded); gameinfo_crc_cancel = any command the info screen does
+   not send (menucmd_fmv_gate). See gameinfo.c. */
+extern uint8_t gameinfo_crc_on;
+void gameinfo_crc_step(void);
+void gameinfo_crc_cancel(void);
 
 #endif

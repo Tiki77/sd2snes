@@ -666,14 +666,16 @@ uint8_t menu_main_loop() {
        (44.1 kHz) - far faster than this 20 ms poll - so busy-service the DAC to
        the same ~20 ms budget instead of sleeping (verbatim pattern from the
        proven msu1-menu branch). No-op when idle: plain 20 ms sleep as before. */
-    if(menu_sfx_active()) {
+    if(menu_sfx_active() || gameinfo_crc_on) {
       tick_t until = getticks() + MS_TO_TICKS(20);
       /* Pump the DAC, but re-check for a command each pass and bail the instant one arrives:
          otherwise a pending CMD_FMV_NEXT waits out the whole 20 ms burst, stretching the FMV
-         frame interval and drifting the video ~25% behind the audio. */
+         frame interval and drifting the video ~25% behind the audio. The info screen's ROM
+         CRC runs here too, one sector per pass, so the DAC is serviced between sectors. */
       do {
         menu_sfx_pump();
         menu_music_work();   /* a QOA clip: decode the next step ahead of the FPGA fetcher */
+        gameinfo_crc_step();
         if(!cmd && !get_snes_reset()) cmd = snes_get_mcu_cmd();
       } while(!cmd && getticks() < until);
     } else if(!mod_busy) {

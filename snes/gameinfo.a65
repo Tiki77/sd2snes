@@ -233,6 +233,7 @@ gameinfo_query:
   plb
   stz gi_desc_ext_on         ; full-desc source resets to GI_DESCRIPTION on every (re)query
   jsr cover_sync_before_cmd
+  jsl @fm_bank_ok            ; bank $C3 back if a guide took it (the title row's code, gicrc.a65)
   lda gi_query_fill
   beq giq_nofill
   jsr cover_fill_param_for_current_sel
@@ -271,6 +272,7 @@ gin_drain:
 gin_loop:
   jsr gin_syncread
   jsr gi_fmv_tick              ; advance the .fmv screenshot at its fps (no-op unless GI_FLAG_FMV)
+  jsl @gicrc_tick_c2           ; title row: the CRC32 when it arrives, the title's marquee
   lda gi_desc_full
   bne gin_full
   ; --- normal screen ---
@@ -1209,13 +1211,18 @@ gi_build_body_normal:
   sep #$20 : .as
   rep #$10 : .xl
   jsr gi_clear_body_buf
-  ; title
+  ; title + the ROM's CRC32 on the right (gicrc.a65, through its $C2 stub); carry SET = bank
+  ; $C3 is not there, the title alone as before
+  jsl @gicrc_title_c2
+  bcc gib_titled
   lda #GIB_TITLE_ROW : sta print_y
   lda #GIB_LBL_X : sta print_x
   stz print_pal
   lda #60 : sta print_count
   ldx #!GI_TITLE : lda #^GI_TITLE
   jsr gi_puts
+gib_titled:
+  .as : .xl
   ; Publisher, then Developer: same geometry, so both go through gi_meta_pair (this bank is
   ; nearly full -- one shared painter costs less than two copies of the nine setup stores).
   ; The Publisher row is skipped whole when the field is absent: an older firmware knows

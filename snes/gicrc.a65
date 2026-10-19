@@ -1,0 +1,188 @@
+; The game info screen's title row: the title on the left, the ROM's CRC32 on the right.
+;
+; The firmware publishes the CRC block GI_CRC (8 hex digits, a state, the magic 'C','R') and the
+; full title GI_TITLEX (gameinfo.c). The CRC of a ROM takes seconds to read, so it is computed in
+; the background: the row first shows "--------", and gicrc_tick (once per frame from gin_loop)
+; redraws it when the state changes. A title wider than its field scrolls (a marquee, the file
+; browser's way of showing a long name): it never reaches into the CRC. Without the magic (an
+; older firmware) the row is the old one: GI_TITLE across the whole width, no CRC.
+;
+; Bank $C3 (the others are full), so it is reached only through the stubs of gicrcres.a65 ($C2),
+; which check the bank's magic first: the Ficha's guide viewer borrows $C3, and gameinfo_query
+; has it put back (fm_bank_ok) before it asks for the next game. Entered with DBR = 0 (the redraw
+; goes through gi_call_sel_flush, which writes the PPU registers by absolute address). Every
+; variable of this file is reached by long address: data.a65 runs past $2000.
+
+.link page $c3
+#include "memmap.i65"
+; memmap.i65 re-asserts '.link page $c0' on include; re-declare $c3 AFTER it.
+.link page $c3
+
+#define GIC_ROW      17        ; GIB_TITLE_ROW (gameinfo.a65)
+#define GIC_TX       2         ; title column
+#define GIC_TW       51        ; title width with the CRC: columns 2..52, one blank, then the CRC
+#define GIC_TW_OLD   60        ; title width without it (older firmware), as before
+#define GIC_HEX_X    54        ; the 8 digits, 54..61: right-aligned to the end of the text area
+#define GIC_WAIT0    60        ; frames shown at the start before the marquee moves
+#define GIC_STEP     10        ; frames per marquee step
+#define GIC_WAIT_END 60        ; frames shown at the end before it starts over
+
+; gicrc_title: the title row of a freshly built body (gi_build_body_normal): the marquee starts
+; over. Draws into the tile buffers only (the caller DMAs). .as/.xl in, A/X/Y clobbered,
+; carry CLEAR out (= drawn, see gicrc_title_c2).
+gicrc_title:
+  php
+  sep #$20 : .as
+  rep #$10 : .xl
+  lda #$00
+  sta @gic_off
+  sta @gic_end
+  lda #GIC_WAIT0
+  sta @gic_wait
+  jsr gic_draw
+  plp
+  clc
+  rtl
+
+; gicrc_tick: once per frame on the normal screen. Redraws + flushes the body when the CRC
+; arrives or the marquee moves. Never in the full-description (Y) view, which owns the row.
+gicrc_tick:
+  php
+  sep #$20 : .as
+  rep #$10 : .xl
+  lda @gi_desc_full
+  bne gt_out
+  jsr gic_valid
+  bcs gt_out
+  lda @GI_CRC+9
+  cmp @gic_seen
+  bne gt_redraw              ; the CRC arrived (or could not be read)
+  lda @gic_over
+  ora @gic_end
+  beq gt_out                 ; the title fits: no marquee
+  lda @gic_wait
+  dec
+  sta @gic_wait
+  bne gt_out
+  lda @gic_end
+  beq gt_step
+  lda #$00                   ; shown to the end: back to the start
+  sta @gic_off
+  sta @gic_end
+  lda #GIC_WAIT0
+  sta @gic_wait
+  bra gt_redraw
+gt_step:
+  .as : .xl
+  rep #$20 : .al
+  lda @gic_off
+  and #$00ff
+  tax
+  sep #$20 : .as
+  lda @GI_TITLEX, x
+  cmp #CJK_LEAD0             ; carry set = the lead of a two-byte CJK glyph
+  lda @gic_off
+  adc #$01                   ; one character on: +1, or +2 over a CJK pair
+  sta @gic_off
+  lda #GIC_STEP
+  sta @gic_wait
+  jsr gic_draw
+  lda @gic_over
+  bne gt_flush
+  lda #$01                   ; the rest fits now: hold the end, then start over
+  sta @gic_end
+  lda #GIC_WAIT_END
+  sta @gic_wait
+  bra gt_flush
+gt_redraw:
+  .as : .xl
+  jsr gic_draw
+gt_flush:
+  .as : .xl
+  jsl @gi_call_sel_flush     ; body -> VRAM, NMI off + forced blank inside one VBlank
+gt_out:
+  .as : .xl
+  plp
+  rtl
+
+; gic_valid: carry CLEAR = the firmware publishes the CRC block (and GI_TITLEX). .as in.
+gic_valid:
+  .as : .xl
+  lda @GI_CRC+10
+  cmp #$43                   ; 'C'
+  bne gv_no
+  lda @GI_CRC+11
+  cmp #$52                   ; 'R'
+  bne gv_no
+  clc
+  rts
+gv_no:
+  sec
+  rts
+
+; gic_draw: the title row into the tile buffers, from gic_off. .as/.xl in.
+gic_draw:
+  .as : .xl
+  rep #$20 : .al
+  ldx #GIC_ROW*64            ; blank the row first: a shorter text leaves no tail
+  lda #$0000
+gd_clr:
+  sta @BG1_TILE_BUF, x
+  sta @BG2_TILE_BUF, x
+  inx
+  inx
+  cpx #GIC_ROW*64+64
+  bcc gd_clr
+  sep #$20 : .as
+  lda #GIC_ROW
+  sta @print_y
+  lda #GIC_TX
+  sta @print_x
+  lda #$00
+  sta @print_pal
+  jsr gic_valid
+  bcs gd_old
+  lda #GIC_TW
+  sta @print_count
+  rep #$20 : .al
+  lda @gic_off
+  and #$00ff
+  clc
+  adc #!GI_TITLEX
+  sta @print_src
+  sep #$20 : .as
+  lda #^GI_TITLEX
+  sta @print_bank
+  jsl @gi_call_hiprint
+  lda @print_over             ; non-zero = the title goes on past the field
+  sta @gic_over
+  lda #GIC_HEX_X
+  sta @print_x
+  lda #$02                   ; the value colour, like the metadata rows
+  sta @print_pal
+  lda #8
+  sta @print_count
+  rep #$20 : .al
+  lda #!GI_CRC
+  sta @print_src
+  sep #$20 : .as
+  lda #^GI_CRC
+  sta @print_bank
+  jsl @gi_call_hiprint
+  lda @GI_CRC+9
+  sta @gic_seen
+  rts
+gd_old:
+  .as : .xl
+  lda #GIC_TW_OLD
+  sta @print_count
+  rep #$20 : .al
+  lda #!GI_TITLE
+  sta @print_src
+  sep #$20 : .as
+  lda #^GI_TITLE
+  sta @print_bank
+  jsl @gi_call_hiprint
+  lda #$00
+  sta @gic_over
+  rts

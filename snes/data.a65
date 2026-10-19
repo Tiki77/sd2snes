@@ -727,4 +727,11 @@ di_name_w       .byt 0     ; the name's width in cells: 51 with the icons, 54 wi
 nsf_seen_song   .byt 0     ; NSF_SONG the last redraw rendered
 media_rep0      .byt 0     ; CFG_PLAYER_REPEAT when a player opened: a change is saved on the way out
 
+;----------Title row of the game info screen (gicrc.a65): marquee + CRC32 ---------------------
+gic_off         .byt 0     ; first title byte shown (marquee)
+gic_wait        .byt 0     ; frames to the next marquee step
+gic_over        .byt 0     ; the title did not fit at gic_off (hiprint's print_over)
+gic_end         .byt 0     ; 1 = shown to its end, waiting to restart
+gic_seen        .byt 0     ; GI_CRC state the row was drawn with
+
 _END            .byt 0

@@ -112,6 +112,13 @@
                                                    firmware never writes here, so gi_build_body_normal skips the
                                                    whole row when byte 0 reads $00 or $FF. Lockstep with
                                                    src/gameinfo.h. */
+#define GI_CRC                      $FF75C8    /* the ROM's CRC32 for the title row (gicrc.a65): +0 8 hex digits
+                                                  + NUL, +9 state (1 pending, 2 ready, 3 failed), +10 'C' +11 'R'.
+                                                  No magic = an older firmware: no CRC, title as before.
+                                                  Lockstep with SRAM_GAMEINFO_CRC_ADDR in src/memmap.h */
+#define GI_TITLEX                   $FF7E00    /* the full title char[128] (valid with the GI_CRC magic); lockstep
+                                                  with SRAM_GAMEINFO_TITLEX_ADDR (the MCU's CRC cache follows at
+                                                  $FF7E80, 64 B) */
 #define GI_DESC_EXT                 $FF7600    /* full description char[2048] NUL-term staged by CMD_GI_DESC_FULL;
                                                   first byte 0 = invalid -> menu falls back to GI_DESCRIPTION;
                                                   lockstep with SRAM_GAMEINFO_DESCEXT_ADDR in src/memmap.h */

@@ -1,0 +1,27 @@
+; The resident half of gicrc.a65 (the Ficha's title row: CRC32 + marquee), which lives in bank
+; $C3: nothing may call into $C3 while the guide viewer has borrowed it, so these two check its
+; magic first (fmr_magic, fmres.a65). Without it the title row is drawn the old way by
+; gi_build_body_normal and nothing ticks. .as in.
+
+.link page $c2
+#include "memmap.i65"
+; memmap.i65 re-asserts '.link page $c0' on include; re-declare $c2 AFTER it.
+.link page $c2
+
+; carry CLEAR = the row is drawn (gicrc_title rtl's straight back to the caller)
+gicrc_title_c2:
+  .as
+  jsr fmr_magic             ; carry set = bank $C3 is ours
+  bcc gtc_no
+  jmp @gicrc_title
+gtc_no:
+  sec
+  rtl
+
+gicrc_tick_c2:
+  .as
+  jsr fmr_magic
+  bcc gtk_no
+  jmp @gicrc_tick
+gtk_no:
+  rtl
