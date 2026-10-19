@@ -150,10 +150,10 @@ def encode_string(text, zero_width=()):
                 off += 1
             i = end + 1
             continue
-        if ch in ENCODE:
+        if ch in ENCODE or ch == '"':      # '"' would close the literal: emit its code
             if cur:
                 pieces.append(f'"{cur}"'); cur = ""
-            pieces.append(str(ENCODE[ch]))
+            pieces.append(str(ENCODE.get(ch, ord(ch))))
         elif is_cjk(ch):
             if CJK is None or ch not in CJK:
                 sys.exit(f"build_const.py: CJK character {ch!r} (U+{ord(ch):04X}) in {text!r} "
