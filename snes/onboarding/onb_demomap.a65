@@ -1,0 +1,67 @@
+; ===========================================================================
+; onboarding: onb_demo_map, the demo picture of each card and answer row. Its own
+; object in a picture bank ($C3 holds 8 pictures and nothing else) because $C0 is full:
+; the engine reads it by long address only (onb_demo_want_sel, onboarding_main.a65).
+; ===========================================================================
+
+.link page $c3   ; no include: onb_memmap.i65 opens with .link page $c0
+
+; the demo picture per card and answer row (16 rows per card, $ff = none): ids of
+; onb_demo_tbl, i.e. utils/gen_onb_demo.py DEMOS order: a miniature of the screen the
+; answer gives, the flags on the language card, an icon where nothing changes on screen
+; (sound, buttons); a "No" is its picture greyed.
+onb_demo_map
+  .byt 0, 1, 2, 3, 4, 5, 6, 7, 74, 75, $ff, $ff, $ff, $ff, $ff, $ff   ;  1 language
+  .byt 48, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ;  2 themes: the sd2snes+ theme, a .thm, restoring it or the classic one
+  .byt 49, 50, 51, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ;  3 text outline
+  .byt 49, 50, 52, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ;  4 text anti-aliasing
+  .byt 8, 9, 10, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ;  5 box art
+  .byt 53, 54, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ;  6 covers in Recent/Favorites (box art on)
+  .byt 8, 11, 12, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ;  7 game info card
+  .byt 55, 56, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ;  8 its video clip (the card on)
+  .byt 57, 58, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ;  9 the clip's music (the clip and the card on)
+  .byt 13, 14, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 10 menu music
+  .byt 15, 16, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 11 random music (music on)
+  .byt 17, 18, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 12 menu sounds
+  .byt 25, 26, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 13 MSU-1 folders
+  .byt 36, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 14 the .pcm track player
+  .byt 65, 66, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 15 show the sd2snes folder
+  .byt 27, 28, 29, 30, 31, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 16 smart reset
+  .byt 59, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 17 the cheat list
+  .byt 19, 20, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 18 in-game menu (a yes turns the hook on)
+  .byt 21, 22, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 19 savestates (a yes turns the hook on)
+  .byt 35, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 20 4 saves per game (the in-game menu on; its yes turned the hook on)
+  .byt 72, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 21 the RAM trainer (the in-game menu on; its yes turned the hook on)
+  .byt 32, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 22 IPS/BPS patches and their header mode
+  .byt 60, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 23 creating the patched ROM
+  .byt 73, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 24 more special chips (chips_more)
+  .byt 61, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 25 Sufami Turbo Slot B
+  .byt 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63   ; 26 Competition Cart round
+  .byt 33, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 27 other consoles (Mk.III only)
+  .byt 62, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 28 Atari 2600 controls (Mk.III only)
+  .byt 64, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 29 the card's folders
+  .byt 34, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 30 memory test
+  .byt 67, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 31 the Mk.II LED (Mk.II only)
+  .byt 68, 69, 70, 37, 38, 39, 71, 40, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 32 and more
+  .byt 41, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 33 2.17: what's new
+  .byt 23, 24, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 34 2.17: controller 2 (a yes turns the hook and the in-game buttons on)
+  .byt 42, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 35 2.17: Game Boy Color (Mk.III only)
+  .byt 43, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 36 2.17: the shortcut/hook list
+  .byt 44, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 37 2.17: Seta chips, bootlegs
+  .byt 45, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 38 2.17: Super 20 in 1, Gamars, .sfrom
+  .byt 46, 8, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 39 2.17: the browser icons (No: the plain list of covers_off, names only -- $CB has no room for a picture of its own)
+  .byt 47, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 40 2.17: cheats from the game info card
+  .byt 77, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 41 2.18: what's new
+  .byt 76, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 42 2.18: the RP2040 cartridge
+  .byt 78, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 43 2.18: the SNES Mouse in the menu
+  .byt 36, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 44 2.18: the music players (the .pcm player picture)
+  .byt 13, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 45 2.18: the NES music player (the music icon: the card before it already shows the .pcm player, and $CB has no room for a picture of its own)
+  .byt 35, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 46 2.18: the saves screen (the in-game SAVES tab picture: $CB has no room for a picture of its own)
+  .byt 46, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 47 2.18: the file manager (the browser list with its icons: $CB has no room for a picture of its own)
+  .byt 12, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 48 2.18: game options (the browser's context menu, where the screen opens from: no bank has room for a picture of its own)
+  .byt 36, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 49 2.18: Repeat in the players (the .pcm player picture)
+  .byt 14, 13, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 50 2.18: stop the music on the game info card (Yes: the music-off icon, No: the music-on one)
+  .byt 11, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 51 2.18: the CRC32 on the game info card (the game info card picture)
+  .byt 38, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 52 2.18: delete a folder (the context menu with its delete row)
+  .byt 42, 42, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 53 2.18: rotated Game Boy buttons (the Game Boy picture for both answers: no bank has room for a greyed one)
+  .byt 23, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff   ; 54 2.18: the NTT Data Keypad (the controllers picture)
