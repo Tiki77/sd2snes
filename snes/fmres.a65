@@ -196,6 +196,7 @@ fm_menu_hook:
   sep #$20 : .as
   lda @FM_ARM
   beq fmh_lists
+  sta @FM_ARMV              ; 2 = an MSU-1 folder opened as its game (fm_ctx_build)
   lda #$00
   sta @FM_ARM
   jsl @fm_bank_ok

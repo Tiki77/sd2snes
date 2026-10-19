@@ -32,6 +32,21 @@
  * saves or states: two games must not share progress.  Recents / Favorites entries follow
  * every rename and cut.
  *
+ * DELETE (FM_OP_RMDIR: one folder; FM_OP_RMSEL: the entries marked in the selection mode,
+ * files and folders) walks twice with the same stack: a count (files, folders, size, for the
+ * question the menu asks) and then the removal, children first, every folder unlinked when
+ * its walk pops.  Only the folder's own tree goes: a game's files under
+ * /sd2snes are keyed by its stem alone, and another game of the same name in another folder
+ * owns them too.  The card root, /sd2snes and its system folders are refused (rm_allowed).
+ * A read-only entry is left (with the folders above it) and the rest goes on; a card that
+ * stops answering ends the op.
+ *
+ * TWO CARD IMAGES FROM THIS FILE.  fileops.bin (everything but the delete) sits right under
+ * its memory ceiling: the image and the spare it needs (FOP_NBUF paths + one sector) share
+ * the firmware's module block, so the delete is its own image, rmdir.bin
+ * (../rmdir/rmmod.c: FOP_RMDIR_ONLY, nothing but the delete).  Host builds
+ * (MODULE_HOST_LINKED) link one module with both.
+ *
  * No globals and no library: the state is the fopmod_t below (in the FRAME the firmware
  * lends), the buffers are the spare RAM, and every string helper is local.
  */
@@ -40,6 +55,20 @@
 #include "memmap.h"
 #include "fileman.h"
 #include "scratch.h"
+#include "filetypes.h"
+
+#if defined(MODULE_HOST_LINKED) || defined(FOP_RMDIR_ONLY)
+#define FOP_RMDIR                 /* the delete is in this build */
+#endif
+#ifdef FOP_RMDIR_ONLY
+/* rmdir.bin: the delete is the only op, so every other path is dead code the compiler drops
+   (with the functions only they call) */
+#define FOP_IS_RMDIR(m) 1
+#pragma GCC diagnostic ignored "-Wunused-function"
+#else
+#define FOP_FILEOPS               /* the rest is in this build */
+#define FOP_IS_RMDIR(m) ((m)->h.op == FM_OP_RMDIR || (m)->h.op == FM_OP_RMSEL)
+#endif
 
 #define FOP_PATH        256       /* every path buffer: 255 characters and the NUL */
 #define FOP_MAXPATH     255
@@ -85,13 +114,18 @@ typedef struct __attribute__((packed)) {
   uint16_t view_lines;
   uint16_t view_win;
   uint8_t  view_last;
-  uint8_t  rsvd[7];
+  uint8_t  rsvd0;
+  uint16_t rm_files;
+  uint16_t rm_dirs;
+  uint8_t  rsvd[2];
 } fop_hdr_t;
 
 _Static_assert(sizeof(fop_hdr_t) == __builtin_offsetof(fm_stat_t, cur_name), "header = fm_stat_t up to cur_name");
 _Static_assert(__builtin_offsetof(fop_hdr_t, items_done) == __builtin_offsetof(fm_stat_t, items_done), "items_done");
 _Static_assert(__builtin_offsetof(fop_hdr_t, progress) == __builtin_offsetof(fm_stat_t, progress), "progress");
 _Static_assert(__builtin_offsetof(fop_hdr_t, view_last) == __builtin_offsetof(fm_stat_t, view_last), "view_last");
+_Static_assert(__builtin_offsetof(fop_hdr_t, rm_files) == __builtin_offsetof(fm_stat_t, rm_files), "rm_files");
+_Static_assert(__builtin_offsetof(fop_hdr_t, rm_dirs) == __builtin_offsetof(fm_stat_t, rm_dirs), "rm_dirs");
 
 /* one level of a folder walk; the levels above the current one wait in PSRAM */
 typedef struct {
@@ -100,6 +134,7 @@ typedef struct {
   uint8_t  flags;
 } fop_frame_t;
 #define FRM_MERGECUT    0x01      /* a cut merged into an existing folder: remove the source if it ended empty */
+#define FRM_RMDIR       0x02      /* delete: remove the folder when its walk is done */
 
 typedef struct {
   const module_api_t *api;
@@ -131,6 +166,9 @@ typedef struct {
   uint32_t clus;                  /* bytes per cluster */
   uint32_t nfree;                 /* free clusters */
   uint32_t v_size, v_known;       /* VIEW: the file size, window starts known */
+#ifdef FOP_RMDIR
+  uint32_t rm_rest;               /* RMDIR: bytes under a KB not yet in bytes_total (KB) */
+#endif
   char    *p, *q, *l, *a, *b;     /* path buffers in the spare RAM */
   uint8_t *buf;                   /* the copy / read buffer, after them */
   uint32_t bufsz;
@@ -294,7 +332,11 @@ static int font(fopmod_t *m, uint32_t cp, uint8_t *out) {
 
 static void progress(fopmod_t *m) {
   uint32_t num, den;
+#ifdef FOP_RMDIR
+  if(m->h.bytes_total && !FOP_IS_RMDIR(m)) { num = m->h.bytes_done; den = m->h.bytes_total; }
+#else
   if(m->h.bytes_total) { num = m->h.bytes_done; den = m->h.bytes_total; }
+#endif
   else { num = m->h.items_done; den = m->h.items_total; }
   if(!den) return;
   if(num > den) num = den;
@@ -834,6 +876,24 @@ static int walk_push(fopmod_t *m, uint8_t flags) {
 }
 
 /* the folder at hand is finished */
+#ifdef FOP_RMDIR
+static void rm_res(fopmod_t *m, FRESULT r, int isdir);
+
+static void walk_pop(fopmod_t *m) {
+  const module_api_t *api = m->api;
+  uint8_t fl = m->cur.flags;
+  FRESULT r = FR_OK;
+  m->p[m->cur.plen] = 0;
+  m->q[m->cur.qlen] = 0;
+  api->f_closedir(&m->cur.dir);
+  if(fl & (FRM_MERGECUT | FRM_RMDIR)) r = api->f_unlink(m->p);   /* refused while anything is left */
+  m->depth--;
+  if(m->depth)
+    api->sram_read(&m->cur, FOP_STACK + (uint32_t)(m->depth - 1) * sizeof(fop_frame_t), sizeof(fop_frame_t));
+  if(fl & FRM_RMDIR) rm_res(m, r, 1);
+  else item_next(m);
+}
+#else
 static void walk_pop(fopmod_t *m) {
   const module_api_t *api = m->api;
   m->p[m->cur.plen] = 0;
@@ -845,6 +905,7 @@ static void walk_pop(fopmod_t *m) {
     api->sram_read(&m->cur, FOP_STACK + (uint32_t)(m->depth - 1) * sizeof(fop_frame_t), sizeof(fop_frame_t));
   item_next(m);
 }
+#endif
 
 static void copy_abort(fopmod_t *m) {
   m->api->f_close(&m->fo);
@@ -891,7 +952,19 @@ static void item_go(fopmod_t *m, int replace) {
 }
 
 /* a conflict answered (kind = FM_ASK_*) */
+#ifdef FOP_RMDIR
+static void rm_go(fopmod_t *m);
+#endif
+
 static void item_answer(fopmod_t *m, uint8_t kind, uint8_t ans) {
+#ifdef FOP_RMDIR
+  if(kind == FM_ASK_RMDIR) {
+    if(ans == FM_ANS_REPLACE) rm_go(m);
+    else fail_op(m, FM_ERR_CANCELLED);
+    return;
+  }
+#endif
+#ifdef FOP_FILEOPS
   if(ans == FM_ANS_KEEPBOTH) {
     if(keep_both(m)) item_go(m, 0);
     else item_fail(m, FM_ERR_PATH);
@@ -900,6 +973,7 @@ static void item_answer(fopmod_t *m, uint8_t kind, uint8_t ans) {
   } else {
     item_skip(m);
   }
+#endif
 }
 
 /* P (a folder when isdir) is to go to Q */
@@ -971,14 +1045,36 @@ static void scan_bytes(fopmod_t *m, uint32_t size) {
 /* ...one more file or folder */
 static void scan_count(fopmod_t *m, uint8_t isdir, uint32_t size) {
   m->h.items_total++;
+#ifdef FOP_RMDIR
+  if(FOP_IS_RMDIR(m)) {
+    if(isdir) m->h.rm_dirs++;
+    else m->h.rm_files++;
+    m->rm_rest += size & 1023;      /* bytes_total counts KB here: no 4 GB ceiling */
+    m->h.bytes_total += (size >> 10) + (m->rm_rest >> 10);
+    m->rm_rest &= 1023;
+    return;                         /* no clusters to find: m->clus is a paste's */
+  }
+#endif
   if(isdir) { m->need++; return; }
   scan_bytes(m, size);
 }
 
 /* the next clipboard entry */
+#ifdef FOP_RMDIR
+static void rm_end(fopmod_t *m);
+static void rm_rec(fopmod_t *m);
+#endif
+
 static void rec_step(fopmod_t *m) {
   FRESULT r;
   uint8_t type;
+#ifdef FOP_RMDIR
+  if(FOP_IS_RMDIR(m)) {
+    if(m->h.op == FM_OP_RMSEL) rm_rec(m);       /* the next marked entry */
+    else rm_end(m);                              /* the folder's walk is over */
+    return;
+  }
+#endif
   if(m->rec_i >= m->rec_n) {
     if(m->scan) {
       if(m->need > m->nfree) { fail_op(m, FM_ERR_NOSPACE); return; }
@@ -1049,6 +1145,14 @@ static void walk_step(fopmod_t *m) {
     return;
   }
   if(pl < 0 || ql < 0) { item_fail(m, FM_ERR_PATH); return; }
+#ifdef FOP_RMDIR
+  if(FOP_IS_RMDIR(m)) {
+    set_name(m, name);
+    if(!m->isdir) rm_res(m, m->api->f_unlink(m->p), 0);
+    else if(!walk_push(m, FRM_RMDIR)) item_fail(m, FM_ERR_IO);
+    return;
+  }
+#endif
   item_start(m);
 }
 
@@ -1175,6 +1279,199 @@ static void op_mkdir(fopmod_t *m, const char *path) {
   if((r = m->api->f_mkdir(m->p)) != FR_OK) { fail_op(m, fr_err(r)); return; }
   op_done(m);
 }
+
+/* --- DELETE (FM_OP_RMDIR) ---------------------------------------------------------------- */
+#ifdef FOP_RMDIR
+
+/* path_asset's five roots under /sd2snes: a game's own files */
+static const char rm_roots[] = "info\0cheats\0saves\0states\0patches\0";
+
+/* May folder p go?  Never the root nor /sd2snes; inside /sd2snes only the trees of a game's
+   own files (path_asset's five roots), which the firmware remakes as it needs them --
+   everything else there (the language files, what a later firmware adds) the system reads. */
+static int rm_allowed(const char *p) {
+  const char *r;
+  if(!p[0]) return 0;
+  if(!under(p, "/sd2snes")) return 1;
+  if(p[8])                                  /* '/': under() leaves '\0' or '/' there */
+    for(r = rm_roots; *r; r += slen(r) + 1)
+      if(under(p + 9, r)) return 1;
+  return 0;
+}
+
+/* P (a folder when isdir) was unlinked, or refused with r.  A card that stopped answering
+   ends the op; anything else (a read-only entry, a folder left not empty) is counted and the
+   rest goes on. */
+static void rm_res(fopmod_t *m, FRESULT r, int isdir) {
+  if(r == FR_DISK_ERR || r == FR_INT_ERR || r == FR_NOT_READY || r == FR_WRITE_PROTECTED) {
+    fail_op(m, FM_ERR_IO);
+    return;
+  }
+  if(r) {
+    /* a folder refused as not empty: what was left in it already said why */
+    if(!isdir || !m->h.err) m->h.err = (r == FR_DENIED) ? FM_ERR_RDONLY : fr_err(r);
+    m->h.n_failed++;
+  } else {
+    m->h.n_done++;
+    if(!isdir) m->lists = 1;        /* a game in it leaves Recents / Favorites (at any end) */
+  }
+  m->h.items_done++;
+  item_next(m);
+}
+
+/* After a delete: was everything on the clipboard inside the deleted folder P?  Then the menu
+   empties it.  A clipboard that only lost some of its entries stays: the paste reports those
+   as not found.  Uses L, A. */
+/* FM_OP_RMSEL: the next entry marked in the selection mode, from *i on (FM_MARKS: bit i =
+   entry i of the directory table the last READDIR left in PSRAM, the order the menu shows):
+   its name into out (a hidden extension's dot put back, a folder's '/' dropped), *i past it.
+   Its type, or -1 when no marked entry is left.  ".." never counts. */
+static int rm_mark(fopmod_t *m, uint32_t *i, char *out) {
+  const module_api_t *api = m->api;
+  uint8_t ent[4], b;
+  uint32_t k;
+  while(*i < FM_MARKS_BYTES * 8) {
+    b = api->sram_readbyte(SRAM_FM_MARKS_ADDR + (*i >> 3)) >> (*i & 7);
+    if(!b) { *i = (*i | 7) + 1; continue; }
+    if(!(b & 1)) { (*i)++; continue; }
+    api->sram_read(ent, SRAM_DIR_ADDR + *i * 4, 4);
+    (*i)++;
+    if(ent[3] == TYPE_PARENT) continue;
+    api->sram_read(out, SRAM_MENU_ADDR + (ent[0] | ((uint32_t)ent[1] << 8) | ((uint32_t)ent[2] << 16)) + 6, FOP_PATH);
+    out[FOP_MAXPATH] = 0;
+    for(k = 0; out[k]; k++) if(out[k] == 1) out[k] = 0x2e;     /* '.' */
+    pnorm(out);
+    if(out[0]) return ent[3];
+  }
+  return -1;
+}
+
+/* is L inside what was deleted (the folder P, or one of the marked entries of folder P)? */
+static int rm_covered(fopmod_t *m) {
+  uint32_t i = 0;
+  int r = 0;
+  if(m->h.op != FM_OP_RMSEL) return under(m->l, m->p);
+  while(!r && rm_mark(m, &i, m->b) >= 0) {
+    if(pjoin(m->p, m->slen, m->b) >= 0) r = under(m->l, m->p);
+    m->p[m->slen] = 0;
+  }
+  return r;
+}
+
+/* After a delete: was everything on the clipboard inside what was deleted?  Then the menu
+   empties it.  A clipboard that only lost some of its entries stays: the paste reports those
+   as not found.  Uses L, A (and B for the marked entries). */
+static void rm_clip(fopmod_t *m) {
+  const module_api_t *api = m->api;
+  uint32_t off = SRAM_FM_CLIP_ADDR + FM_CLIP_HDR, n = api->sram_readshort(SRAM_FM_CLIP_ADDR + 2), k;
+  if(!n) return;
+  api->sram_read(m->l, SRAM_FM_CLIP_ADDR + 4, FOP_PATH);
+  m->l[FOP_MAXPATH] = 0;
+  k = pnorm(m->l);
+  while(n--) {
+    rec_read(m, &off, m->a);
+    if(pjoin(m->l, k, m->a) < 0 || !rm_covered(m)) return;
+  }
+  m->h.flags |= FM_FL_UNCLIP;
+}
+
+/* FM_OP_RMSEL, one marked entry of folder P (its walk, when a folder, comes back here) */
+static void rm_rec(fopmod_t *m) {
+  const module_api_t *api = m->api;
+  uint32_t i = m->rec_i;
+  int t;
+  FRESULT r;
+  m->p[m->slen] = 0;
+  t = rm_mark(m, &i, m->l);
+  m->rec_i = (uint16_t)i;
+  if(t < 0) { rm_end(m); return; }
+  if(pjoin(m->p, m->slen, m->l) < 0) {
+    if(!m->scan) item_fail(m, FM_ERR_PATH);
+    return;
+  }
+  scpy(m->q, m->p);
+  /* the same rule as one folder: nothing the system reads (a card file of /sd2snes is
+     TYPE_FILE; the path rule covers it too).  Checked in the count, before anything goes. */
+  if(m->scan && (t == TYPE_FILE || !rm_allowed(m->p))) {
+    m->p[m->slen] = 0;
+    fail_op(m, FM_ERR_SYSTEM);
+    return;
+  }
+  m->fi.lfname = 0;
+  m->fi.lfsize = 0;
+  r = api->f_stat(m->p, &m->fi);
+  if(r != FR_OK) {
+    if(!m->scan) item_fail(m, FM_ERR_NOTFOUND);
+    return;
+  }
+  m->isdir = (m->fi.fattrib & AM_DIR) != 0;
+  if(m->scan) {
+    scan_count(m, m->isdir, m->fi.fsize);
+    if(m->isdir) walk_push(m, 0);
+    return;
+  }
+  set_name(m, m->l);
+  if(!m->isdir) rm_res(m, api->f_unlink(m->p), 0);
+  else if(!walk_push(m, FRM_RMDIR)) item_fail(m, FM_ERR_IO);
+}
+
+/* the folder's walk is over: after the count, ask; after the removal, done */
+static void rm_end(fopmod_t *m) {
+  if(m->h.op == FM_OP_RMSEL) m->p[m->slen] = 0;   /* P = the folder the entries are in */
+  if(m->scan) {
+    m->scan = 0;
+    if(m->rm_rest) m->h.bytes_total++;   /* rounded up: "0 KB" is an empty folder */
+    if(m->h.op == FM_OP_RMSEL && !m->h.items_total) { fail_op(m, FM_ERR_NOTFOUND); return; }
+    set_name(m, m->h.op == FM_OP_RMSEL ? "" : leaf(m->p));
+    m->h.state = FM_ST_ASK;
+    m->h.ask = FM_ASK_RMDIR;
+    m->phase = PH_ASK;
+    return;
+  }
+  rm_clip(m);
+  m->h.state = FM_ST_DONE;
+  m->h.progress = 255;
+  m->phase = PH_END;
+}
+
+/* the answer was yes: the same walk again, removing */
+static void rm_go(fopmod_t *m) {
+  m->h.state = FM_ST_RUN;
+  m->h.items_done = 0;
+  if(m->h.op == FM_OP_RMSEL) {
+    m->rec_i = 0;
+    m->phase = PH_REC;
+  } else if(!walk_push(m, FRM_RMDIR)) fail_op(m, FM_ERR_IO);
+}
+
+static void op_rmsel(fopmod_t *m, const char *path) {
+  uint32_t i;
+  for(i = 0; i < FOP_MAXPATH && path[i]; i++) m->p[i] = path[i];
+  m->p[i] = 0;
+  m->slen = (uint16_t)pnorm(m->p);
+  m->scan = 1;
+  m->h.state = FM_ST_SCAN;
+  m->phase = PH_REC;
+}
+
+static void op_rmdir(fopmod_t *m, const char *path) {
+  const char *lf;
+  uint32_t i;
+  for(i = 0; i < FOP_MAXPATH && path[i]; i++) m->p[i] = path[i];
+  m->p[i] = 0;
+  pnorm(m->p);
+  scpy(m->q, m->p);                 /* the walk keeps a destination too: unused here */
+  if(!rm_allowed(m->p)) { fail_op(m, FM_ERR_SYSTEM); return; }
+  lf = leaf(m->p);
+  set_name(m, lf);
+  m->scan = 1;
+  m->h.state = FM_ST_SCAN;
+  m->h.items_total = 1;             /* the folder itself */
+  /* "." / ".." would open the folder itself or its parent; a file does not open */
+  if((lf[0] == '.' && (!lf[1] || (lf[1] == '.' && !lf[2]))) || !walk_push(m, 0))
+    fail_op(m, FM_ERR_NOTFOUND);
+}
+#endif
 
 /* --- VIEW ---------------------------------------------------------------------------------
  * Window k shows the file from woff[k] (kept in SRAM_FM_WORK_ADDR) up to the last line break
@@ -1420,10 +1717,16 @@ int fopmod_start(void *st, const module_api_t *api, const char *path) {
     m->bufsz = (size - FOP_NBUF * FOP_PATH) & ~(uint32_t)(FOP_RD - 1);
     if(m->bufsz > FOP_BUF_MAX) m->bufsz = FOP_BUF_MAX;
     switch(m->h.op) {
+#ifdef FOP_FILEOPS
       case FM_OP_PASTE:  op_paste(m, path); break;
       case FM_OP_RENAME: op_rename(m, path); break;
       case FM_OP_MKDIR:  op_mkdir(m, path); break;
       case FM_OP_VIEW:   op_view(m, path); break;
+#endif
+#ifdef FOP_RMDIR
+      case FM_OP_RMDIR:  op_rmdir(m, path); break;
+      case FM_OP_RMSEL:  op_rmsel(m, path); break;
+#endif
       default:           fail_op(m, FM_ERR_IO); break;
     }
   } else {
@@ -1452,20 +1755,25 @@ void fopmod_ctl(void *st, uint32_t param) {
         m->answer_all = (param >> 16) & 0xff;
       }
       break;
+#ifdef FOP_FILEOPS
     case FM_CTL_VIEW_WIN:
       if(m->h.op == FM_OP_VIEW && m->h.state == FM_ST_VIEW) {
         view_render(m, (param >> 8) & 0xffff);
         publish(m);
       }
       break;
+#endif
   }
 }
 
 void fopmod_idle(void *st) {
   fopmod_t *m = st;
   const module_api_t *api = m->api;
-  uint32_t t0, nclst;
+  uint32_t t0;
+#ifdef FOP_FILEOPS
+  uint32_t nclst;
   FATFS *fs;
+#endif
   if(!running(m)) return;
   t0 = api->ticks();
   do {
@@ -1475,6 +1783,7 @@ void fopmod_idle(void *st) {
       break;
     }
     switch(m->phase) {
+#ifdef FOP_FILEOPS
       case PH_FREE:
         if(api->f_getfree("/", &nclst, &fs) != FR_OK) { fail_op(m, FM_ERR_IO); break; }
         m->nfree = nclst;
@@ -1484,10 +1793,18 @@ void fopmod_idle(void *st) {
       case PH_REC:  rec_step(m); break;
       case PH_WALK: walk_step(m); break;
       case PH_COPY: copy_step(m); break;
+#else
+      case PH_REC:  rec_step(m); break;
+      case PH_WALK: walk_step(m); break;
+#endif
       case PH_ASK:
         if(m->answer) {
           uint8_t kind = m->h.ask, a = m->answer;
+#ifdef FOP_RMDIR
+          if(m->answer_all && kind <= 3) m->all[kind - 1] = a;   /* FM_ASK_RMDIR has no "all" */
+#else
           if(m->answer_all) m->all[kind - 1] = a;
+#endif
           m->answer = 0;
           m->h.ask = 0;
           m->h.state = FM_ST_RUN;

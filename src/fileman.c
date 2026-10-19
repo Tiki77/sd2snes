@@ -106,10 +106,12 @@ static void fm_stat_error(uint8_t op, uint8_t err) {
 }
 
 /* The module learns its op from FM_STAT+4, written before it starts; the path is the folder
-   for a paste / new folder, the selected entry otherwise. */
+   for a paste / new folder / a delete of the marked entries / a delete with MCU_PARAM+9 set,
+   the selected entry otherwise. */
 static void fm_open(uint8_t op) {
   sram_writebyte(op, SRAM_FM_STAT_ADDR + 4);
-  if(op == FM_OP_PASTE || op == FM_OP_MKDIR) {
+  if(op == FM_OP_PASTE || op == FM_OP_MKDIR || op == FM_OP_RMSEL
+     || (op == FM_OP_RMDIR && snescmd_readbyte(SNESCMD_MCU_PARAM + 9))) {
     sram_readstrn(file_lfn, snes_get_mcu_param() & 0xffffff, 256);
     file_lfn[255] = 0;
   } else {
@@ -118,7 +120,7 @@ static void fm_open(uint8_t op) {
   /* a folder's directory entry ends in '/' (scan_dir); the module wants the bare path */
   size_t n = strlen((const char *)file_lfn);
   if(n > 1 && file_lfn[n - 1] == '/') file_lfn[n - 1] = 0;
-  module_open(MODULE_ID_FILEOP, (const char *)file_lfn);
+  module_open(op >= FM_OP_RMDIR ? MODULE_ID_RMDIR : MODULE_ID_FILEOP, (const char *)file_lfn);
 }
 
 void fileman_command(void) {
@@ -146,6 +148,8 @@ void fileman_command(void) {
     case FM_OP_RENAME:
     case FM_OP_VIEW:
     case FM_OP_MKDIR:
+    case FM_OP_RMDIR:
+    case FM_OP_RMSEL:
       fm_open(op);
       break;
     default:                                  /* FM_OP_PROBE */

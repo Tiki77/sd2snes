@@ -1158,6 +1158,7 @@
 #define FM_VIEW_PCT                 63 /* the line record's byte: where it starts in the file, 0..100 */
 /* fm_stat_t offsets */
 #define FMS_STATE                   3
+#define FMS_BYTES_TOTAL             12 /* dword; a delete: the folder's size in KB */
 #define FMS_OP                      4
 #define FMS_ERR                     5
 #define FMS_ASK                     6
@@ -1173,6 +1174,8 @@
 #define FMS_VWIN                    30
 #define FMS_VLAST                   32
 #define FMS_NAME                    40
+#define FMS_RM_FILES                34 /* word: a delete's files counted */
+#define FMS_RM_DIRS                 36 /* word: ...and folders */
 /* ops (MCU_PARAM+8 of CMD_FM) */
 #define FM_OP_PROBE                 0
 #define FM_OP_BANK                  1
@@ -1182,6 +1185,8 @@
 #define FM_OP_RENAME                5
 #define FM_OP_VIEW                  6
 #define FM_OP_MKDIR                 7
+#define FM_OP_RMDIR                 8 /* MCU_PARAM+9: 0 = the selected folder, 1 = the folder the browser shows */
+#define FM_OP_RMSEL                 9 /* the marked entries of the folder shown (rmdir.bin) */
 #define FM_CLIP_COPY                1
 #define FM_CLIP_CUT                 2
 /* CMD_MOD_CTL to fileops.bin */
@@ -1201,10 +1206,12 @@
 #define FM_ST_BUSY                  7
 #define FM_ERR_IO                   4
 #define FM_ERR_CANCELLED            6
-#define FM_ERR_MAX                  10
+#define FM_ERR_MAX                  12
 #define FM_CLIP_MODE                $E10000 /* the clipboard's first byte: FM_CLIP_* (src/fileman.h) */
 #define FM_ASK_DIR                  2
 #define FM_ASK_MIXED                3
+#define FM_ASK_RMDIR                4
+#define FM_FL_UNCLIP                $08
 #define MODULE_ST_MISSING           1
 /* WRAM: $7E9400-$7E9FFF, the free tail of the iris block (the saves screen has $7E9000-$7E93FF,
    the Ficha $7E8800-$7E8BFF).  setup_gfx zeroes it at every boot, so the flags start at 0
@@ -1214,6 +1221,7 @@
 #define FM_ARM                      $7E9404 /* 1 = the next show_menu is the browser's context menu: fm_menu_hook appends the file rows */
 #define FM_IDX                      $7E9406 /* word: the directory entry the context menu was opened on */
 #define FM_TYPE                     $7E9408 /* its type */
+#define FM_ARMV                     $7E9409 /* what FM_ARM held when fm_menu_hook took it: 2 = an MSU-1 folder's game menu (only the delete-folder row) */
 #define FM_TAB                      $7E9500 /* the context table fm_ctx_build writes (up to 24 entries) */
 #define FM_SCR                      $7E9800 /* bank $C3's own scratch, up to $7E9FFF */
 #define FM_BANK_MAGIC               $C30000 /* "FMB1": bank $C3 is the file manager's (fileman.a65) */

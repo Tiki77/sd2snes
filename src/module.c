@@ -87,7 +87,9 @@ static uint8_t mod_id;              /* the module in ptrcache, 0 = none (or gone
 extern const module_fns_t nsfmod_fns, mtmod_fns, pcmmod_fns, rtcmod_fns, fopmod_fns;
 static int module_load(uint8_t id)
 {
-  static const module_fns_t *const fns[MODULE_COUNT] = { &nsfmod_fns, &mtmod_fns, &pcmmod_fns, &rtcmod_fns, &fopmod_fns };
+  /* rmdir.bin is fopmod.c too: the host build links one module with both */
+  static const module_fns_t *const fns[MODULE_COUNT] = { &nsfmod_fns, &mtmod_fns, &pcmmod_fns, &rtcmod_fns, &fopmod_fns,
+                                                         &fopmod_fns };
   if(!id || id > MODULE_COUNT) return 0;
   mod = *fns[id - 1];
   return 1;
@@ -97,7 +99,7 @@ static int module_load(uint8_t id)
 {
   static const char *const file[MODULE_COUNT] = {
     "/sd2snes/nsfplay.bin", "/sd2snes/memtest.bin", "/sd2snes/pcmplay.bin",
-    "/sd2snes/rtc7110.bin", "/sd2snes/fileops.bin"
+    "/sd2snes/rtc7110.bin", "/sd2snes/fileops.bin", "/sd2snes/rmdir.bin"
   };
   uint8_t *img = (uint8_t *)ptrcache;
   const module_hdr_t *h = (const module_hdr_t *)img;

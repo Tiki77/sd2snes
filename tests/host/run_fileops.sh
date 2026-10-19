@@ -72,10 +72,10 @@ case "${FOP_MUTANT:-}" in
   noround)     perl -0pi -e 's/ \+ \(\(size % m->clus\) \? 1 : 0\)//' "$M" ;;
   nospacechk)  perl -0pi -e 's/if\(m->need > m->nfree\)/if(0)/' "$M" ;;
   nounlink)    perl -0pi -e 's/(static void copy_abort.*?\n.*?\n.*?\n)  m->api->f_unlink\(m->q\);\n/$1/s' "$M" ;;
-  noallkind)   perl -0pi -e 's/if\(m->answer_all\) m->all\[kind - 1\] = a;/if(m->answer_all) { m->all[0] = m->all[1] = m->all[2] = a; }/' "$M" ;;
+  noallkind)   perl -0pi -e 's/if\(m->answer_all && kind <= 3\) m->all\[kind - 1\] = a;/if(m->answer_all) { m->all[0] = m->all[1] = m->all[2] = a; }/' "$M" ;;
   mixedrepl)   perl -0pi -e 's/ && kind != FM_ASK_MIXED//' "$M" ;;
   nosame)      perl -0pi -e 's/m->same = eqi\(m->p, m->q\);/m->same = 0;/' "$M" ;;
-  nomergedel)  perl -0pi -e 's/if\(m->cur.flags & FRM_MERGECUT\) api->f_unlink\(m->p\);//' "$M" ;;
+  nomergedel)  perl -0pi -e 's/if\(fl & \(FRM_MERGECUT \| FRM_RMDIR\)\) r = api->f_unlink/if(fl \& FRM_RMDIR) r = api->f_unlink/' "$M" ;;
   nocaseren)   perl -0pi -e 's/if\(eqi\(m->p, m->q\)\) \{\n    \/\*/if(0) {\n    \/*/' "$M" ;;
   stateany)    perl -0pi -e 's/return isdig\(r\[0\]\) && isdig\(r\[1\]\) && eqi\(r \+ 2, ".state"\);/return (isdig(r[0]) \&\& eqi(r + 1, ".state")) || (isdig(r[0]) \&\& isdig(r[1]) \&\& eqi(r + 2, ".state"));/' "$M" ;;
   copysaves)   perl -0pi -e 's/i < \(copy \? 2u : 5u\)/i < 5u/' "$M" ;;
@@ -93,6 +93,20 @@ case "${FOP_MUTANT:-}" in
   countread)   perl -0pi -e 's/(    m->st_fill \+= br;\n)/$1    m->h.bytes_done += br;\n/; s/    m->h.bytes_done \+= n;\n//' "$M" ;;
   nodrainreset) perl -0pi -e 's/  m->draining = 0;\n  m->st_fill = 0;\n  return m->src_eof;/  m->draining = 0;\n  return m->src_eof;/' "$M" ;;
   ctl01)       perl -0pi -e 's/if\(out\[i\] < 2\) out\[i\] = .\?.;/(void)out[i];/; s/out\[0\] = \(cp < 0x20 \|\| cp == 0x7f\) \? .\?. : \(uint8_t\)cp;/out[0] = (uint8_t)cp;/' "$M" ;;
+  rm_nosys)    perl -0pi -e 's/if\(!rm_allowed\(m->p\)\)/if(!rm_allowed(m->p) \&\& 0)/' "$M" ;;
+  rm_noroots)  perl -0pi -e 's/      if\(under\(p \+ 9, r\)\) return 1;/      (void)r;/' "$M" ;;
+  rm_nodirdel) perl -0pi -e 's/if\(fl & \(FRM_MERGECUT \| FRM_RMDIR\)\)/if(fl \& FRM_MERGECUT)/' "$M" ;;
+  rm_noask)    perl -0pi -e 's/    m->h.ask = FM_ASK_RMDIR;\n    m->phase = PH_ASK;\n    return;/    rm_go(m);\n    return;/' "$M" ;;
+  rm_nofatal)  perl -0pi -e 's/if\(r == FR_DISK_ERR \|\|/if(r == FR_INVALID_OBJECT ||/' "$M" ;;
+  rm_errlast)  perl -0pi -e 's/if\(!isdir \|\| !m->h.err\) m->h.err =/m->h.err =/' "$M" ;;
+  rm_noclip)   perl -0pi -e 's/  m->h.flags \|= FM_FL_UNCLIP;\n//' "$M" ;;
+  rm_cliprest) perl -0pi -e 's/ \|\| !rm_covered\(m\)\) return;/ || (!rm_covered(m) \&\& 0)) return;/' "$M" ;;
+  rm_nolists)  perl -0pi -e 's/    if\(!isdir\) m->lists = 1; /    /' "$M" ;;
+  rm_sizekb)   perl -0pi -e 's/    m->rm_rest &= 1023;\n/    m->rm_rest = 0;\n/' "$M" ;;
+  rm_nodots)   perl -0pi -e 's/if\(\(lf\[0\] == .\.. && \(!lf\[1\] \|\| \(lf\[1\] == .\.. && !lf\[2\]\)\)\) \|\| /if(/' "$M" ;;
+  rm_selsys)   perl -0pi -e 's/if\(m->scan && \(t == TYPE_FILE \|\| !rm_allowed\(m->p\)\)\)/if(0 \&\& m->scan \&\& (t == TYPE_FILE || !rm_allowed(m->p)))/' "$M" ;;
+  rm_selclip)  perl -0pi -e 's/if\(pjoin\(m->p, m->slen, m->b\) >= 0\) r = under\(m->l, m->p\);/(void)0;/' "$M" ;;
+  rm_selhide)  perl -0pi -e 's/if\(out\[k\] == 1\) out\[k\] = 0x2e;/(void)k;/' "$M" ;;
   *) echo "unknown mutant $FOP_MUTANT" >&2; exit 2 ;;
 esac
 if [ -n "${FOP_MUTANT:-}" ] && cmp -s "$S/modules/fileops/fopmod.c" "$M"; then
@@ -124,3 +138,5 @@ exit $rc
 # Mutants (each must FAIL the suite): nointoself noround nospacechk nounlink noallkind
 # mixedrepl nosame nomergedel nocaseren stateany copysaves noclipchk nopatchmap nolists
 # nocrlf nobom nocp1252 nowrapsp notab nobrk ctl01 drainshort stageover countread nodrainreset
+# rm_nosys rm_noroots rm_nodirdel rm_noask rm_nofatal rm_errlast rm_noclip rm_cliprest rm_nolists
+# rm_sizekb rm_nodots rm_selsys rm_selclip rm_selhide

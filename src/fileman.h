@@ -46,6 +46,17 @@
 #define FM_OP_RENAME        5   /* open fileops.bin: rename the selected entry to FM_NAME */
 #define FM_OP_VIEW          6   /* open fileops.bin: view the selected entry as text */
 #define FM_OP_MKDIR         7   /* open fileops.bin: make folder FM_NAME in the cwd */
+#define FM_OP_RMDIR         8   /* open rmdir.bin: delete a folder and everything in it --
+                                   the selected entry, or with +9 = 1 the folder the browser
+                                   shows (an MSU-1 folder opened as its game).  It counts
+                                   first and asks (FM_ASK_RMDIR); only the folder's own
+                                   contents go: the files /sd2snes keeps by game (saves,
+                                   cheats, info...) are keyed by stem and may belong to a
+                                   same-named game elsewhere, so they stay */
+
+#define FM_OP_RMSEL         9   /* open rmdir.bin: delete the entries of FM_MARKS in the folder the
+                                   browser shows (MCU_PARAM+0..2), files and folders, the
+                                   same way as FM_OP_RMDIR (count, FM_ASK_RMDIR, remove) */
 
 #define FM_CLIP_NONE        0
 #define FM_CLIP_COPY        1
@@ -83,16 +94,24 @@
 #define FM_ERR_NOCLIP       8   /* nothing on the clipboard */
 #define FM_ERR_NOTFOUND     9   /* the source is gone (deleted since it was copied) */
 #define FM_ERR_FULL         10  /* the clipboard cannot hold that many names */
+#define FM_ERR_SYSTEM       11  /* delete: the card root, /sd2snes, or a folder of it the
+                                   system needs (only its info / cheats / saves / states /
+                                   patches trees may go) */
+#define FM_ERR_RDONLY       12  /* delete: an entry is read-only (left, with its folders) */
 
 /* fm_stat_t.ask: what collides with what */
 #define FM_ASK_FILE         1   /* a file over a file */
 #define FM_ASK_DIR          2   /* a folder over a folder: replace = merge into it */
 #define FM_ASK_MIXED        3   /* a file over a folder or a folder over a file */
+#define FM_ASK_RMDIR        4   /* delete the folder cur_name (rm_files, rm_dirs, bytes_total KB)?
+                                   FM_ANS_REPLACE = yes, FM_CTL_CANCEL = no */
 
 /* fm_stat_t.flags */
 #define FM_FL_ROM_ASSETS    0x01 /* rename: the game's saves / covers / cheats went along */
 #define FM_FL_LISTS         0x02 /* Recents / Favorites entries were rewritten */
 #define FM_FL_ASSET_SKIP    0x04 /* a game file was left behind: the new name already had one */
+#define FM_FL_UNCLIP        0x08 /* delete: everything on the clipboard was in the deleted
+                                    folder; the menu empties the clipboard (FM_OP_UNCLIP) */
 
 #define FM_MAGIC0           ('F')
 #define FM_MAGIC1           ('S')
@@ -108,7 +127,7 @@ typedef struct __attribute__((packed)) {
   uint8_t  ask;             /* +6  FM_ASK_* while state == ASK */
   uint8_t  flags;           /* +7  FM_FL_* */
   uint32_t bytes_done;      /* +8 */
-  uint32_t bytes_total;     /* +12 */
+  uint32_t bytes_total;     /* +12 (a delete: the folder's size in KB, rounded up) */
   uint16_t items_done;      /* +16 files + folders handled */
   uint16_t items_total;     /* +18 */
   uint16_t n_done;          /* +20 copied / moved */
@@ -120,7 +139,10 @@ typedef struct __attribute__((packed)) {
   uint16_t view_lines;      /* +28 lines in FM_VIEW for the current window */
   uint16_t view_win;        /* +30 the window index rendered */
   uint8_t  view_last;       /* +32 1 = this window reaches the end of the file */
-  uint8_t  rsvd[7];         /* +33 */
+  uint8_t  rsvd0;           /* +33 */
+  uint16_t rm_files;        /* +34 delete: files in the folder (all levels) */
+  uint16_t rm_dirs;         /* +36 delete: folders in it (all levels) */
+  uint8_t  rsvd[2];         /* +38 */
   uint8_t  cur_name[FM_NAME_LEN]; /* +40 leaf being handled / asked about, font-encoded, NUL */
   uint8_t  rsvd2[88];       /* +168 .. 256 */
 } fm_stat_t;
@@ -132,6 +154,8 @@ _Static_assert(__builtin_offsetof(fm_stat_t, progress) == 26, "FM_PROGRESS");
 _Static_assert(__builtin_offsetof(fm_stat_t, view_lines) == 28, "FM_VIEW_LINES");
 _Static_assert(__builtin_offsetof(fm_stat_t, view_last) == 32, "FM_VIEW_LAST");
 _Static_assert(__builtin_offsetof(fm_stat_t, cur_name) == 40, "FM_CUR_NAME");
+_Static_assert(__builtin_offsetof(fm_stat_t, rm_files) == 34, "FMS_RM_FILES");
+_Static_assert(__builtin_offsetof(fm_stat_t, rm_dirs) == 36, "FMS_RM_DIRS");
 
 /* FM_CLIPINFO: +0 'F' +1 'C' +2 FM_VERSION +3 mode (FM_CLIP_*) +4..5 count (u16 LE) */
 #define FM_CLIPINFO_LEN     8

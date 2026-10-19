@@ -35,8 +35,11 @@ DRESULT disk_read(BYTE d, BYTE *b, DWORD s, UINT c) {
   return RES_OK;
 }
 static uint64_t disk_wr;          /* sectors written, for the bytes_done check in run() */
+static long wr_fail = -1;         /* >= 0: writes left before the card stops taking any */
 DRESULT disk_write(BYTE d, const BYTE *b, DWORD s, UINT c) {
   (void)d;
+  if(wr_fail == 0) return RES_ERROR;
+  if(wr_fail > 0) wr_fail--;
   disk_wr += c;
   if(((size_t)s + c) * 512 > disk_size) return RES_PARERR;
   memcpy(disk + (size_t)s * 512, b, (size_t)c * 512);
@@ -114,6 +117,7 @@ static FATFS fs;
 static void fresh(void) {
   memcpy(disk, pristine, disk_size);
   memset(psram, 0, PS);
+  wr_fail = -1;
   if(f_mount(&fs, "/", 1) != FR_OK) { fprintf(stderr, "mount failed\n"); exit(1); }
   refreshes = 0;
 }
@@ -281,6 +285,7 @@ typedef struct {
   uint8_t kind[16];     /* what was asked */
   char name[16][FM_NAME_LEN];
   uint32_t cancel_at;   /* send FM_CTL_CANCEL once bytes_done reaches this (0 = never) */
+  uint32_t cancel_items;/* ...or once items_done reaches this (0 = never) */
   int cancel_ask;       /* answer the first question with FM_CTL_CANCEL */
   int cancelled;
 } script_t;
@@ -332,7 +337,8 @@ static void run(uint8_t op, const char *path, const char *name, script_t *sc) {
         sc->n++;
       }
     }
-    if(sc && sc->cancel_at && !sc->cancelled && st.bytes_done >= sc->cancel_at) {
+    if(sc && !sc->cancelled && ((sc->cancel_at && st.bytes_done >= sc->cancel_at)
+                                || (sc->cancel_items && st.items_done >= sc->cancel_items))) {
       sc->cancelled = 1;
       fopmod_fns.ctl(mst, FM_CTL_CANCEL);
     }
@@ -1001,6 +1007,336 @@ static void t_view_windows(void) {
   free(buf);
 }
 
+/* ---- delete a folder (FM_OP_RMDIR) ---- */
+
+static script_t yes1(void) {
+  script_t sc;
+  memset(&sc, 0, sizeof(sc));
+  sc.ans[0] = FM_ANS_REPLACE;
+  return sc;
+}
+
+/* a tree of files and folders, deep, with long names and empty folders */
+static void rm_tree(const char *top, int *files, int *dirs, uint32_t *bytes) {
+  char lvl[300], f[300];
+  int depth, i;
+  *files = *dirs = 0;
+  *bytes = 0;
+  mkdp(top);
+  snprintf(lvl, sizeof(lvl), "%s", top);
+  for(depth = 0; depth < 6; depth++) {
+    for(i = 0; i < 5; i++) {
+      snprintf(f, sizeof(f), "%s/a long file name number %d at level %d.bin", lvl, i, depth);
+      mkf(f, 700 * i + depth, i + depth);
+      (*files)++;
+      *bytes += 700 * i + depth;
+    }
+    snprintf(f, sizeof(f), "%s/empty %d", lvl, depth);
+    mkd(f);
+    (*dirs)++;
+    snprintf(lvl + strlen(lvl), sizeof(lvl) - strlen(lvl), "/Level %d", depth);
+    mkd(lvl);
+    (*dirs)++;
+  }
+  snprintf(f, sizeof(f), "%s/many", top);
+  mkd(f);
+  (*dirs)++;
+  for(i = 0; i < 40; i++) {
+    snprintf(f, sizeof(f), "%s/many/m%02d.txt", top, i);
+    mkf(f, 100, i);
+    (*files)++;
+    *bytes += 100;
+  }
+}
+
+static void t_rmdir_tree(void) {
+  int files, dirs;
+  uint32_t bytes;
+  script_t sc = yes1();
+  fresh();
+  rm_tree("/games/Old Stuff", &files, &dirs, &bytes);
+  mkf("/games/Old Stuff/Mega.sfc", 4096, 1);
+  files++; bytes += 4096;
+  mkf("/games/keep/Mega.sfc", 4096, 1);           /* the same game elsewhere */
+  mkf("/games/Old Stuffing.sfc", 10, 2);          /* a name that starts the same */
+  mkf("/sd2snes/saves/ME/Mega.srm", 8192, 3);     /* its files, keyed by stem: they stay */
+  mkf("/sd2snes/info/ME/Mega.yml", 100, 4);
+  mkf("/Old Stuff.cov", 10, 5);
+  DWORD fr0 = nfree();
+  run(FM_OP_RMDIR, "/games/Old Stuff/", NULL, &sc);
+  CHECK(sc.n == 1 && sc.kind[0] == FM_ASK_RMDIR, "asked %d times, kind %d", sc.n, sc.kind[0]);
+  CHECK(!strcmp(sc.name[0], "Old Stuff"), "asked about '%s'", sc.name[0]);
+  CHECK(st.rm_files == files && st.rm_dirs == dirs, "counted %d files %d folders, made %d / %d", st.rm_files, st.rm_dirs, files, dirs);
+  CHECK(st.bytes_total == (bytes + 1023) >> 10, "size %u KB, made %u bytes", st.bytes_total, bytes);
+  CHECK(st.state == FM_ST_DONE && st.n_failed == 0 && st.n_done == files + dirs + 1, "state %d err %d done %d failed %d", st.state, st.err, st.n_done, st.n_failed);
+  CHECK(st.items_total == files + dirs + 1 && st.items_done == st.items_total && st.progress == 255, "items %d/%d", st.items_done, st.items_total);
+  CHECK(!ex("/games/Old Stuff"), "the folder is still there");
+  CHECK(chkf("/games/keep/Mega.sfc", 4096, 1) && chkf("/games/Old Stuffing.sfc", 10, 2) && ex("/Old Stuff.cov"), "a neighbour went too");
+  CHECK(chkf("/sd2snes/saves/ME/Mega.srm", 8192, 3) && chkf("/sd2snes/info/ME/Mega.yml", 100, 4), "the game's /sd2snes files went");
+  CHECK(nfree() > fr0, "no space came back");
+  CHECK(refreshes == 1, "lists refreshed %d times", refreshes);
+  CHECK(!(st.flags & FM_FL_UNCLIP), "no clipboard, yet it asks to empty it");
+}
+
+static void t_rmdir_no(void) {
+  script_t sc;
+  fresh();
+  mkf("/x/a/b.txt", 10, 1);
+  mkf("/x/c.txt", 10, 2);
+  int n = tree_count("/x");
+  memset(&sc, 0, sizeof(sc)); sc.cancel_ask = 1;
+  run(FM_OP_RMDIR, "/x/", NULL, &sc);
+  CHECK(st.state == FM_ST_ERROR && st.err == FM_ERR_CANCELLED && st.n_done == 0, "state %d err %d done %d", st.state, st.err, st.n_done);
+  CHECK(tree_count("/x") == n && chkf("/x/a/b.txt", 10, 1), "something went");
+  CHECK(refreshes == 0, "lists refreshed");
+  /* empty, and sizes (KB, rounded up once, not per file) */
+  sc = yes1();
+  mkd("/empty");
+  run(FM_OP_RMDIR, "/empty", NULL, &sc);
+  CHECK(st.state == FM_ST_DONE && st.n_done == 1 && st.rm_files == 0 && st.rm_dirs == 0 && !ex("/empty"), "empty folder: state %d", st.state);
+  CHECK(st.bytes_total == 0, "size %u KB", st.bytes_total);
+  mkf("/s/a", 1000, 1);
+  sc = yes1();
+  run(FM_OP_RMDIR, "/s", NULL, &sc);
+  CHECK(st.bytes_total == 1, "size %u KB", st.bytes_total);
+  mkf("/s/a", 3u << 20, 1);
+  mkf("/s/b", 512u << 10, 1);
+  mkf("/s/c", 1500, 1);
+  sc = yes1();
+  run(FM_OP_RMDIR, "/s", NULL, &sc);
+  CHECK(st.bytes_total == 3586 && !ex("/s"), "size %u KB", st.bytes_total);
+}
+
+/* what may not go */
+static void t_rmdir_refused(void) {
+  static const char *const no[] = { "/", "", "/sd2snes", "/SD2SNES/", "/sd2snes/lang", "/sd2snes/lang/x",
+                                    "/sd2snes/other", NULL };
+  const char *const *p;
+  script_t sc;
+  fresh();
+  mkf("/sd2snes/m3nu.bin", 100, 1);
+  mkf("/sd2snes/lang/ja.bin", 100, 2);
+  mkf("/sd2snes/lang/x/y", 100, 2);
+  mkf("/sd2snes/other/z", 100, 2);
+  mkf("/sd2snes/saves/ME/Mega.srm", 100, 3);
+  mkf("/sd2snes/cheats/ME/Mega.yml", 100, 3);
+  mkf("/sd2snesX/a", 100, 4);
+  mkf("/top.txt", 10, 5);
+  int n = tree_count("/");
+  for(p = no; *p; p++) {
+    sc = yes1();
+    run(FM_OP_RMDIR, *p, NULL, &sc);
+    CHECK(st.state == FM_ST_ERROR && st.err == FM_ERR_SYSTEM && sc.n == 0, "'%s': state %d err %d", *p, st.state, st.err);
+  }
+  CHECK(tree_count("/") == n, "something went");
+  /* not a folder, not there, ".." */
+  sc = yes1();
+  run(FM_OP_RMDIR, "/top.txt", NULL, &sc);
+  CHECK(st.state == FM_ST_ERROR && st.err == FM_ERR_NOTFOUND && ex("/top.txt"), "a file: state %d err %d", st.state, st.err);
+  run(FM_OP_RMDIR, "/nothere", NULL, &sc);
+  CHECK(st.state == FM_ST_ERROR && st.err == FM_ERR_NOTFOUND, "missing: state %d err %d", st.state, st.err);
+  run(FM_OP_RMDIR, "/sd2snesX/..", NULL, &sc);
+  CHECK(st.state == FM_ST_ERROR && st.err == FM_ERR_NOTFOUND && tree_count("/") == n, "'..': state %d err %d", st.state, st.err);
+  /* a game's file trees may go, the root of one too */
+  sc = yes1();
+  run(FM_OP_RMDIR, "/sd2snes/saves/ME", NULL, &sc);
+  CHECK(st.state == FM_ST_DONE && !ex("/sd2snes/saves/ME") && ex("/sd2snes/saves"), "saves bucket: state %d err %d", st.state, st.err);
+  sc = yes1();
+  run(FM_OP_RMDIR, "/sd2snes/Cheats", NULL, &sc);
+  CHECK(st.state == FM_ST_DONE && !ex("/sd2snes/cheats"), "cheats root: state %d err %d", st.state, st.err);
+  sc = yes1();
+  run(FM_OP_RMDIR, "/sd2snesX", NULL, &sc);
+  CHECK(st.state == FM_ST_DONE && !ex("/sd2snesX"), "a look-alike name: state %d err %d", st.state, st.err);
+  CHECK(ex("/sd2snes/m3nu.bin") && ex("/sd2snes/lang/ja.bin"), "a system file went");
+}
+
+/* a read-only file stays, and the folders above it; the rest goes */
+static void t_rmdir_rdonly(void) {
+  script_t sc = yes1();
+  fresh();
+  mkf("/r/a.txt", 10, 1);
+  mkf("/r/sub/keep.txt", 10, 2);
+  mkf("/r/sub/b.txt", 10, 3);
+  mkf("/r/other/c.txt", 10, 4);
+  f_chmod("/r/sub/keep.txt", AM_RDO, AM_RDO);
+  run(FM_OP_RMDIR, "/r", NULL, &sc);
+  CHECK(st.state == FM_ST_DONE && st.err == FM_ERR_RDONLY, "state %d err %d", st.state, st.err);
+  CHECK(st.n_failed == 3 && st.n_done == 4, "done %d failed %d", st.n_done, st.n_failed);
+  CHECK(ex("/r/sub/keep.txt") && !ex("/r/a.txt") && !ex("/r/sub/b.txt") && !ex("/r/other"), "what is left");
+  CHECK(refreshes == 1, "lists refreshed %d times", refreshes);
+  /* a path past 255 characters: that reason is kept, not the folders' */
+  char longn[201], f[300];
+  memset(longn, 'L', 200); longn[200] = 0;
+  snprintf(f, sizeof(f), "/p/%s/%.80d", longn, 0);
+  mkf(f, 10, 1);
+  mkf("/p/fine.txt", 10, 1);
+  sc = yes1();
+  run(FM_OP_RMDIR, "/p", NULL, &sc);
+  CHECK(st.state == FM_ST_DONE && st.err == FM_ERR_PATH && st.n_failed == 3 && st.n_done == 1, "long path: state %d err %d done %d failed %d", st.state, st.err, st.n_done, st.n_failed);
+  CHECK(!ex("/p/fine.txt") && ex(f), "long path: what is left");
+}
+
+/* the card stops answering in the middle: the op ends, with the reason */
+static void t_rmdir_ioerr(void) {
+  int files, dirs, k;
+  uint32_t bytes;
+  for(k = 0; k < 3; k++) {
+    script_t sc = yes1();
+    fresh();
+    rm_tree("/w", &files, &dirs, &bytes);
+    int n = tree_count("/w");
+    sc.cancel_items = 0;
+    wr_fail = 2 + k * 7;
+    run(FM_OP_RMDIR, "/w", NULL, &sc);
+    wr_fail = -1;
+    CHECK(st.state == FM_ST_ERROR && st.err == FM_ERR_IO, "fault %d: state %d err %d", k, st.state, st.err);
+    CHECK(st.items_done < n, "fault %d: %d of %d items done", k, st.items_done, n);
+  }
+}
+
+/* B in the middle: what went is gone, the rest stays, the lists are fixed */
+static void t_rmdir_cancel(void) {
+  int files, dirs;
+  uint32_t bytes;
+  script_t sc = yes1();
+  fresh();
+  rm_tree("/c", &files, &dirs, &bytes);
+  int n = tree_count("/c");
+  sc.cancel_items = 10;
+  run(FM_OP_RMDIR, "/c", NULL, &sc);
+  CHECK(st.state == FM_ST_ERROR && st.err == FM_ERR_CANCELLED, "state %d err %d", st.state, st.err);
+  int left = tree_count("/c");
+  CHECK(left > 0 && left < n && left == n - st.n_done, "%d of %d left, %d done", left, n, st.n_done);
+  CHECK(refreshes == 1, "lists refreshed %d times", refreshes);
+}
+
+/* deep: 120 levels, the walk stack's whole depth */
+static void t_rmdir_deep(void) {
+  char p[300];
+  int i;
+  script_t sc = yes1();
+  fresh();
+  strcpy(p, "/d");
+  mkd(p);
+  for(i = 0; i < 120; i++) { strcat(p, "/d"); mkd(p); }
+  strcat(p, "/f");
+  mkf(p, 10, 1);
+  run(FM_OP_RMDIR, "/d", NULL, &sc);
+  CHECK(st.state == FM_ST_DONE && st.n_failed == 0 && st.n_done == 122 && st.rm_dirs == 120 && st.rm_files == 1, "state %d err %d done %d dirs %d", st.state, st.err, st.n_done, st.rm_dirs);
+  CHECK(!ex("/d"), "the folder is still there");
+}
+
+/* the clipboard pointing into the deleted folder */
+static void t_rmdir_clip(void) {
+  script_t sc;
+  fresh();
+  mkf("/g/a/x.sfc", 10, 1); mkf("/g/b.sfc", 10, 2); mkf("/g/a/sub/y.sfc", 10, 3);
+  clip(FM_CLIP_COPY, "/g/a/sub/", NAMES("y.sfc"));
+  sc = yes1();
+  run(FM_OP_RMDIR, "/g/a", NULL, &sc);
+  CHECK(st.state == FM_ST_DONE && (st.flags & FM_FL_UNCLIP), "source below: flags %02x", st.flags);
+  mkf("/g/a/x.sfc", 10, 1);
+  clip(FM_CLIP_CUT, "/g", NAMES("a/"));
+  sc = yes1();
+  run(FM_OP_RMDIR, "/g/A", NULL, &sc);
+  CHECK(st.state == FM_ST_DONE && (st.flags & FM_FL_UNCLIP), "the folder itself: flags %02x", st.flags);
+  mkf("/g/a/x.sfc", 10, 1);
+  clip(FM_CLIP_CUT, "/g", NAMES("a/", "b.sfc"));
+  sc = yes1();
+  run(FM_OP_RMDIR, "/g/a", NULL, &sc);
+  CHECK(st.state == FM_ST_DONE && !(st.flags & FM_FL_UNCLIP), "another entry survives: flags %02x", st.flags);
+  mkf("/g/a/x.sfc", 10, 1);
+  clip(FM_CLIP_COPY, "/g/ab", NAMES("q"));
+  sc = yes1();
+  run(FM_OP_RMDIR, "/g/a", NULL, &sc);
+  CHECK(st.state == FM_ST_DONE && !(st.flags & FM_FL_UNCLIP), "a look-alike folder: flags %02x", st.flags);
+  mkf("/top/x.sfc", 10, 1);
+  clip(FM_CLIP_COPY, "/", NAMES("top/"));
+  sc = yes1();
+  run(FM_OP_RMDIR, "/top", NULL, &sc);
+  CHECK(st.state == FM_ST_DONE && (st.flags & FM_FL_UNCLIP), "from the root: flags %02x", st.flags);
+}
+
+
+/* ---- the selection mode's delete (FM_OP_RMSEL): the directory table and FM_MARKS, laid out
+   as scan_dir and the menu leave them ---- */
+static void dirtab(const char *const *names, const char *marks) {
+  uint32_t str = 0x1C0000, i;               /* names in the string area, relative to $C00000 */
+  memset(psram + SRAM_FM_MARKS_ADDR, 0, FM_MARKS_BYTES);
+  for(i = 0; names[i]; i++) {
+    const char *n = names[i];
+    size_t l = strlen(n);
+    uint8_t type = !strcmp(n, "../") ? 0x80 : n[l - 1] == '/' ? 0x40 : (strstr(n, ".bin") ? 9 : 1);
+    uint8_t *e = psram + SRAM_DIR_ADDR + i * 4;
+    e[0] = str & 0xff; e[1] = (str >> 8) & 0xff; e[2] = str >> 16; e[3] = type;
+    memset(psram + SRAM_MENU_ADDR + str, ' ', 6);           /* the size string */
+    memcpy(psram + SRAM_MENU_ADDR + str + 6, n, l + 1);
+    for(char *d = (char *)psram + SRAM_MENU_ADDR + str + 6; *d; d++) if(*d == '|') *d = 1;  /* a hidden extension */
+    str += 6 + l + 1;
+    if(marks[i] == 'x') psram[SRAM_FM_MARKS_ADDR + (i >> 3)] |= 1 << (i & 7);
+  }
+}
+
+static void t_rmsel(void) {
+  script_t sc = yes1();
+  fresh();
+  mkf("/sel/a.sfc", 3000, 1);
+  mkf("/sel/b.txt", 100, 2);
+  mkf("/sel/keep.txt", 100, 3);
+  mkf("/sel/Dir/x.bin", 2000, 4);
+  mkf("/sel/Dir/sub/y.bin", 50, 5);
+  mkf("/sd2snes/saves/A_/a.srm", 100, 6);
+  clip(FM_CLIP_COPY, "/sel/Dir", NAMES("x.bin", "sub/"));
+  /* "b|txt": the browser hides the extension behind a 1 */
+  dirtab(NAMES("../", "Dir/", "a.sfc", "b|txt", "keep.txt"), " xxx ");
+  run(FM_OP_RMSEL, "/sel/", NULL, &sc);
+  CHECK(sc.n == 1 && sc.kind[0] == FM_ASK_RMDIR, "asked %d times", sc.n);
+  CHECK(st.rm_files == 4 && st.rm_dirs == 2 && st.items_total == 6, "counted %d files %d folders, %d items", st.rm_files, st.rm_dirs, st.items_total);
+  CHECK(st.bytes_total == (3000 + 100 + 2000 + 50 + 1023) / 1024, "size %u KB", st.bytes_total);
+  CHECK(st.state == FM_ST_DONE && st.n_done == 6 && st.n_failed == 0, "state %d err %d done %d failed %d", st.state, st.err, st.n_done, st.n_failed);
+  CHECK(!ex("/sel/a.sfc") && !ex("/sel/b.txt") && !ex("/sel/Dir") && chkf("/sel/keep.txt", 100, 3), "what is left");
+  CHECK(ex("/sd2snes/saves/A_/a.srm"), "a game's /sd2snes file went");
+  CHECK(refreshes == 1 && (st.flags & FM_FL_UNCLIP), "lists %d, flags %02x", refreshes, st.flags);
+  /* No: nothing goes */
+  mkf("/sel/c.txt", 10, 1);
+  dirtab(NAMES("../", "c.txt", "keep.txt"), " xx");
+  memset(&sc, 0, sizeof(sc)); sc.cancel_ask = 1;
+  run(FM_OP_RMSEL, "/sel", NULL, &sc);
+  CHECK(st.state == FM_ST_ERROR && st.err == FM_ERR_CANCELLED && ex("/sel/c.txt") && ex("/sel/keep.txt"), "no: state %d err %d", st.state, st.err);
+  /* nothing marked */
+  dirtab(NAMES("../", "c.txt"), "  ");
+  sc = yes1();
+  run(FM_OP_RMSEL, "/sel", NULL, &sc);
+  CHECK(st.state == FM_ST_ERROR && st.err == FM_ERR_NOTFOUND && sc.n == 0, "none marked: state %d err %d", st.state, st.err);
+  /* a clipboard elsewhere stays */
+  mkf("/sel/d.txt", 10, 1);
+  clip(FM_CLIP_COPY, "/sel", NAMES("keep.txt"));
+  dirtab(NAMES("../", "d.txt", "keep.txt"), " x ");
+  sc = yes1();
+  run(FM_OP_RMSEL, "/sel", NULL, &sc);
+  CHECK(st.state == FM_ST_DONE && !ex("/sel/d.txt") && !(st.flags & FM_FL_UNCLIP), "clip elsewhere: flags %02x", st.flags);
+}
+
+/* the system's files and folders refuse the whole delete, before anything goes */
+static void t_rmsel_sys(void) {
+  script_t sc = yes1();
+  fresh();
+  mkf("/sd2snes/m3nu.bin", 100, 1);
+  mkf("/sd2snes/saves/A_/a.srm", 100, 2);
+  mkf("/top.txt", 10, 3);
+  int n = tree_count("/");
+  dirtab(NAMES("../", "saves/", "m3nu.bin"), " xx");
+  run(FM_OP_RMSEL, "/sd2snes", NULL, &sc);
+  CHECK(st.state == FM_ST_ERROR && st.err == FM_ERR_SYSTEM && sc.n == 0, "/sd2snes: state %d err %d", st.state, st.err);
+  dirtab(NAMES("sd2snes/", "top.txt"), "xx");
+  run(FM_OP_RMSEL, "/", NULL, &sc);
+  CHECK(st.state == FM_ST_ERROR && st.err == FM_ERR_SYSTEM && sc.n == 0, "root: state %d err %d", st.state, st.err);
+  CHECK(tree_count("/") == n, "something went");
+  dirtab(NAMES("../", "saves/"), " x");
+  run(FM_OP_RMSEL, "/sd2snes", NULL, &sc);
+  CHECK(st.state == FM_ST_DONE && !ex("/sd2snes/saves") && ex("/sd2snes/m3nu.bin"), "a game-file root: state %d err %d", st.state, st.err);
+}
+
 /* ================================================================================ */
 
 static const struct { const char *name; void (*fn)(void); } cases[] = {
@@ -1023,6 +1359,16 @@ static const struct { const char *name; void (*fn)(void); } cases[] = {
   { "viewer: text", t_view_text },
   { "viewer: wrap", t_view_wrap },
   { "viewer: windows", t_view_windows },
+  { "delete: a tree", t_rmdir_tree },
+  { "delete: no / sizes", t_rmdir_no },
+  { "delete: refused", t_rmdir_refused },
+  { "delete: read-only", t_rmdir_rdonly },
+  { "delete: card error", t_rmdir_ioerr },
+  { "delete: cancel", t_rmdir_cancel },
+  { "delete: deep", t_rmdir_deep },
+  { "delete: clipboard", t_rmdir_clip },
+  { "delete marked", t_rmsel },
+  { "delete marked: refused", t_rmsel_sys },
 };
 
 int main(void) {

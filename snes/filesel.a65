@@ -1306,8 +1306,8 @@ ctx_is_dir
 ; filesel_key_y backs out afterwards (gisf_back).
   jsr gnav_msu_dir
   bcc ctx_fm_only
-  lda #$00              ; the context of the game the folder opens as: the file rows
-  sta @FM_ARM           ; would act on that ROM, not on the folder
+  lda #$02              ; the context of the game the folder opens as: no file rows (they
+  sta @FM_ARM           ; would act on that ROM), only "Delete folder" (fm_ctx_build)
   jsr cover_fill_param_for_current_sel ; MCU_PARAM exactly as ctx_is_file packs it
   jsr filesel_contextmenu_file
   bra open_context_menu_cont

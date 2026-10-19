@@ -950,6 +950,8 @@ mtext_fm_select         .byt "Select several", 0
 mtext_fm_selall         .byt "Select all", 0
 mtext_fm_selnone        .byt "Select none", 0
 mtext_fm_selexit        .byt "Done selecting", 0
+mtext_fm_rmdir          .byt "Delete folder", 0
+mtext_fm_sdel           .byt "Delete", 0
 mtext_fm_replace        .byt "Replace", 0
 mtext_fm_merge          .byt "Merge", 0
 mtext_fm_skip           .byt "Skip", 0
@@ -981,7 +983,18 @@ text_fm_err_noclip      .byt "Nothing to paste", 0
 text_fm_err_notfound    .byt "Not found", 0
 text_fm_err_full        .byt "Too many entries for the clipboard", 0
 text_fm_err_nomod       .byt "fileops.bin missing: update the sd2snes folder", 0
+text_fm_err_nomodrm     .byt "rmdir.bin missing: update the sd2snes folder", 0
 text_fm_err_nofw        .byt "Update the firmware to use this", 0
+text_fm_rm_ask          .byt "Delete the folder and all it holds?", 0
+text_fm_n_files         .byt "# files", 0
+text_fm_n_dirs          .byt "# folders", 0
+text_fm_err_sys         .byt "The system needs this: nothing deleted", 0
+text_fm_n_dir           .byt "# folder", 0
+text_fm_n_file          .byt "# file", 0
+text_fm_deleting        .byt "Deleting", 0
+text_fm_rm_note         .byt "Saves and cheats in /sd2snes are kept", 0
+text_fm_sdel_ask        .byt "Delete the marked entries?", 0
+text_fm_err_rdonly      .byt "Read-only entries were left", 0
 mdesc_fm_copy           .byt "Put this entry on the clipboard, to paste a copy of it in another folder", 0
 mdesc_fm_cut            .byt "Put this entry on the clipboard, to move it to another folder", 0
 mdesc_fm_paste          .byt "Copy or move what is on the clipboard into this folder", 0
@@ -995,6 +1008,8 @@ mdesc_fm_scut           .byt "Put the marked entries on the clipboard, to move t
 mdesc_fm_selall         .byt "Mark every entry of this folder", 0
 mdesc_fm_selnone        .byt "Unmark every entry", 0
 mdesc_fm_selexit        .byt "Leave the selection mode", 0
+mdesc_fm_rmdir          .byt "Delete this folder and all it holds. The saves, cheats and info the sd2snes folder keeps for its games stay", 0
+mdesc_fm_sdel           .byt "Delete the marked entries, folders with everything in them. Saves and cheats in /sd2snes are kept", 0
 
 ; ---- the game options screen (gameopt.a65, bank $C3, same rules as text_fm_*) ----
 mtext_gopt_row          .byt "Game options", 0

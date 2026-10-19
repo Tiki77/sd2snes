@@ -39,7 +39,8 @@
 #define MODULE_ID_PCM      3          /* pcmplay.bin: the .pcm player (SNES_CMD_PLAY_PCM) */
 #define MODULE_ID_RTC7110  4          /* rtc7110.bin: the SPC7110 RTC battery (session) */
 #define MODULE_ID_FILEOP   5          /* fileops.bin: the browser's file manager (SNES_CMD_FM) */
-#define MODULE_COUNT       5
+#define MODULE_ID_RMDIR    6          /* rmdir.bin: its "Delete folder" (FM_OP_RMDIR) */
+#define MODULE_COUNT       6
 
 /* What start() returns when the module could not be loaded at all */
 #define MODULE_MISSING     (-1)
