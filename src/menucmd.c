@@ -28,6 +28,7 @@
 #include "module.h"
 #include "menucmd.h"
 #include "fileman.h"
+#include "gameopt.h"
 #include "util.h"
 #include "timer.h"    /* getticks: seed for the random menu-music draw */
 #include "rtc.h"      /* get_bcdtime: mixed into that seed when the RTC is valid */
@@ -260,7 +261,7 @@ static NO_INLINE void delete_file_from(sel_src_t s) {
 }
 
 /* Delete the battery-SRAM save(s) for `srmsrc`; the ROM/patch and the list entry stay.
-   Wipes ALL slots + the .slot sidecar -- neither the browser nor the lists have a slot
+   Wipes ALL slots + the slots it starts with -- neither the browser nor the lists have a slot
    UI.  Slot 0 (legacy <stem>.srm) drives the NACK; the rest are best-effort. */
 static NO_INLINE void delete_srm_for(const char *srmsrc, int src) {
   printf("Delete SRM for: %s (src %d)\n", srmsrc, src);
@@ -285,10 +286,7 @@ static NO_INLINE void delete_srm_for(const char *srmsrc, int src) {
       snescmd_writebyte(0xaa, SNESCMD_SNES_CMD);
     }
   }
-  { uint8_t scfile[256];
-    if(path_asset((char*)scfile, sizeof(scfile), SAVE_BASEDIR, srmsrc, ".slot") >= 0)
-      f_unlink((TCHAR*)scfile);
-  }
+  gameopt_slots_set(srmsrc, 0, 0);   /* and the slots it starts with go back to 1 */
 }
 
 /* The saves screen (SNES_CMD_SAVES): the game's saves keyed like delete_srm_for's, the
@@ -300,6 +298,19 @@ static NO_INLINE void saves_from(void) {
   uint8_t dst = snescmd_readbyte(SNESCMD_MCU_PARAM + 11);
   saves_command(sel_sidecar(where == 2 ? SEL_FAV : where == 1 ? SEL_RECENT : SEL_BROWSER),
                 op, ks >> 4, ks & 0x0f, dst);
+}
+
+/* The game options screen (SNES_CMD_GAMEOPT from the menu): the game's per-game file
+   keyed like its saves, GAMEOPT_BLK republished. */
+static NO_INLINE void gameopt_from(void) {
+  uint8_t where = snescmd_readbyte(SNESCMD_MCU_PARAM + 8);
+  uint8_t op = snescmd_readbyte(SNESCMD_MCU_PARAM + 9);
+  uint8_t idx = snescmd_readbyte(SNESCMD_MCU_PARAM + 10);
+  uint8_t val = snescmd_readbyte(SNESCMD_MCU_PARAM + 11);
+  sel_src_t s = where == 2 ? SEL_FAV : where == 1 ? SEL_RECENT : SEL_BROWSER;
+  sel_name(s, 0);                    /* the ROM decides which options apply to it */
+  gameopt_classify((const char*)file_lfn);
+  gameopt_command(sel_sidecar(s), op, idx, val, 0);
 }
 
 static void delete_srm_from(sel_src_t s) {
@@ -688,7 +699,9 @@ uint32_t menucmd_launch_rom(uint8_t cmd) {
     return filesize;
   }
   /* load aborted (missing chip BIOS etc.): clear the file error state -- or the LED
-     blinks -- and NACK, so game_handshake_error shows the message. */
+     blinks -- and NACK, so game_handshake_error shows the message.  The game's per-game
+     values leave CFG with it: the menu is back. */
+  gameopt_restore();
   file_res = FR_OK;
   /* Republish Recents.  The write above happens BEFORE the pre-check, so a refused game
      has already been moved to the top of lastgame.cfg while the SNES-side mirror still
@@ -990,6 +1003,9 @@ uint8_t menucmd_dispatch(uint8_t cmd, uint8_t *menu_reload) {
       return 0;
     case SNES_CMD_FM:
       fileman_command();
+      return 0;
+    case SNES_CMD_GAMEOPT:
+      gameopt_from();
       return 0;
     case SNES_CMD_DELETE_FILE_FAV:
       delete_file_from(SEL_FAV);

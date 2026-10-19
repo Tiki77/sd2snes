@@ -162,7 +162,7 @@ typedef struct __attribute__ ((__packed__)) _cfg_block {
   uint8_t  clear_ppu_rsvd;          /* CFG @ $143: RETIRED in 2.17 (was ClearPpuOnBoot: the menu now clears VRAM/CGRAM/OAM before EVERY launch, game_handshake). The byte stays at $143 for CFG offset stability; nothing reads it. */
   uint8_t  bus_compat;              /* CFG @ $144: bus-timing compat mode. ON restores the pre-1.11.1 (56dd166-reverted) pulse-end-strobe time sharing -> releases the cart databus EARLIER, avoiding bus contention on timing-sensitive 1-CHIP consoles (fixes games that hang or glitch there, e.g. DKC — the Nintendo-logo freeze is just the easiest repro; = v1.11.0 behavior). Default OFF (the wider window mrehkopf reverted TO, which most units need). Drives FPGA featurebits[13] via fpga_set_features. */
   uint8_t  enable_game_manual;      /* CFG @ $145: RETIRED in 2.17 (the EnableGameManual YAML flag and the "Game manual" menu toggle are gone: the guides are always on whenever a <rom>.man exists). The byte stays at $145 for CFG offset stability; nothing reads it. */
-  uint8_t  enable_sram_slots;       /* CFG @ $146: multi-slot battery SRAM -- ALWAYS ON since 2.15 (the EnableSramSlots YAML flag and menu toggle were retired; the byte stays at $146 for CFG offset stability and is forced to 1). The in-game SAVES tab selects an active slot (deferred: applies on the next game load), saves route to <stem>.srm (slot 1) / <stem>.0N.srm (slots 2-4) via the /sd2snes/saves/<stem>.slot sidecar. The live session slot is IMMUTABLE (set once at game load) so an in-game switch can never misroute an autosave. */
+  uint8_t  enable_sram_slots;       /* CFG @ $146: multi-slot battery SRAM -- ALWAYS ON since 2.15 (the EnableSramSlots YAML flag and menu toggle were retired; the byte stays at $146 for CFG offset stability and is forced to 1). The in-game SAVES tab selects an active slot (deferred: applies on the next game load), saves route to <stem>.srm (slot 1) / <stem>.0N.srm (slots 2-4) via SaveGameSlot of the game's per-game file (gameopt.h). The live session slot is IMMUTABLE (set once at game load) so an in-game switch can never misroute an autosave. */
   uint16_t ingame_buttons_menu;     /* CFG @ $147: pad combo that opens the in-game menu. Default $4230 =
      L+R+Y+Left. YAML only (no menu entry); the UI strings keep showing the default. Sanitised by
      cfg_check_menu_combo() in cfg.c -- a 0 mask would match every mid-frame IRQ. Armed at game load by
@@ -338,5 +338,10 @@ uint16_t cfg_buttons_string2bits(char *str);
 uint8_t cfg_is_msu1_autosave_enabled(void);
 
 int cfg_get_stringvalue(const char *key, char *target, size_t count);
+
+/* The byte option at cfg_t offset `off` (true/false or a number in config.yml): its key
+   (NULL = there is none; *isbool tells which kind), and a scalar stored as cfg_load would. */
+const char *cfg_key_at(uint16_t off, uint8_t *isbool);
+uint8_t cfg_scalar_at(uint16_t off, long v);
 
 #endif

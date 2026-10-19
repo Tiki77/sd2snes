@@ -1,0 +1,2501 @@
+// igopt.i65 -- GAME OPTIONS screen of the in-game menu: the settings the running game
+// overrides (src/gameopt.h: config.yml's options in the game's <stem>.yml), shown like the
+// menu's Settings.
+//
+// Y at the tab-bar level opens it from any tab (gopt_open), Y goes back to the tab it came
+// from (help_close, shared with the HELP screen), B steps back a level (then leaves), START
+// closes the whole menu. It is tab index 6 in the dispatch tables and, like HELP (5), it is
+// NOT on the bar.
+//
+// WHAT IT SHOWS comes from the menu itself, resident in game: the firmware names the
+// options and stages GAMEOPT_BLK at every game load (per option: its cfg_t offset with a
+// "live" bit, the game's value, the global one), and this screen walks the menu's Settings
+// tree (menu_enttab_cfg, through the pointers the menu publishes at MENU_GOPT_PTRS) exactly
+// like the menu's game options screen does (snes/gameopt.a65): a group per Settings submenu
+// that holds one of the options, the option rows as Settings has them -- their names,
+// descriptions and value words, resolved for the menu language from the menu's own string
+// tables. Nothing here is translated twice.
+//
+// LOOKS AND BEHAVES LIKE THE MENU'S OPTION LISTS: the groups' window (title notched into
+// the top border, the ellipsis after each group like a submenu row), and over it, one row lower
+// and two columns in, the group's window with the option rows (value right-aligned,
+// "Default (On)" when the game follows the global option), the window under it dimmed like
+// window_greyout leaves it; under the active window, at its left edge and the width of its
+// own text, a box with what the row under the bar does. A on an option edits its value the
+// way menu_value_dialog_kv8 does: the bar shrinks to the value field and turns the highlight
+// colour, Up the next value, Down the previous one (no wrap), L the first, A sets it (only
+// then it goes to the card and the game) and B puts the old one back.
+//
+// WHAT CAN CHANGE HERE: only an option with the live bit (the firmware applies it to the
+// running game at once). The rest is drawn dimmed and A does nothing on it: the box says to
+// change it from the menu, before the game starts -- the firmware refuses it anyway.
+//
+// Drawing: a level change goes through ig_switch_to (the tab-switch fade, forced blank:
+// gopt_enter redraws the state as it is when igo_keep is set); a cursor move, a scroll and a
+// value change redraw their rows at the start of a vblank each. A row is redrawn WITH its two
+// border cells (the flush writes the whole 64-column row, so a row without them would cut
+// the frame -- seen on hardware).
+// snescom preprocessing: // comments only, never `;` inside an included file.
+
+// GAME OPTIONS i18n string indices -- lockstep with GOPT_LABELS in gen_igmenu_lang.py.
+#define IGM_GO_TITLE     0
+#define IGM_GO_DEFAULT   1
+#define IGM_GO_FAIL      2
+#define IGM_GO_LOCKED    3
+
+// Geometry: the menu's own (snes/gameopt.a65 opens the groups' window at 8,11 and show_menu
+// steps a submenu +2,+1), so the in-game screen draws the same windows in the same columns.
+// Rows are the menu's minus 2: the menu's text area is scrolled up 13 lines under the logo,
+// the overlay is not, and two rows put every window 3 lines off the menu's place on the
+// screen (measured on the Ciclone, gopt_same_*.png). The menu's limits move with them:
+// MENU_VISMAX rows (10+12+1 = the bottom on row 23) and the description box between
+// DESC_TOPROW 9 and DESC_BOTROW 26, here 7 and 24 (the footer is on row 25).
+#define IGO_X0           8          // the groups' window
+#define IGO_WY0          9
+#define IGO_X1           10         // a group's window
+#define IGO_WY1          10
+#define IGO_VIS          12         // MENU_VISMAX
+#define IGO_GMAX         8          // groups kept
+#define IGO_IMAX         32         // options kept
+#define IGO_LV           46         // a group's label + value at most (gameopt.a65 GOX_LV)
+// the description box: menu_desc_compute / menu_desc_draw with the in-game rows
+#define IGO_DRIGHT       61         // DESC_RIGHT
+#define IGO_DTOP         7          // DESC_TOPROW - 2
+#define IGO_DBOT         24         // DESC_BOTROW - 2
+#define IGO_LMAX         6          // MAX_DESC_LINES
+
+// Window glyphs: corners, edges, sides, the title caps, the scrollbar.
+#define IGO_G_NW         20
+#define IGO_G_NE         21
+#define IGO_G_SW         22
+#define IGO_G_SE         23
+#define IGO_G_NH         24
+#define IGO_G_SH         25
+#define IGO_G_WV         26
+#define IGO_G_EV         27
+#define IGO_G_TL         28
+#define IGO_G_TR         29
+#define IGO_G_TRACK      16
+#define IGO_G_THUMB      17
+
+#define IGO_PAL_TEXT     $2000      // palette 0: text
+#define IGO_PAL_DIM      $2400      // palette 1: a dimmed window, a box, a row that cannot change
+#define IGO_PAL_FRAME    $2c00      // palette 3: the active window's frame
+
+
+// Scratch: PSRAM $F4, the free gap from $F48440 (igo_editing, $F48434, is defined in
+// igmenu.a65: its footer reads it). THE DB CONVENTION: every routine here is entered and
+// left with DB = $F4 (gopt_enter / gopt_input / gopt_back / gopt_open set it), so the
+// scratch is reached absolute (!) -- except inside the few that read the menu's banks,
+// which switch DB around their reads and use only long (@) scratch accesses in between.
+#define igo_sp           $F48440    // 3 B: a string (or a label resolved into one)
+#define igo_hb           $F48443    // MENU_GOPT_PTRS: the bank of the five below
+#define igo_hcfg         $F48444    //   menu_enttab_cfg
+#define igo_slo          $F48446    //   strtab_lo
+#define igo_shi          $F48448    //   strtab_hi
+#define igo_spb          $F4844A    //   strpool_bank
+#define igo_snl          $F4844C    //   strtab_nlang_latin
+#define igo_ng           $F4844E    // groups
+#define igo_ni           $F48450    // options
+#define igo_lvl          $F48452    // 0 the groups, 1 a group's options
+#define igo_g            $F48454    // the group shown at level 1
+#define igo_cur          $F48456    // the row under the bar (index in the level's list)
+#define igo_top          $F48458    // level 1: the first row shown
+#define igo_keep         $F4845A    // 1 = gopt_enter draws the state as it is
+#define igo_n            $F4845C    // rows in the level
+#define igo_vis          $F4845E    // rows shown
+#define igo_wx           $F48460    // the options' window: x (odd), width (even)
+#define igo_ww           $F48462
+#define igo_px           $F48464    // the groups' window: x, width
+#define igo_pw           $F48466
+#define igo_dx           $F48468    // the description box: x, width, top row, height
+#define igo_dw           $F4846A
+#define igo_dy           $F4846C
+#define igo_dh           $F4846E
+#define igo_dho          $F48470    // the rows the box took last time (blanked when it shrinks)
+#define igo_ev           $F48472    // editing: the value shown (GOV_DEFAULT or a key)
+#define igo_ep           $F48474    //   its place in the list (0 = Default)
+#define igo_en           $F48476    //   entries in the list
+#define igo_vmax         $F48478    // the widest value of the level (the value field)
+#define igo_fail         $F4847A    // 1 = the last change was refused
+#define igo_tmp          $F4847C
+#define igo_tmp2         $F4847E
+#define igo_len          $F48480
+#define igo_w1           $F48482
+#define igo_scan         $F48484    // 3 B: a table being walked
+#define igo_tab          $F48487    // 3 B: a group's / a value table
+#define igo_off          $F4848A    // an option's GAMEOPT_BLK index / a cfg_t offset
+#define igo_tpal         $F4848C    // the row's text palette
+#define igo_fpal         $F4848E    // the window's frame palette
+#define igo_nl           $F48490    // description lines
+#define igo_dr           $F48492    // the box row being drawn
+#define igo_dvb          $F48494    // 1 = the box rows wait for a vblank each
+#define igo_srow         $F48496    // a screen row
+#define igo_ls           $F48498    // IGO_LMAX words: each description line's offset in igo_txt
+#define igo_ll           $F484A4    // IGO_LMAX words: its length
+#define igo_grp          $F484B0    // IGO_GMAX x 4 B: Settings row (word, bank igo_hb), first option, count
+#define igo_it           $F484D0    // IGO_IMAX x 4 B: the option's row (word + bank), its GAMEOPT_BLK index
+#define igo_txt          $F48550    // 224 B: a description, then the note
+#define igo_vbuf         $F48630    // 48 B: a value composed ("Default (On)")
+#define igo_bpal         $F48660    // the palette of the row outside the window
+#define igo_cell         $F48662
+#define igo_cell2        $F48664
+#define igo_zx           $F48666    // igo_flush2's window: x, x + 1, x + w - 1, x + w, kind
+#define igo_z1           $F48668
+#define igo_z2           $F4866A
+#define igo_z3           $F4866C
+#define igo_zk           $F4866E
+#define igo_t0           $F48670    // the title's cells of a border row
+#define igo_t1           $F48672
+#define igo_dcap         $F48674    // the longest "Default (..)" the group can show (gox_fit)
+#define igo_wlen         $F48676    // the length of the word "Default"
+#define igo_iw           $F48678    // the description's wrap width
+#define igo_lmax         $F4867A    // its line cap
+#define igo_abv          $F4867C    // rows free above / below the active window
+#define igo_blw          $F4867E
+#define igo_dyo          $F48680    // where the box was last time (igo_dho rows)
+#define igo_end          $F48682
+
+// ========================================================================================
+//  Reading the menu (DB switched inside; long scratch accesses only)
+// ========================================================================================
+
+// ---- igo_hdr: carry set when the menu publishes MENU_GOPT_PTRS (copied into igo_hb..). ----
+igo_hdr:
+	php
+	sep #$20 : .as
+	lda @MENU_CAP_MARKER
+	cmp #$53                                  // 'S'
+	bne igh_no
+	lda @MENU_CAP_MARKER+1
+	cmp #$32                                  // '2'
+	bne igh_no
+	lda @MENU_CAP_MARKER+3
+	and #MENU_CAP_FEAT_GOPT
+	beq igh_no
+	lda @MENU_GOPT_PTRS
+	sta @igo_hb
+	rep #$20 : .al
+	lda @MENU_GOPT_PTRS+1
+	sta @igo_hcfg
+	lda @MENU_GOPT_PTRS+3
+	sta @igo_slo
+	lda @MENU_GOPT_PTRS+5
+	sta @igo_shi
+	lda @MENU_GOPT_PTRS+7
+	sta @igo_spb
+	lda @MENU_GOPT_PTRS+9
+	sta @igo_snl
+	plp
+	sec
+	rts
+igh_no:
+	.as
+	plp
+	clc
+	rts
+
+// ---- igo_res: igo_sp = a menu label -> the string it names in the menu language (the
+//      in-game clamp of ovl_resolve_str: a CJK column reads English). ----
+igo_res:
+	php
+	phb
+	sep #$20 : .as
+	rep #$10 : .xl
+	lda @igo_sp+2
+	cmp @igo_hb
+	bne igr_out
+	rep #$20 : .al
+	lda @igo_sp
+	cmp @igo_slo
+	bcc igr_out
+	cmp @igo_shi
+	bcs igr_out
+	sep #$20 : .as
+	lda @igo_hb : pha : plb
+	rep #$20 : .al
+	lda @igo_snl
+	tax
+	lda !0, x                                 // the columns the in-game clamp keeps
+	and #$00ff
+	sta @igo_w1
+	sep #$20 : .as
+	lda @CFG_LANGUAGE
+	rep #$20 : .al
+	and #$00ff
+	cmp @igo_w1
+	bcc igr_lang
+	lda #$0000
+igr_lang:
+	.al : .xl
+	sta @igo_w1
+	asl
+	clc : adc @igo_sp
+	tax
+	lda !0, x                                 // the table's word for this column
+	sta @igo_sp
+	lda @igo_spb
+	clc : adc @igo_w1
+	tax
+	sep #$20 : .as
+	lda !0, x                                 // and the bank of its pool
+	sta @igo_sp+2
+igr_out:
+	.as
+	plb
+	plp
+	rts
+
+// ---- igo_lget: igo_sp = the label at A(8)_bank:X(16) (a menu entry field: word, bank),
+//      resolved. ----
+igo_lget:
+	php
+	phb
+	sep #$20 : .as
+	rep #$10 : .xl
+	pha : plb
+	rep #$20 : .al
+	lda !0, x
+	sta @igo_sp
+	sep #$20 : .as
+	lda !2, x
+	sta @igo_sp+2
+	plb
+	jsr igo_res
+	plp
+	rts
+
+// ---- igo_puts: the string at igo_sp into OVL_RB from column X(16), up to column 62.
+//      X = past it. ----
+igo_puts:
+	php
+	phb
+	rep #$30 : .al : .xl
+	lda @igo_sp
+	tay
+	sep #$20 : .as
+	lda @igo_sp+2 : pha : plb
+igp_l:
+	.as : .xl
+	cpx #IG_HELP_MAXCOL
+	bcs igp_d
+	lda !0, y
+	beq igp_d
+	sta @$F48200, x                           // OVL_RB
+	inx
+	iny
+	bra igp_l
+igp_d:
+	.as : .xl
+	plb
+	plp
+	rts
+
+// ---- igo_slen: A(16) = the length of the string at igo_sp (60 at most). ----
+igo_slen:
+	php
+	phb
+	rep #$30 : .al : .xl
+	lda @igo_sp
+	tay
+	sep #$20 : .as
+	lda @igo_sp+2 : pha : plb
+	ldx #$0000
+igsl_l:
+	.as : .xl
+	lda !0, y
+	beq igsl_d
+	iny
+	inx
+	cpx #60
+	bne igsl_l
+igsl_d:
+	.as : .xl
+	plb
+	rep #$20 : .al
+	txa
+	plp
+	rts
+
+// ---- igo_vcat: the string at igo_sp to igo_vbuf+X(16), up to 40 bytes in all. X = past it. ----
+igo_vcat:
+	php
+	phb
+	rep #$30 : .al : .xl
+	lda @igo_sp
+	tay
+	sep #$20 : .as
+	lda @igo_sp+2 : pha : plb
+igvc_l:
+	.as : .xl
+	cpx #40
+	bcs igvc_d
+	lda !0, y
+	beq igvc_d
+	sta @igo_vbuf, x
+	inx
+	iny
+	bra igvc_l
+igvc_d:
+	.as : .xl
+	plb
+	plp
+	rts
+
+// ---- igo_tcat: the string at igo_sp to igo_txt+X(16), up to 220 bytes in all. X = past it. ----
+igo_tcat:
+	php
+	phb
+	rep #$30 : .al : .xl
+	lda @igo_sp
+	tay
+	sep #$20 : .as
+	lda @igo_sp+2 : pha : plb
+igtc_l:
+	.as : .xl
+	cpx #220
+	bcs igtc_d
+	lda !0, y
+	beq igtc_d
+	sta @igo_txt, x
+	inx
+	iny
+	bra igtc_l
+igtc_d:
+	.as : .xl
+	plb
+	plp
+	rts
+
+// ---- igo_istr: igo_sp = GOPT string A(16) of this screen (igm_gopt_tbl, bank $C8). ----
+igo_istr:
+	php
+	rep #$30 : .al : .xl
+	asl : asl : asl                          // index * IGM_LANG_STRIDE
+	clc : adc @sst_lang
+	asl
+	tax
+	lda @igm_gopt_tbl, x
+	sta @igo_sp
+	sep #$20 : .as
+	lda #$c8
+	sta @igo_sp+2
+	plp
+	rts
+
+// ---- igo_build: igo_grp / igo_it from Settings and GAMEOPT_BLK. Carry set = at least one
+//      option to show. ----
+igo_build:
+	php
+	phb
+	rep #$30 : .al : .xl
+	lda #$0000
+	sta @igo_ng
+	sta @igo_ni
+	lda @igo_hcfg
+	clc : adc #$0004
+	sta @igo_scan                             // Settings' first row (bank igo_hb)
+igb_row:
+	.al : .xl
+	sep #$20 : .as
+	lda @igo_hb : pha : plb
+	rep #$20 : .al
+	lda @igo_scan
+	tax
+	lda !0, x
+	and #$00ff
+	bne igb_have
+	jmp igb_done                              // type 0: the end of Settings
+igb_have:
+	.al : .xl
+	cmp #MTYPE_SUBMENU
+	beq igb_sub
+	jmp igb_next
+igb_sub:
+	.al : .xl
+	lda @igo_ng
+	cmp #IGO_GMAX
+	bcc igb_room
+	jmp igb_next
+igb_room:
+	.al : .xl
+	lda !4, x                                 // its table: the rows after the header
+	clc : adc #$0004
+	sta @igo_tab
+	sep #$20 : .as
+	lda !6, x
+	sta @igo_tab+2
+	rep #$20 : .al
+	lda @igo_ni
+	sta @igo_w1                               // the group's first option
+igb_e:
+	.al : .xl
+	lda @igo_ni
+	cmp #IGO_IMAX
+	bcs igb_gend
+	sep #$20 : .as
+	lda @igo_tab+2 : pha : plb
+	rep #$20 : .al
+	lda @igo_tab
+	tax
+	lda !0, x
+	and #$00ff
+	beq igb_gend
+	jsr igo_match                             // carry: one of the options, A = its index
+	bcc igb_enext
+	pha
+	lda @igo_ni
+	asl : asl
+	tax
+	lda @igo_tab
+	sta @igo_it, x
+	pla
+	sep #$20 : .as
+	sta @igo_it+3, x
+	lda @igo_tab+2
+	sta @igo_it+2, x
+	rep #$20 : .al
+	lda @igo_ni
+	inc
+	sta @igo_ni
+igb_enext:
+	.al : .xl
+	lda @igo_tab
+	clc : adc #MENU_ENTRY_SIZE
+	sta @igo_tab
+	bra igb_e
+igb_gend:
+	.al : .xl
+	lda @igo_ni
+	sec : sbc @igo_w1
+	beq igb_next                              // none of the options: no group
+	pha
+	lda @igo_ng
+	asl : asl
+	tax
+	lda @igo_scan
+	sta @igo_grp, x
+	pla
+	sep #$20 : .as
+	sta @igo_grp+3, x
+	lda @igo_w1
+	sta @igo_grp+2, x
+	rep #$20 : .al
+	lda @igo_ng
+	inc
+	sta @igo_ng
+igb_next:
+	.al : .xl
+	lda @igo_scan
+	clc : adc #MENU_ENTRY_SIZE
+	sta @igo_scan
+	jmp igb_row
+igb_done:
+	.al : .xl
+	plb
+	lda @igo_ni
+	beq igb_none
+	plp
+	sec
+	rts
+igb_none:
+	.al : .xl
+	plp
+	clc
+	rts
+
+// ---- igo_match: carry set when the entry at DB:X is the Settings row of one of the
+//      options (a value table on a CFG byte), A(16) = its GAMEOPT_BLK index. X kept. ----
+igo_match:
+	.al : .xl
+	phx
+	sep #$20 : .as
+	lda !0, x
+	cmp #MTYPE_VALUE
+	bne igm_no
+	lda !7, x
+	cmp #OPTTYPE_KVBYTE
+	bne igm_no
+	lda !10, x
+	cmp #^CFG_ADDR
+	bne igm_no
+	rep #$20 : .al
+	lda !8, x
+	sec : sbc #!CFG_ADDR
+	sta @igo_off
+	sep #$20 : .as
+	lda @GAMEOPT_BLK+GOB_COUNT
+	rep #$20 : .al
+	and #$00ff
+	beq igm_no16
+	tay
+	ldx #$0000
+igm_l:
+	.al : .xl
+	lda @GAMEOPT_BLK+GOB_OFF, x
+	and #$1fff
+	cmp @igo_off
+	beq igm_hit
+	inx
+	inx
+	dey
+	bne igm_l
+igm_no16:
+	.al : .xl
+	sep #$20 : .as
+igm_no:
+	.as : .xl
+	rep #$20 : .al
+	plx
+	clc
+	rts
+igm_hit:
+	.al : .xl
+	txa
+	lsr
+	tax                                       // the index
+	sep #$20 : .as
+	lda @GAMEOPT_BLK+GOB_VAL, x
+	cmp #GOV_NA                               // not on this board
+	beq igm_no
+	rep #$20 : .al
+	txa
+	plx
+	sec
+	rts
+
+// ========================================================================================
+//  The rows (DB = $F4)
+// ========================================================================================
+
+// ---- igo_row_entry: igo_scan = the entry of row A(16) of level 1 (long), igo_off = its
+//      option's GAMEOPT_BLK index, igo_tab = its value table. ----
+igo_row_entry:
+	php
+	phb
+	rep #$30 : .al : .xl
+	pha
+	lda !igo_g
+	asl : asl
+	tax
+	lda !igo_grp+2, x
+	and #$00ff
+	clc : adc $01, s
+	asl : asl
+	tax
+	pla
+	lda !igo_it, x
+	sta !igo_scan
+	lda !igo_it+2, x
+	and #$00ff
+	sta !igo_scan+2
+	lda !igo_it+3, x
+	and #$00ff
+	sta !igo_off
+	sep #$20 : .as
+	lda !igo_scan+2 : pha : plb
+	rep #$20 : .al
+	lda @igo_scan
+	tax
+	lda !4, x
+	sta @igo_tab
+	sep #$20 : .as
+	lda !6, x
+	sta @igo_tab+2
+	plb
+	plp
+	rts
+
+// ---- carry set = row A(16) of level 1 cannot change while the game runs (the firmware's
+//      live bit, $8000 of its offset word). igo_scan/off/tab as igo_row_entry. ----
+igo_row_locked:
+	php
+	rep #$30 : .al : .xl
+	jsr igo_row_entry
+	lda !igo_off
+	asl
+	tax
+	lda @GAMEOPT_BLK+GOB_OFF, x
+	bmi igl_live
+	plp
+	sec
+	rts
+igl_live:
+	.al : .xl
+	plp
+	clc
+	rts
+
+// ---- igo_kv_find: igo_sp = the value word that the value table at igo_tab gives key A(16)
+//      (resolved). Carry clear = the table does not have it. ----
+igo_kv_find:
+	php
+	phb
+	rep #$30 : .al : .xl
+	sta @igo_w1
+	lda @igo_tab
+	tax
+	sep #$20 : .as
+	lda @igo_tab+2 : pha : plb
+	rep #$20 : .al
+igkf_l:
+	.al : .xl
+	lda !0, x
+	cmp #$ffff
+	beq igkf_no
+	cmp @igo_w1
+	beq igkf_hit
+	txa
+	clc : adc #$0005
+	tax
+	bra igkf_l
+igkf_hit:
+	.al : .xl
+	lda !2, x
+	sta @igo_sp
+	sep #$20 : .as
+	lda !4, x
+	sta @igo_sp+2
+	plb
+	jsr igo_res
+	plp
+	sec
+	rts
+igkf_no:
+	.al : .xl
+	plb
+	plp
+	clc
+	rts
+
+// ---- igo_kv_at: A(16) = the value at place A of the list (0 = Default, GOV_DEFAULT; place
+//      k = the k-th entry of the value table at igo_tab). ----
+igo_kv_at:
+	php
+	phb
+	rep #$30 : .al : .xl
+	cmp #$0000
+	beq igka_def
+	dec
+	sta @igo_w1
+	asl : asl
+	clc : adc @igo_w1
+	clc : adc @igo_tab
+	tax
+	sep #$20 : .as
+	lda @igo_tab+2 : pha : plb
+	rep #$20 : .al
+	lda !0, x
+	plb
+	plp
+	rts
+igka_def:
+	.al : .xl
+	lda #GOV_DEFAULT
+	plb
+	plp
+	rts
+
+// ---- igo_kv_count: A(16) = the places of the list: the value table's entries + Default. ----
+igo_kv_count:
+	php
+	phb
+	rep #$30 : .al : .xl
+	lda @igo_tab
+	tax
+	sep #$20 : .as
+	lda @igo_tab+2 : pha : plb
+	rep #$20 : .al
+	ldy #$0001
+igkc_l:
+	.al : .xl
+	lda !0, x
+	cmp #$ffff
+	beq igkc_d
+	iny
+	txa
+	clc : adc #$0005
+	tax
+	bra igkc_l
+igkc_d:
+	.al : .xl
+	plb
+	tya
+	plp
+	rts
+
+// ---- igo_vtext: igo_vbuf = value A(16) of option igo_off with the value table igo_tab
+//      ("Default (<the global's>)" for GOV_DEFAULT), igo_len = its length, igo_sp = it. ----
+igo_vtext:
+	php
+	rep #$30 : .al : .xl
+	and #$00ff
+	cmp #GOV_DEFAULT
+	beq igvt_def
+	jsr igo_kv_find
+	ldx #$0000
+	bcc igvt_dash
+	jsr igo_vcat
+	bra igvt_end
+igvt_dash:
+	.al : .xl
+	sep #$20 : .as
+	lda #$2d                                  // a value the table does not name: "-"
+	sta !igo_vbuf
+	rep #$20 : .al
+	inx
+	bra igvt_end
+igvt_def:
+	.al : .xl
+	lda #IGM_GO_DEFAULT
+	jsr igo_istr
+	ldx #$0000
+	jsr igo_vcat
+	stx !igo_wlen
+	phx
+	ldx !igo_off
+	sep #$20 : .as
+	lda @GAMEOPT_BLK+GOB_GLOBAL, x
+	rep #$20 : .al
+	and #$00ff
+	jsr igo_kv_find
+	plx
+	bcc igvt_end
+	sep #$20 : .as
+	lda #$20
+	sta !igo_vbuf, x
+	inx
+	lda #$28                                  // '('
+	sta !igo_vbuf, x
+	inx
+	rep #$20 : .al
+	jsr igo_vcat
+	sep #$20 : .as
+	lda #$29                                  // ')'
+	sta !igo_vbuf, x
+	inx
+	rep #$20 : .al
+	cpx !igo_dcap                             // wider than the group allows: the word alone
+	bcc igvt_end                              //   (gox_fit's rule, gameopt.a65)
+	beq igvt_end
+	ldx !igo_wlen
+igvt_end:
+	.al : .xl
+	txa
+	sta !igo_len
+	sep #$20 : .as
+	lda #$00
+	sta !igo_vbuf, x
+	lda #^igo_vbuf
+	sta !igo_sp+2
+	rep #$20 : .al
+	lda #!igo_vbuf
+	sta !igo_sp
+	plp
+	rts
+
+// ---- igo_row_value: igo_vbuf = what row A(16) of level 1 shows (the value being picked
+//      while it is edited). ----
+igo_row_value:
+	php
+	rep #$30 : .al : .xl
+	pha
+	jsr igo_row_entry
+	pla
+	cmp !igo_cur
+	bne igrv_card
+	lda !igo_editing
+	beq igrv_card
+	lda !igo_ev
+	bra igrv_have
+igrv_card:
+	.al : .xl
+	ldx !igo_off
+	sep #$20 : .as
+	lda @GAMEOPT_BLK+GOB_VAL, x
+	rep #$20 : .al
+	and #$00ff
+igrv_have:
+	.al : .xl
+	jsr igo_vtext
+	plp
+	rts
+
+// ---- igo_grp_label: igo_sp = the name of group A(16) (its Settings row's own). ----
+igo_grp_label:
+	php
+	rep #$30 : .al : .xl
+	asl : asl
+	tax
+	lda !igo_grp, x
+	inc
+	tax
+	sep #$20 : .as
+	lda !igo_hb
+	jsr igo_lget
+	plp
+	rts
+
+// ---- igo_grp_title: igo_sp = group A(16)'s window title (its table's, as Settings opens it). ----
+igo_grp_title:
+	php
+	phb
+	rep #$30 : .al : .xl
+	asl : asl
+	tax
+	lda !igo_grp, x
+	tax
+	sep #$20 : .as
+	lda !igo_hb : pha : plb
+	rep #$20 : .al
+	lda !4, x
+	inc
+	sta @igo_w1                               // the table's title field
+	sep #$20 : .as
+	lda !6, x
+	plb
+	pha
+	rep #$20 : .al
+	lda !igo_w1
+	tax
+	sep #$20 : .as
+	pla
+	jsr igo_lget
+	plp
+	rts
+
+// ---- igo_row_label: igo_sp = the name of row A(16) of level 1. ----
+igo_row_label:
+	php
+	rep #$30 : .al : .xl
+	jsr igo_row_entry
+	lda !igo_scan
+	inc
+	tax
+	sep #$20 : .as
+	lda !igo_scan+2
+	jsr igo_lget
+	plp
+	rts
+
+// ========================================================================================
+//  Geometry (DB = $F4)
+// ========================================================================================
+
+// ---- A(16) = interior content width -> A = box width: + 2 borders + 2 pads, rounded up to
+//      even (the x is odd: left border on BG1, right border on BG2). ----
+igo_fit:
+	.al : .xl
+	clc : adc #$0004
+	bit #$0001
+	beq igf_even
+	inc
+igf_even:
+	.al : .xl
+	rts
+
+// ---- igo_wfit: show_menu's window width (menu_measure): A(16) = label + value, igo_cell =
+//      the title, igo_cell2 = the value (0: none). A < title -> title + 2; + 4, + 3 with a
+//      value. ----
+igo_wfit:
+	.al : .xl
+	cmp !igo_cell
+	bcs iwf_t
+	lda !igo_cell
+	inc : inc
+iwf_t:
+	.al : .xl
+	clc : adc #$0004
+	ldx !igo_cell2
+	beq iwf_v
+	clc : adc #$0003
+iwf_v:
+	.al : .xl
+	rts
+
+// ---- the groups' window at IGO_X0: its title, the group names (+ the ellipsis, 2 cells). ----
+igo_geom0:
+	php
+	rep #$30 : .al : .xl
+	lda #IGM_GO_TITLE
+	jsr igo_istr
+	jsr igo_slen
+	sta !igo_cell
+	lda #$0000
+	sta !igo_cell2
+	sta !igo_len
+igg0_l:
+	.al : .xl
+	cmp !igo_ng
+	bcs igg0_d
+	pha
+	jsr igo_grp_label
+	jsr igo_slen
+	inc : inc                                 // + the ellipsis
+	cmp !igo_len
+	bcc igg0_s
+	sta !igo_len
+igg0_s:
+	.al : .xl
+	pla
+	inc
+	bra igg0_l
+igg0_d:
+	.al : .xl
+	lda !igo_len
+	jsr igo_wfit
+	sta !igo_pw
+	lda #IGO_X0
+	sta !igo_px
+	plp
+	rts
+
+// ---- the options' window of group igo_g at IGO_X1: its title, the widest label, the widest
+//      value any row can show (igo_vmax, the edit field) -- a "Default (..)" kept to what
+//      lets the group fit (igo_dcap, the menu's gox_fit). igo_n / igo_vis set. ----
+igo_geom1:
+	php
+	rep #$30 : .al : .xl
+	lda !igo_g
+	asl : asl
+	tax
+	lda !igo_grp+3, x
+	and #$00ff
+	sta !igo_n
+	cmp #IGO_VIS+1
+	bcc igg1_v0
+	lda #IGO_VIS
+igg1_v0:
+	.al : .xl
+	sta !igo_vis
+	lda #$0000
+	sta !igo_len
+	sta !igo_vmax
+	sta !igo_dr                               // the row
+igg1_l:
+	.al : .xl
+	lda !igo_dr
+	cmp !igo_n
+	bcs igg1_ld
+	jsr igo_row_label
+	jsr igo_slen
+	cmp !igo_len
+	bcc igg1_lab
+	sta !igo_len
+igg1_lab:
+	.al : .xl
+	inc !igo_dr
+	bra igg1_l
+igg1_ld:
+	.al : .xl
+	lda #IGO_LV
+	sec : sbc !igo_len
+	bcs igg1_cap
+	lda #$0000
+igg1_cap:
+	.al : .xl
+	sta !igo_dcap
+	lda #$0000
+	sta !igo_dr
+igg1_r:
+	.al : .xl
+	lda !igo_dr
+	cmp !igo_n
+	bcs igg1_d
+	jsr igo_row_entry                         // igo_tab, igo_off
+	jsr igo_kv_count                          // every value it can take, Default included
+	sta !igo_en
+	lda #$0000
+igg1_vl:
+	.al : .xl
+	cmp !igo_en
+	bcs igg1_vd
+	pha
+	jsr igo_kv_at
+	pha
+	lda !igo_len
+	sta !igo_tmp2
+	pla
+	jsr igo_vtext
+	lda !igo_len
+	cmp !igo_vmax
+	bcc igg1_vs
+	sta !igo_vmax
+igg1_vs:
+	.al : .xl
+	lda !igo_tmp2
+	sta !igo_len
+	pla
+	inc
+	bra igg1_vl
+igg1_vd:
+	.al : .xl
+	inc !igo_dr
+	bra igg1_r
+igg1_d:
+	.al : .xl
+	lda !igo_g
+	jsr igo_grp_title
+	jsr igo_slen
+	sta !igo_cell
+	lda !igo_vmax
+	sta !igo_cell2
+	lda !igo_len
+	clc : adc !igo_vmax
+	jsr igo_wfit
+	sta !igo_ww
+	lda #IGO_X1
+	sta !igo_wx
+	plp
+	rts
+
+// ========================================================================================
+//  Drawing (DB = $F4). A screen row is composed in OVL_RB -- igo_rs blanks it and, on level
+//  1, puts the dimmed groups' window's cells under it -- the window's cells go over that,
+//  and igo_flush2 writes the whole row with three palettes: the window's frame, its text,
+//  and the rest of the row. So the group's window never cuts the one under it.
+// ========================================================================================
+
+// ---- store glyph A (8-bit used) at OVL_RB column X(16). ----
+igo_put:
+	php
+	sep #$20 : .as
+	sta OVL_RB, x
+	plp
+	rts
+
+// ---- igo_rs: start screen row A(16) (igo_tmp2, igo_w1 and igo_sp kept for the caller). ----
+igo_rs:
+	php
+	rep #$30 : .al : .xl
+	sta !igo_srow
+	lda !igo_tmp2
+	pha
+	lda !igo_w1
+	pha
+	lda !igo_sp
+	pha
+	lda !igo_sp+1
+	pha
+	jsr ovl_row_clear
+	lda #IGO_PAL_TEXT
+	sta !igo_bpal
+	lda !igo_lvl
+	beq igrs_out
+	lda !igo_srow
+	sec : sbc #IGO_WY0
+	bcc igrs_out                              // above the groups' window
+	sta !igo_cell
+	lda !igo_ng
+	inc
+	cmp !igo_cell
+	bcc igrs_out                              // below it
+	lda #IGO_PAL_DIM
+	sta !igo_bpal
+	lda !igo_px : sta !igo_tmp2
+	lda !igo_pw : sta !igo_w1
+	lda !igo_cell
+	bne igrs_nt
+	lda #IGM_GO_TITLE                         // its top border, with the title
+	jsr igo_istr
+	lda #IGO_G_NW
+	jsr igo_hl_cells
+	bra igrs_out
+igrs_nt:
+	.al : .xl
+	lda !igo_ng
+	inc
+	cmp !igo_cell
+	bne igrs_row
+	lda #$0000                                // its bottom border
+	sta !igo_sp+1
+	lda #IGO_G_SW
+	jsr igo_hl_cells
+	bra igrs_out
+igrs_row:
+	.al : .xl
+	lda !igo_cell
+	dec
+	jsr igo_grp_cells                         // a group's row
+igrs_out:
+	.al : .xl
+	pla
+	sta !igo_sp+1
+	pla
+	sta !igo_sp
+	pla
+	sta !igo_w1
+	pla
+	sta !igo_tmp2
+	plp
+	rts
+
+// ---- igo_hl_cells: a horizontal border into OVL_RB: A(16) = the left corner (NW 20 or SW
+//      22; the edge and the right corner follow), igo_tmp2 = x, igo_w1 = width, igo_sp = a
+//      title to notch into it (igo_sp+2 = 0: none). igo_t0/t1 = the title's cells. ----
+igo_hl_cells:
+	php
+	rep #$30 : .al : .xl
+	pha
+	lda #$0000
+	sta !igo_t0
+	sta !igo_t1
+	lda !igo_tmp2
+	tax
+	lda $01, s
+	jsr igo_put
+	lda !igo_w1
+	dec : dec
+	tay
+	lda $01, s
+	cmp #IGO_G_NW
+	bne ihc_bot
+	lda #IGO_G_NH
+	bra ihc_edge
+ihc_bot:
+	.al : .xl
+	lda #IGO_G_SH
+ihc_edge:
+	.al : .xl
+	inx
+	jsr igo_put
+	dey
+	bne ihc_edge
+	inx
+	pla
+	inc
+	jsr igo_put
+	sep #$20 : .as
+	lda !igo_sp+2
+	rep #$20 : .al
+	and #$00ff
+	beq ihc_out
+	lda !igo_tmp2                             // the title, notched in like draw_window's
+	inc : inc
+	tax
+	lda #IGO_G_TL
+	jsr igo_put
+	inx
+	stx !igo_t0
+	jsr igo_puts
+	stx !igo_t1
+	lda #IGO_G_TR
+	jsr igo_put
+ihc_out:
+	.al : .xl
+	plp
+	rts
+
+// ---- igo_sides: a box row's own cells: its two side borders and blanks between (over
+//      whatever igo_rs put there). X(16) = x, A(16) = width. ----
+igo_sides:
+	php
+	rep #$30 : .al : .xl
+	sta !igo_tmp
+	lda #IGO_G_WV
+	jsr igo_put
+	ldy !igo_tmp
+	dey
+	dey
+	lda #$0020
+igsd_l:
+	.al : .xl
+	inx
+	jsr igo_put
+	dey
+	bne igsd_l
+	inx
+	lda #IGO_G_EV
+	jsr igo_put
+	plp
+	rts
+
+// ---- igo_grp_cells: group row A(16) into OVL_RB: its sides, its name and the ellipsis, like a
+//      submenu row. ----
+igo_grp_cells:
+	php
+	rep #$30 : .al : .xl
+	pha
+	lda !igo_px
+	tax
+	lda !igo_pw
+	jsr igo_sides
+	pla
+	jsr igo_grp_label
+	lda !igo_px
+	inc : inc
+	tax
+	jsr igo_puts
+	lda #$007f                                // text_ellipse: glyphs 127, 128
+	jsr igo_put
+	inx
+	inc
+	jsr igo_put
+	plp
+	rts
+
+// ---- igo_flush2: write OVL_RB to screen row igo_srow. The cells of the window -- columns
+//      [X(16), X + A(16)) -- in its palettes (Y(16) = 0: a box row, igo_fpal on its two
+//      sides and igo_tpal inside; 1: a border row, igo_fpal but the title's [t0, t1) in
+//      igo_tpal); the rest of the row in igo_bpal. ----
+igo_flush2:
+	php
+	rep #$30 : .al : .xl
+	pha
+	lda !igo_dvb                              // the screen is on: the row is composed, now
+	beq igf2_now                              //   write it at the start of a vblank
+	jsr igo_vblank
+igf2_now:
+	.al : .xl
+	pla
+	sty !igo_zk
+	stx !igo_zx
+	inx
+	stx !igo_z1
+	clc : adc !igo_zx
+	sta !igo_z3
+	dec
+	sta !igo_z2
+	lda !igo_srow
+	asl : asl : asl : asl : asl               // row * 32 (tilemap entries per row)
+	sta !igo_cell2
+	clc : adc #OVL_BG2_MAP
+	sta @$002116                              // even columns: BG2
+	ldx #$0000
+igf2_ev:
+	.al : .xl
+	jsr igo_fcell
+	inx
+	inx
+	cpx #$0040
+	bcc igf2_ev
+	lda !igo_cell2
+	clc : adc #OVL_BG1_MAP
+	sta @$002116                              // odd columns: BG1
+	ldx #$0001
+igf2_od:
+	.al : .xl
+	jsr igo_fcell
+	inx
+	inx
+	cpx #$0041
+	bcc igf2_od
+	plp
+	rts
+
+// one cell: column X(16) of OVL_RB to $2118 with its palette
+igo_fcell:
+	.al : .xl
+	lda OVL_RB, x
+	and #$00ff
+	asl
+	sta !igo_cell
+	cpx !igo_zx
+	bcc igfc_base
+	cpx !igo_z3
+	bcs igfc_base
+	lda !igo_zk
+	bne igfc_hl
+	cpx !igo_z1
+	bcc igfc_frame
+	cpx !igo_z2
+	bcs igfc_frame
+	bra igfc_text
+igfc_hl:
+	.al : .xl
+	cpx !igo_t0
+	bcc igfc_frame
+	cpx !igo_t1
+	bcs igfc_frame
+igfc_text:
+	.al : .xl
+	lda !igo_tpal
+	bra igfc_put
+igfc_frame:
+	.al : .xl
+	lda !igo_fpal
+	bra igfc_put
+igfc_base:
+	.al : .xl
+	lda !igo_bpal
+igfc_put:
+	.al : .xl
+	ora !igo_cell
+	sta @$002118
+	rts
+
+// ---- igo_hrow: a border row of the window at (igo_tmp2, igo_w1): screen row X(16), left
+//      corner A(16), title igo_sp (igo_sp+2 = 0: none) -- in igo_fpal / igo_tpal. ----
+igo_hrow:
+	php
+	rep #$30 : .al : .xl
+	pha
+	txa
+	jsr igo_rs
+	pla
+	jsr igo_hl_cells
+	ldx !igo_tmp2
+	lda !igo_w1
+	ldy #$0001
+	jsr igo_flush2
+	plp
+	rts
+
+// ---- igo_draw0: the groups' window. A(16) = 1: dimmed (level 1 over it). ----
+igo_draw0:
+	php
+	rep #$30 : .al : .xl
+	cmp #$0000
+	beq igd0_live
+	lda #IGO_PAL_DIM
+	sta !igo_tpal
+	sta !igo_fpal
+	bra igd0_go
+igd0_live:
+	.al : .xl
+	lda #IGO_PAL_TEXT : sta !igo_tpal
+	lda #IGO_PAL_FRAME : sta !igo_fpal
+igd0_go:
+	.al : .xl
+	lda #IGM_GO_TITLE
+	jsr igo_istr
+	jsr igo_draw0_px
+	lda #IGO_G_NW
+	ldx #IGO_WY0
+	jsr igo_hrow
+	lda #$0000
+igd0_l:
+	.al : .xl
+	cmp !igo_ng
+	bcs igd0_bot
+	pha
+	jsr igo_draw0_row
+	pla
+	inc
+	bra igd0_l
+igd0_bot:
+	.al : .xl
+	jsr igo_draw0_px
+	lda #$0000
+	sta !igo_sp+1                             // no title
+	lda !igo_ng
+	clc : adc #IGO_WY0+1
+	tax
+	lda #IGO_G_SW
+	jsr igo_hrow
+	plp
+	rts
+igo_draw0_px:
+	.al : .xl
+	lda !igo_px : sta !igo_tmp2
+	lda !igo_pw : sta !igo_w1
+	rts
+
+// group row A(16) (the palettes as igo_draw0 left them).
+igo_draw0_row:
+	php
+	rep #$30 : .al : .xl
+	pha
+	clc : adc #IGO_WY0+1
+	jsr igo_rs
+	pla
+	jsr igo_grp_cells
+	ldx !igo_px
+	lda !igo_pw
+	ldy #$0000
+	jsr igo_flush2
+	plp
+	rts
+
+// ---- igo_draw1: the options' window, its rows. ----
+igo_draw1:
+	php
+	rep #$30 : .al : .xl
+	jsr igo_pal1
+	lda !igo_g
+	jsr igo_grp_title
+	jsr igo_draw1_px
+	lda #IGO_G_NW
+	ldx #IGO_WY1
+	jsr igo_hrow
+	lda #$0000
+igd1_l:
+	.al : .xl
+	cmp !igo_vis
+	bcs igd1_bot
+	pha
+	clc : adc !igo_top
+	jsr igo_draw1_row
+	pla
+	inc
+	bra igd1_l
+igd1_bot:
+	.al : .xl
+	jsr igo_pal1
+	jsr igo_draw1_px
+	lda #$0000
+	sta !igo_sp+1
+	lda !igo_vis
+	clc : adc #IGO_WY1+1
+	tax
+	lda #IGO_G_SW
+	jsr igo_hrow
+	plp
+	rts
+igo_draw1_px:
+	.al : .xl
+	lda !igo_wx : sta !igo_tmp2
+	lda !igo_ww : sta !igo_w1
+	rts
+igo_pal1:
+	.al : .xl
+	lda #IGO_PAL_TEXT : sta !igo_tpal
+	lda #IGO_PAL_FRAME : sta !igo_fpal
+	rts
+
+// option row A(16) (an index in the group, on screen): its label at the left, its value
+// right-aligned, the scrollbar cell when the group scrolls; dimmed when it cannot change now.
+igo_draw1_row:
+	php
+	rep #$30 : .al : .xl
+	pha
+	sec : sbc !igo_top
+	clc : adc #IGO_WY1+1
+	jsr igo_rs
+	jsr igo_pal1
+	lda $01, s
+	jsr igo_row_locked
+	bcc igr1_live
+	lda #IGO_PAL_DIM : sta !igo_tpal
+igr1_live:
+	.al : .xl
+	ldx !igo_wx
+	lda !igo_ww
+	jsr igo_sides
+	lda $01, s
+	jsr igo_row_label
+	lda !igo_wx
+	inc : inc
+	tax
+	jsr igo_puts
+	lda $01, s
+	jsr igo_row_value
+	lda !igo_wx
+	clc : adc !igo_ww
+	dec : dec
+	sec : sbc !igo_len
+	tax                                       // right-aligned: ends two columns in
+	jsr igo_puts
+	lda !igo_n                                // the scrollbar, in the last interior column
+	cmp !igo_vis
+	beq igr1_nosb
+	bcc igr1_nosb
+	lda $01, s
+	sec : sbc !igo_top
+	sta !igo_cell
+	jsr igo_thumb
+	ldy #IGO_G_TRACK
+	cmp !igo_cell
+	bne igr1_track
+	ldy #IGO_G_THUMB
+igr1_track:
+	.al : .xl
+	lda !igo_wx
+	clc : adc !igo_ww
+	dec : dec
+	tax
+	tya
+	jsr igo_put
+igr1_nosb:
+	.al : .xl
+	pla
+	ldx !igo_wx
+	lda !igo_ww
+	ldy #$0000
+	jsr igo_flush2
+	plp
+	rts
+
+// A(16) = the screen row of the scrollbar's thumb: top * (vis - 1) / (n - vis).
+igo_thumb:
+	php
+	rep #$30 : .al : .xl
+	lda !igo_n
+	sec : sbc !igo_vis
+	sta !igo_tmp
+	lda !igo_vis
+	dec
+	tax
+	lda #$0000
+igth_m:
+	.al : .xl
+	cpx #$0000
+	beq igth_md
+	clc : adc !igo_top
+	dex
+	bra igth_m
+igth_md:
+	.al : .xl
+	ldx #$0000
+igth_d:
+	.al : .xl
+	cmp !igo_tmp
+	bcc igth_dd
+	sec : sbc !igo_tmp
+	inx
+	bra igth_d
+igth_dd:
+	.al : .xl
+	txa
+	plp
+	rts
+
+// ---- igo_desc_text: igo_txt = what the row under the bar does (its row's own description),
+//      wrapped like desc_next_line (greedy on spaces at igo_iw, a word longer than that cut)
+//      into at most igo_lmax lines; on level 1, when the row cannot change now or the card
+//      refused it, one line more says so (the menu has no such rows). igo_ls/igo_ll/igo_nl,
+//      igo_tmp2 = the longest line. ----
+igo_desc_text:
+	php
+	rep #$30 : .al : .xl
+	lda #$0000
+	sta !igo_cell2                            // the note (0: none)
+	lda !igo_lvl
+	bne igdt_l1
+	lda !igo_cur                              // a group: its Settings row's description
+	asl : asl
+	tax
+	lda !igo_grp, x
+	clc : adc #$000b
+	tax
+	sep #$20 : .as
+	lda !igo_hb
+	bra igdt_get
+igdt_l1:
+	.al : .xl
+	lda #IGM_GO_FAIL
+	ldx !igo_fail
+	bne igdt_nset
+	lda !igo_cur
+	jsr igo_row_locked
+	lda #IGM_GO_LOCKED
+	bcs igdt_nset
+	lda #$0000
+igdt_nset:
+	.al : .xl
+	sta !igo_cell2
+	lda !igo_cur
+	jsr igo_row_entry
+	lda !igo_scan
+	clc : adc #$000b
+	tax
+	sep #$20 : .as
+	lda !igo_scan+2
+igdt_get:
+	.as : .xl
+	jsr igo_lget
+	rep #$20 : .al
+	ldx #$0000
+	jsr igo_tcat
+	stx !igo_len                              // the description's end
+	sep #$20 : .as
+	lda #$00
+	sta !igo_txt, x
+	rep #$20 : .al
+	lda !igo_lmax                             // its lines: the cap, one less with a note
+	ldx !igo_cell2
+	beq igdt_cap
+	dec
+igdt_cap:
+	.al : .xl
+	sta !igo_cell
+	lda #$0000
+	sta !igo_nl
+	sta !igo_tmp2
+	tay                                       // Y = where the next line starts
+igdt_line:
+	.al : .xl
+	cpy !igo_len
+	bcs igdt_wrapped
+	lda !igo_nl
+	cmp !igo_cell
+	bcs igdt_wrapped
+	tya
+	clc : adc !igo_iw
+	cmp !igo_len
+	bcc igdt_back
+	lda !igo_len                              // the rest fits
+	bra igdt_put
+igdt_back:
+	.al : .xl
+	tax                                       // the first cell past the line: a space there
+igdt_bl:                                      //   breaks it clean, else the last space before
+	.al : .xl
+	sep #$20 : .as
+	lda !igo_txt, x
+	rep #$20 : .al
+	and #$00ff
+	cmp #$0020
+	beq igdt_sp
+	dex
+	stx !igo_tmp
+	cpy !igo_tmp
+	bcc igdt_bl
+	tya                                       // no space: cut the word
+	clc : adc !igo_iw
+	bra igdt_put
+igdt_sp:
+	.al : .xl
+	txa
+igdt_put:
+	.al : .xl
+	sta !igo_tmp                              // the line's end
+	jsr igo_addline
+	lda !igo_tmp
+	tay
+	cpy !igo_len
+	bcs igdt_line
+	sep #$20 : .as                            // skip the space the line broke on
+	lda !igo_txt, y
+	rep #$20 : .al
+	and #$00ff
+	cmp #$0020
+	bne igdt_line
+	iny
+	bra igdt_line
+igdt_wrapped:
+	.al : .xl
+	cpy !igo_len                              // text left over: the last line ends in the
+	bcs igdt_whole                            //   ellipsis, inside the box (desc_render_trunc)
+	lda !igo_nl
+	beq igdt_whole
+	dec
+	asl
+	tax
+	lda !igo_tmp2
+	sec : sbc #$0002
+	cmp !igo_ll, x
+	bcs igdt_tkeep
+	sta !igo_ll, x
+igdt_tkeep:
+	.al : .xl
+	lda !igo_ls, x
+	clc : adc !igo_ll, x
+	tay
+	sep #$20 : .as
+	lda #$7f
+	sta !igo_txt, y
+	lda #$80
+	sta !igo_txt+1, y
+	rep #$20 : .al
+	lda !igo_ll, x
+	inc : inc
+	sta !igo_ll, x
+igdt_whole:
+	.al : .xl
+	lda !igo_cell2
+	beq igdt_done
+	jsr igo_istr                              // the note, after the text
+	lda !igo_len
+	inc
+	tax
+	phx
+	jsr igo_tcat
+	stx !igo_tmp
+	ply                                       // Y = its start
+	jsr igo_addline
+igdt_done:
+	.al : .xl
+	plp
+	rts
+
+// line igo_nl = igo_txt[Y .. igo_tmp), the longest kept in igo_tmp2
+igo_addline:
+	.al : .xl
+	lda !igo_nl
+	asl
+	tax
+	tya
+	sta !igo_ls, x
+	lda !igo_tmp
+	sec : sbc !igo_ls, x
+	sta !igo_ll, x
+	cmp !igo_tmp2
+	bcc igal_s
+	sta !igo_tmp2
+igal_s:
+	.al : .xl
+	inc !igo_nl
+	rts
+
+// ---- igo_desc: the description box of the active window, placed by menu_desc_compute /
+//      menu_desc_draw's rules: at the window's left edge, the width of its longest line,
+//      below the window when it fits there (one blank row between, none on an exact fit),
+//      else above it; no box with fewer than 3 free rows on both sides. The rows of the box
+//      before that this one does not cover are blanked. A(16) = 1: every row written at the
+//      start of a vblank (the screen is on: igo_dvb). ----
+igo_desc:
+	php
+	rep #$30 : .al : .xl
+	sta !igo_dvb
+	lda !igo_lvl
+	bne igds_l1
+	lda !igo_px
+	sta !igo_dx
+	ldx #IGO_WY0
+	lda !igo_ng
+	bra igds_g
+igds_l1:
+	.al : .xl
+	lda !igo_wx
+	sta !igo_dx
+	ldx #IGO_WY1
+	lda !igo_vis
+igds_g:
+	.al : .xl
+	stx !igo_cell                             // the window's top row
+	stx !igo_tmp
+	clc : adc !igo_tmp
+	inc
+	sta !igo_srow                             // ...and its bottom one
+	lda #IGO_DRIGHT                           // the wrap width
+	sec : sbc !igo_dx
+	sec : sbc #$0003
+	sta !igo_iw
+	lda #IGO_DBOT                             // the rows free below and above
+	sec : sbc !igo_srow
+	bcs igds_b
+	lda #$0000
+igds_b:
+	.al : .xl
+	sta !igo_blw
+	lda !igo_cell
+	sec : sbc #IGO_DTOP
+	bcs igds_a
+	lda #$0000
+igds_a:
+	.al : .xl
+	sta !igo_abv
+	cmp !igo_blw
+	bcs igds_m
+	lda !igo_blw
+igds_m:
+	.al : .xl
+	cmp #$0003
+	bcs igds_on
+	lda #$0000                                // no room: no box
+	sta !igo_dh
+	bra igds_draw
+igds_on:
+	.al : .xl
+	sec : sbc #$0002
+	cmp #IGO_LMAX+1
+	bcc igds_lm
+	lda #IGO_LMAX
+igds_lm:
+	.al : .xl
+	sta !igo_lmax
+	lda !igo_cell
+	pha
+	lda !igo_srow
+	pha
+	jsr igo_desc_text
+	lda !igo_tmp2
+	clc : adc #$0004
+	sta !igo_dw
+	pla
+	sta !igo_srow
+	pla
+	sta !igo_cell
+	lda !igo_nl
+	clc : adc #$0002
+	sta !igo_dh
+	cmp !igo_blw
+	beq igds_bnogap
+	bcc igds_below
+	cmp !igo_abv                              // above it
+	beq igds_anogap
+	lda !igo_cell
+	sec : sbc !igo_dh
+	dec
+	bra igds_y
+igds_anogap:
+	.al : .xl
+	lda !igo_cell
+	sec : sbc !igo_dh
+	bra igds_y
+igds_below:
+	.al : .xl
+	lda !igo_srow
+	inc : inc
+	bra igds_y
+igds_bnogap:
+	.al : .xl
+	lda !igo_srow
+	inc
+igds_y:
+	.al : .xl
+	sta !igo_dy
+igds_draw:
+	.al : .xl
+	// the rows of the box before that this one does not cover: blank
+	lda #$0000
+	sta !igo_dr
+igds_old:
+	.al : .xl
+	lda !igo_dr
+	cmp !igo_dho
+	bcs igds_new
+	clc : adc !igo_dyo
+	cmp !igo_dy
+	bcc igds_blank
+	sec : sbc !igo_dy
+	cmp !igo_dh
+	bcc igds_onext
+igds_blank:
+	.al : .xl
+	lda !igo_dr
+	clc : adc !igo_dyo
+	jsr igo_blank_row
+igds_onext:
+	.al : .xl
+	inc !igo_dr
+	bra igds_old
+igds_new:
+	.al : .xl
+	lda #$0000
+	sta !igo_dr
+igds_r:
+	.al : .xl
+	lda !igo_dr
+	cmp !igo_dh
+	bcs igds_end
+	jsr igo_desc_row
+	inc !igo_dr
+	bra igds_r
+igds_end:
+	.al : .xl
+	lda !igo_dh
+	sta !igo_dho
+	lda !igo_dy
+	sta !igo_dyo
+	plp
+	rts
+
+// screen row A(16) with nothing of the box on it (what igo_rs puts under it stays)
+igo_blank_row:
+	php
+	rep #$30 : .al : .xl
+	jsr igo_rs
+	ldx #$0000
+	txa
+	ldy #$0000
+	jsr igo_flush2
+	plp
+	rts
+
+// row igo_dr of the box (past its bottom: a blank row).
+igo_desc_row:
+	php
+	rep #$30 : .al : .xl
+	lda #IGO_PAL_TEXT : sta !igo_tpal         // the text is not dimmed,
+	lda #IGO_PAL_DIM : sta !igo_fpal          //   the box is (menu_desc_draw)
+	lda !igo_dr
+	clc : adc !igo_dy
+	tax
+	lda !igo_dr
+	beq igdr_top
+	inc
+	cmp !igo_dh
+	beq igdr_bot
+	bcs igdr_blank
+	txa                                       // a text row: line igo_dr - 1
+	jsr igo_rs
+	ldx !igo_dx
+	lda !igo_dw
+	jsr igo_sides
+	lda !igo_dr
+	dec
+	asl
+	tax
+	lda !igo_ls, x
+	tay
+	clc : adc !igo_ll, x
+	sta !igo_len                              // where the line ends
+	lda !igo_dx
+	inc : inc
+	tax
+	sep #$20 : .as
+igdr_c:
+	.as : .xl
+	cpy !igo_len
+	bcs igdr_cd
+	lda !igo_txt, y
+	sta OVL_RB, x
+	inx
+	iny
+	bra igdr_c
+igdr_cd:
+	.as : .xl
+	rep #$20 : .al
+	ldx !igo_dx
+	lda !igo_dw
+	ldy #$0000
+	jsr igo_flush2
+	plp
+	rts
+igdr_top:
+	.al : .xl
+	lda #IGO_G_NW
+	bra igdr_h
+igdr_bot:
+	.al : .xl
+	lda #IGO_G_SW
+igdr_h:
+	.al : .xl
+	pha
+	lda !igo_dx : sta !igo_tmp2
+	lda !igo_dw : sta !igo_w1
+	lda #$0000
+	sta !igo_sp+1                             // no title
+	pla
+	jsr igo_hrow
+	plp
+	rts
+igdr_blank:
+	.al : .xl
+	txa
+	jsr igo_rs
+	ldx #$0000                                // no window: the row as igo_rs left it
+	txa
+	ldy #$0000
+	jsr igo_flush2
+	plp
+	rts
+
+// ========================================================================================
+//  Tab 6: open, draw, input (DB = $F4 from here on)
+// ========================================================================================
+
+// ---- Y at the tab-bar level (igmenu_loop). Nothing to open without the firmware's block,
+//      the menu's pointers or one option to show. The focus bit goes up BEFORE the switch,
+//      like help_open: the redraw inside ig_switch_to then greys the bar and picks this
+//      screen's footer. ----
+gopt_open:
+	php
+	phb
+	sep #$20 : .as
+	lda #$f4 : pha : plb
+	lda @GAMEOPT_BLK
+	cmp #$47                                  // 'G'
+	bne igo_open_no
+	lda @GAMEOPT_BLK+1
+	cmp #$4f                                  // 'O'
+	bne igo_open_no
+	lda @GAMEOPT_BLK+2
+	cmp #GO_VERSION
+	bne igo_open_no
+	jsr igo_lang
+	jsr igo_hdr
+	bcc igo_open_no
+	jsr igo_build
+	bcc igo_open_no
+	rep #$30 : .al : .xl
+	lda #$0000
+	sta !igo_lvl
+	sta !igo_cur
+	sta !igo_top
+	sta !igo_fail
+	sta !igo_editing
+	lda !igo_ng
+	sta !igo_n
+	sta !igo_vis
+	jsr igo_geom0
+	lda #$0001
+	sta !igo_keep
+	lda @active_tab
+	and #$00ff
+	sta @help_prev_tab
+	lda @igmenu_flags
+	ora #$0002
+	sta @igmenu_flags
+	lda #$0006
+	jsr ig_switch_to
+igo_open_no:
+	plb
+	plp
+	rts
+
+// sst_lang = CFG.language clamped for the igm tables.
+igo_lang:
+	php
+	sep #$20 : .as
+	lda @CFG_LANGUAGE
+	cmp #IGM_LANG_COUNT
+	bcc igol_ok
+	lda #$00
+igol_ok:
+	.as
+	rep #$30 : .al : .xl
+	and #$00ff
+	sta @sst_lang
+	plp
+	rts
+
+// ---- tab 6 enter (ig_switch_to, forced blank): the state as gopt_open / a level change left
+//      it. A tab switch that lands here without it (nothing does today) closes the screen
+//      on the next key. ----
+gopt_enter:
+	php
+	phb
+	sep #$20 : .as
+	lda #$f4 : pha : plb
+	jsr igo_lang
+	rep #$30 : .al : .xl
+	lda !igo_keep
+	beq ige_out
+	lda #$0000
+	sta !igo_keep
+	sta !igo_dvb                              // forced blank: no vblank waits
+	sta !igo_dho                              // the body was cleared: nothing to blank
+	jsr igo_bar_color                         // (A = 0: the normal bar)
+	lda !igo_lvl
+	bne ige_l1
+	lda #$0000
+	jsr igo_draw0
+	bra ige_desc
+ige_l1:
+	.al : .xl
+	lda #$0001
+	jsr igo_draw0                             // dimmed under the group's window
+	jsr igo_draw1
+ige_desc:
+	.al : .xl
+	lda #$0000
+	jsr igo_desc
+	lda #IGO_PAL_TEXT : sta !ovl_pal
+ige_out:
+	.al : .xl
+	plb
+	plp
+	rts
+
+// ---- tab 6 input. Browsing: Up/Down pick the row, A opens a group / edits a value, Y
+//      closes the screen (B, through gopt_back: one level up, then ig_focus_leave). Editing
+//      (menu_value_dialog_kv8's keys): Up the next value, Down the previous one, L the
+//      first, A sets it, B (gopt_back) cancels. ----
+gopt_input:
+	php
+	phb
+	sep #$20 : .as
+	lda #$f4 : pha : plb
+	rep #$30 : .al : .xl
+	lda !igo_editing
+	beq igi_browse
+	jsr igo_edit_input
+	bra igi_done
+igi_browse:
+	.al : .xl
+	lda @ovl_edge
+	bit #$4000
+	beq igi_noy
+	jsr help_close
+	bra igi_done
+igi_noy:
+	.al : .xl
+	bit #$0800
+	beq igi_noup
+	lda !igo_cur
+	beq igi_done
+	dec
+	jsr igo_move
+	bra igi_done
+igi_noup:
+	.al : .xl
+	bit #$0400
+	beq igi_nodown
+	lda !igo_cur
+	inc
+	cmp !igo_n
+	bcs igi_done
+	jsr igo_move
+	bra igi_done
+igi_nodown:
+	.al : .xl
+	bit #$0080
+	beq igi_done
+	lda !igo_lvl
+	bne igi_edit
+	lda !igo_cur                              // A on a group: its options, over the groups
+	sta !igo_g
+	lda #$0001
+	sta !igo_lvl
+	lda #$0000
+	sta !igo_cur
+	sta !igo_top
+	sta !igo_fail
+	jsr igo_geom1
+	jsr igo_relevel
+	bra igi_done
+igi_edit:
+	.al : .xl
+	jsr igo_edit_begin
+igi_done:
+	.al : .xl
+	plb
+	plp
+	rts
+
+// redraw the level from scratch through the tab switch (its fade and forced blank)
+igo_relevel:
+	php
+	rep #$30 : .al : .xl
+	lda #$0001
+	sta !igo_keep
+	lda #$0006
+	jsr ig_switch_to
+	plp
+	rts
+
+// ---- the bar to row A(16): level 1 scrolls the rows when it leaves them; the description
+//      follows, a row per vblank. ----
+igo_move:
+	php
+	rep #$30 : .al : .xl
+	sta !igo_cur
+	lda #$0000
+	sta !igo_fail
+	lda !igo_lvl
+	beq igmv_desc
+	lda !igo_cur
+	cmp !igo_top
+	bcs igmv_nup
+	sta !igo_top                              // above the rows shown
+	bra igmv_scroll
+igmv_nup:
+	.al : .xl
+	lda !igo_top
+	clc : adc !igo_vis
+	dec
+	cmp !igo_cur
+	bcs igmv_desc                             // on screen: just the description
+	lda !igo_cur                              // below them: the row becomes the last
+	sec : sbc !igo_vis
+	inc
+	sta !igo_top
+igmv_scroll:
+	.al : .xl
+	lda #$0000
+	sta !igo_dr
+igmv_r:
+	.al : .xl
+	lda !igo_dr
+	cmp !igo_vis
+	bcs igmv_desc
+	lda #$0001
+	sta !igo_dvb                              // each row at the start of a vblank
+	lda !igo_dr
+	clc : adc !igo_top
+	jsr igo_draw1_row
+	inc !igo_dr
+	bra igmv_r
+igmv_desc:
+	.al : .xl
+	lda #$0001
+	jsr igo_desc
+	plp
+	rts
+
+// ---- editing: one key per frame, like the menu's value dialog. ----
+igo_edit_input:
+	php
+	rep #$30 : .al : .xl
+	lda @ovl_edge
+	bit #$0080
+	beq iei_noa
+	jsr igo_edit_commit
+	plp
+	rts
+iei_noa:
+	.al : .xl
+	ldy !igo_ep
+	bit #$0800
+	beq iei_noup
+	iny
+	cpy !igo_en
+	bcs iei_done
+	bra iei_set
+iei_noup:
+	.al : .xl
+	bit #$0400
+	beq iei_nodown
+	cpy #$0000
+	beq iei_done
+	dey
+	bra iei_set
+iei_nodown:
+	.al : .xl
+	bit #$0020                                // L: the first value
+	beq iei_done
+	cpy #$0000
+	beq iei_done
+	ldy #$0000
+iei_set:
+	.al : .xl
+	sty !igo_ep
+	lda !igo_cur
+	jsr igo_row_entry                         // igo_tab: the row's value table
+	tya
+	jsr igo_kv_at
+	sta !igo_ev
+	jsr igo_row_redraw
+iei_done:
+	.al : .xl
+	plp
+	rts
+
+// ---- A on an option: start editing its value (nothing on one that cannot change now). ----
+igo_edit_begin:
+	php
+	rep #$30 : .al : .xl
+	lda !igo_cur
+	jsr igo_row_locked
+	bcs ieb_out
+	ldx !igo_off
+	sep #$20 : .as
+	lda @GAMEOPT_BLK+GOB_VAL, x
+	rep #$20 : .al
+	and #$00ff
+	sta !igo_ev
+	jsr igo_kv_count
+	sta !igo_en
+	ldy #$0000                                // the value's place in the list (0 if it has none)
+ieb_find:
+	.al : .xl
+	cpy !igo_en
+	bcs ieb_none
+	tya
+	jsr igo_kv_at
+	cmp !igo_ev
+	beq ieb_have
+	iny
+	bra ieb_find
+ieb_none:
+	.al : .xl
+	ldy #$0000
+	lda #GOV_DEFAULT
+	sta !igo_ev
+ieb_have:
+	.al : .xl
+	sty !igo_ep
+	lda #$0001
+	sta !igo_editing
+	jsr igo_bar_color
+	jsr igo_footer
+ieb_out:
+	.al : .xl
+	plp
+	rts
+
+// ---- leave editing (A done or B), the bar back to normal. ----
+igo_edit_end:
+	php
+	rep #$30 : .al : .xl
+	lda #$0000
+	sta !igo_editing
+	jsr igo_bar_color
+	jsr igo_footer
+	plp
+	rts
+
+// ---- A while editing: the value goes to the card and the game (when it changed). ----
+igo_edit_commit:
+	php
+	rep #$30 : .al : .xl
+	lda !igo_cur
+	jsr igo_row_entry
+	ldx !igo_off
+	sep #$20 : .as
+	lda @GAMEOPT_BLK+GOB_VAL, x
+	rep #$20 : .al
+	and #$00ff
+	cmp !igo_ev
+	beq iec_same
+	jsr igo_edit_end
+	jsr gopt_step
+	plp
+	rts
+iec_same:
+	.al : .xl
+	jsr igo_edit_end
+	jsr igo_row_redraw
+	plp
+	rts
+
+// ---- B at the content level (igmenu_loop, before ig_focus_leave): carry set = consumed
+//      here (a value edit cancelled, or back from a group to the groups); clear = B leaves
+//      the screen as usual. ----
+gopt_back:
+	php
+	phb
+	sep #$20 : .as
+	lda #$f4 : pha : plb
+	rep #$30 : .al : .xl
+	lda !igo_editing
+	beq gbk_level
+	jsr igo_edit_end
+	jsr igo_row_redraw                         // the value the game has
+	bra gbk_yes
+gbk_level:
+	.al : .xl
+	lda !igo_lvl
+	beq gbk_no
+	lda #$0000
+	sta !igo_lvl
+	sta !igo_fail
+	lda !igo_g
+	sta !igo_cur
+	lda !igo_ng
+	sta !igo_n
+	sta !igo_vis
+	jsr igo_relevel
+gbk_yes:
+	.al : .xl
+	plb
+	plp
+	sec
+	rts
+gbk_no:
+	.al : .xl
+	plb
+	plp
+	clc
+	rts
+
+// ---- redraw the cursor's row (level 1), written at the start of a vblank. ----
+igo_row_redraw:
+	php
+	rep #$30 : .al : .xl
+	lda #$0001
+	sta !igo_dvb
+	lda !igo_cur
+	jsr igo_draw1_row
+	plp
+	rts
+
+// ---- the footer for the current mode, at the start of a vblank. ----
+igo_footer:
+	php
+	rep #$30 : .al : .xl
+	jsr igo_vblank
+	jsr igmenu_draw_footer
+	plp
+	rts
+
+// ---- the BAR's colour: A(16) = 0 normal, 1 highlight (editing). The four COLDATA slots of
+//      the ch5 table in WRAM, the ones ig_theme_init stamps and the menu's set_bar_color
+//      writes; the theme's colours when one is staged, else the menu's defaults. ----
+igo_bar_color:
+	php
+	rep #$30 : .al : .xl
+	asl : asl
+	tax
+	sep #$20 : .as
+	lda @IGM_THM_MAGIC
+	cmp #$a5
+	bne ibc_baked
+	lda @IGM_THM_BARCOL+0, x : sta @$7E0063
+	lda @IGM_THM_BARCOL+1, x : sta @$7E0066
+	lda @IGM_THM_BARCOL+2, x : sta @$7E0069
+	lda @IGM_THM_BARCOL+3, x : sta @$7E006c
+	plp
+	rts
+ibc_baked:
+	.as : .xl
+	lda @igo_barcol+0, x : sta @$7E0063
+	lda @igo_barcol+1, x : sta @$7E0066
+	lda @igo_barcol+2, x : sta @$7E0069
+	lda @igo_barcol+3, x : sta @$7E006c
+	plp
+	rts
+
+// ---- send igo_ev as the value of the option under the bar, through the firmware, then
+//      redraw from what it restaged (a refused change: the row keeps the card's value and
+//      the note says why). ----
+gopt_step:
+	php
+	rep #$30 : .al : .xl
+	lda !igo_cur
+	jsr igo_row_entry
+	sep #$20 : .as
+	lda !igo_ev
+	sta @MCU_PARAM+11
+	lda !igo_off
+	sta @MCU_PARAM+10
+	lda #GOOP_SET
+	sta @MCU_PARAM+9
+	lda #CMD_GAMEOPT
+	sta @MCU_CMD
+	jsr saves_wait_ack                         // bounded: the write is one small file
+	sep #$20 : .as
+	lda @GAMEOPT_BLK+GOB_RESULT
+	rep #$20 : .al
+	and #$00ff
+	sta !igo_fail
+	jsr igo_row_redraw
+	lda #$0001
+	jsr igo_desc                               // the note: done, or why not
+	plp
+	rts
+
+// ---- wait for the START of a vblank (out of one first), so a row's VRAM writes land. ----
+igo_vblank:
+	php
+	sep #$20 : .as
+igv_out:
+	lda @$004212
+	bmi igv_out
+igv_in:
+	lda @$004212
+	bpl igv_in
+	plp
+	rts
+
+// ---- ig_bar_sync target for tab 6 (jumped to from inside ig_bar_sync, which already did
+//      its php): the bar across the window on the row under it, or on the value field while
+//      it is edited, like a menu's. ----
+igb_gopt_target:
+	.al : .xl
+	lda @igo_lvl
+	bne igbg_l1
+	lda @igo_cur
+	clc : adc #IGO_WY0+1
+	sta @ig_bar_row
+	lda @igo_px : inc : inc : sta @ig_bar_xl
+	lda @igo_pw : sec : sbc #$0004 : sta @ig_bar_wl
+	jmp igb_place
+igbg_l1:
+	.al : .xl
+	lda @igo_cur
+	sec : sbc @igo_top
+	clc : adc #IGO_WY1+1
+	sta @ig_bar_row
+	lda @igo_editing
+	bne igbg_edit
+	lda @igo_wx : inc : inc : sta @ig_bar_xl
+	lda @igo_ww : sec : sbc #$0004 : sta @ig_bar_wl
+	jmp igb_place
+igbg_edit:
+	.al : .xl
+	lda @igo_wx                                // the value field, like menu_edit_value's
+	clc : adc @igo_ww
+	dec : dec
+	sec : sbc @igo_vmax
+	sta @ig_bar_xl
+	lda @igo_vmax : sta @ig_bar_wl
+	jmp igb_place
+
+// the bar's colours without a theme: hdma_bar_color_src (const.a65), normal then highlight
+igo_barcol:
+	.byt $2a, $40, $9f, $00
+	.byt $36, $40, $8a, $00

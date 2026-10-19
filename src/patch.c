@@ -1685,7 +1685,8 @@ static const struct patch_asset patch_assets_rom[] = {
 
 static const struct patch_asset patch_assets_save[] = {
     { SAVE_BASEDIR,  ".srm"  },
-    { SAVE_BASEDIR,  ".slot" },
+    { SAVE_BASEDIR,  ".yml"  },   /* per-game settings and slots (gameopt.h) */
+    { SAVE_BASEDIR,  ".slot" },   /* the slots of before                     */
     { SAVE_BASEDIR,  ".mpk"  },
 };
 

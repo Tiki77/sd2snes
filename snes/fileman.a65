@@ -29,6 +29,8 @@
 ; the first bytes of the bank: fm_bank_ok (fmres.a65) checks them before calling in
 fm_bank_magic .byt "FMB1"
 
+; FMX_TLEN / FMX_TBL / FMX_DESC / FMX_TAB2 are also defined in gameopt.a65 (its rows go
+; through fm_row): keep them in lockstep.
 #define FMX_TLEN    $7E9800     ; word: bytes written into the table being built
 #define FMX_T       $7E9802     ; word scratch
 #define FMX_T2      $7E9804     ; word scratch
@@ -263,6 +265,41 @@ fm_ctx_build:
   rep #$10 : .xl
   phb
   pla                       ; A = the table's bank
+  jsr fm_ctx_copy
+  lda print_ptr+2           ; the rows-only table (fm_ctx_alone): this bank's title
+  cmp #$c3
+  bne fcb_title_ok
+  ldx #!text_fm_title
+  jsr fm_str
+  rep #$20 : .al
+  lda print_src
+  sta @FM_TAB+1
+  sep #$20 : .as
+  lda print_bank
+  sta @FM_TAB+3
+fcb_title_ok:
+  .as : .xl
+  jsr gopt_ctx_row          ; a game's own table: the game options row (gameopt.a65)
+  jsr fm_facts
+  jsr fm_ctx_rows
+  jsr fm_ctx_del
+  jsr fm_tab_end
+  pld
+  plp
+  pea $7e7e
+  plb
+  plb
+  rep #$10 : .xl
+  ldx #!FM_TAB
+  rtl
+
+; fm_ctx_copy: A:X = a show_menu table -> FM_TAB, header and entries, without the end
+; (FMX_TBL = FM_TAB, FMX_TLEN = what was copied).  Its Delete row is held back in FMX_DEL
+; (fm_ctx_del puts it after every row appended here: Delete is always the menu's last).
+; Leaves DP = 0, DB = $7E and [print_ptr] = the table; the caller saved DP and restores it.
+; .as/.xl.
+fm_ctx_copy:
+  .as : .xl
   pea $0000
   pld
   pea $7e7e
@@ -312,31 +349,7 @@ fcb_keep:
   bra fcb_entry
 fcb_copied:
   .as : .xl
-  lda print_ptr+2           ; the rows-only table (fm_ctx_alone): this bank's title
-  cmp #$c3
-  bne fcb_title_ok
-  ldx #!text_fm_title
-  jsr fm_str
-  rep #$20 : .al
-  lda print_src
-  sta @FM_TAB+1
-  sep #$20 : .as
-  lda print_bank
-  sta @FM_TAB+3
-fcb_title_ok:
-  .as : .xl
-  jsr fm_facts
-  jsr fm_ctx_rows
-  jsr fm_ctx_del
-  jsr fm_tab_end
-  pld
-  plp
-  pea $7e7e
-  plb
-  plb
-  rep #$10 : .xl
-  ldx #!FM_TAB
-  rtl
+  rts
 
 ; fcb_copy1: the entry at [print_ptr],Y to $7E:X; Y past it.  .as/.xl, DB $7E.
 fcb_copy1:

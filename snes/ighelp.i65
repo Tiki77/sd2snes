@@ -34,6 +34,7 @@
 #define IGM_HP_KEYS1     13
 #define IGM_HP_KEYS2     14
 #define IGM_HP_UNAVAIL   15
+#define IGM_HP_KEYS3     16
 
 // Layout (tile rows / logical columns; the frame is ig_frame_geom record 5: interior rows
 // 4..23, columns 2..61). The action label may run to column 31 (HELP_LABEL_MAX = 24) and
@@ -43,6 +44,7 @@
 #define IGH_KEYS_ROW     20
 #define IGH_KEYS1_ROW    21
 #define IGH_KEYS2_ROW    22
+#define IGH_KEYS3_ROW    23
 #define IGH_LABEL_COL    8
 #define IGH_VALUE_COL    34
 
@@ -326,6 +328,11 @@ ighe_no_note:
 	jsr igh_draw_centered
 	ldx #IGH_KEYS2_ROW
 	jsr ig_hint_keys
+	lda #IGM_HP_KEYS3
+	ldx #IGH_KEYS3_ROW
+	jsr igh_draw_centered
+	ldx #IGH_KEYS3_ROW
+	jsr ig_hint_keys
 	plb
 	plp
 	rts
@@ -550,8 +557,8 @@ help_close_fixup:
 	rep #$30 : .al : .xl
 	lda @active_tab
 	and #$00ff
-	cmp #$0005
-	bne hcf_done
+	cmp #IGMENU_TABS                     // HELP (5) or GAME OPTIONS (6, igopt.i65)
+	bcc hcf_done
 	lda @help_prev_tab
 	cmp #IGMENU_TABS
 	bcc hcf_tab_ok

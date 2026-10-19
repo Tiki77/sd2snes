@@ -92,6 +92,7 @@ static uint16_t scan_dir_msu_rom(const uint8_t *path, uint32_t base_addr, uint16
 static uint8_t is_card_data_ext(const char *name) {
   static const char *const exts[] = {
     "srm", "slot", "mpk", "rtc",        /* battery saves + their sidecars */
+    "opt",                              /* per-game options of 2.18 betas (the Web Manager converts) */
     "state",                            /* savestates */
     "yml",                              /* cheats / game info / patch meta / config */
     "cfg",                              /* lastgame.cfg, favorites.cfg */

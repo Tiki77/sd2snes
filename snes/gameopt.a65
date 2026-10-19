@@ -1,0 +1,1022 @@
+; ======================================================================
+;  The game options screen: the settings one game overrides (src/gameopt.h: config.yml's
+;  options in the game's <stem>.yml), shown like Settings itself.
+;
+;  Opened from the "Game options" row of the three context menus (browser, Recents,
+;  Favorites) -- a MTYPE_FUNC row, so leaving the screen comes back to that context menu --
+;  and from L on the game info screen.  The rows are not in the context tables: the
+;  browser's are copied into WRAM by fm_ctx_build anyway (the file manager's rows go after
+;  them), so gopt_ctx_row appends ours there; for Recents and Favorites fmres.a65's
+;  fm_menu_hook recognises the table and hands it to gopt_list_build, which does the same
+;  copy with only our row.  That keeps every byte of this out of the full $C0-$C2.
+;
+;  WHAT IT SHOWS.  The firmware names the options (gameopt_list in src/gameopt.c) and
+;  publishes, per option, its cfg_t offset, the game's value and the global one
+;  (GAMEOPT_BLK).  gopt_build walks Settings (menu_enttab_cfg): every submenu that holds the
+;  row of one of those options becomes a submenu here, with the same title and description,
+;  and inside it the option's row exactly as Settings has it -- name, description, value
+;  table -- except that its value is the game's byte in GAMEOPT_BLK and its value table
+;  starts with "Default (<what the global gives>)".  So the screen has nothing of its own to
+;  translate or keep in step: a new option is one line in gameopt_list.  show_menu does the
+;  rest, submenus and value dialogs included; when it closes, every option whose value
+;  changed goes back with GOOP_SET, which writes the file.
+;
+;  WRAM.  The tables are built in GOX_BUF ($7E8000-$7E8FFF: the iris block, idle while a
+;  menu is up; the game info screen's band scratch at $7E8800 is free too, the info screen
+;  is torn down before this opens and rebuilt after).  Scratch in $7E9000- (the saves
+;  screen's, never up at the same time).
+;
+;  Bank $C3 (the file manager's; fm_bank_ok checks it before anything calls in).  DP = 0,
+;  DB = $7E (fm_env); the $C0 routines through the ui_call_* / gi_call_* trampolines.
+; ======================================================================
+.link page $c3
+#include "memmap.i65"
+; memmap.i65 re-asserts '.link page $c0' on include; re-declare $c3 AFTER it.
+.link page $c3
+
+; fileman.a65's table builder (fm_tab_head / fm_row / fm_tab_end / fm_show) works on these;
+; lockstep with the defines there.
+#define FMX_TLEN    $7E9800
+#define FMX_TBL     $7E9820
+#define FMX_DESC    $7E9822
+#define FMX_DEL     $7E9E80     ; fileman.a65's held-back Delete row (lockstep)
+#define FMX_DELON   $7E9E97
+
+; The tables (gopt_build), $7E8000-$7E8FFF:
+#define GOX_TOP     $7E8000     ; the screen's own table: a submenu row per Settings group
+#define GOX_SUB     $7E8100     ; the groups' tables, one after the other
+#define GOX_KV      $7E8600     ; the value tables: "Default (..)", then the option's own
+#define GOX_TXT     $7E8C00     ; the "Default (..)" texts
+#define GOX_END     $7E9000
+#define GOX_TXTMAX  40          ; bytes of one of them, NUL included
+; Scratch ($7E9000-, the saves screen's while it is up):
+#define GOX_OLD     $7E9000     ; GO_MAX B: the values the screen opened with
+#define GOX_NEW     $7E9028     ; GO_MAX B: the values it closed with
+#define GOX_R       $7E9050     ; 23 B: the Settings row being looked at
+#define GOX_E       $7E9068     ; 23 B: the group's row being looked at
+#define GOX_CUR     $7E9080     ; 3 B: the group table's next row (long)
+#define GOX_TT      $7E9083     ; word: the next free byte of GOX_TOP
+#define GOX_TS      $7E9085     ; word: the group table being built
+#define GOX_TP      $7E9087     ; word: the next free byte of GOX_SUB
+#define GOX_KP      $7E9089     ; word: the next free byte of GOX_KV
+#define GOX_XP      $7E908B     ; word: the next free byte of GOX_TXT
+#define GOX_I       $7E908D     ; word: the option the row is (GAMEOPT_BLK index)
+#define GOX_CNT     $7E908F     ; word: bytes left to copy (gox_copy)
+#define GOX_RN      $7E9091     ; word: the next Settings row
+#define GOX_OFF     $7E9093     ; word: a cfg_t offset / a value being looked up
+#define GOX_TK      $7E9095     ; word: the value table being built
+#define GOX_WLEN    $7E9097     ; word: the length of the word "Default" in the menu language
+#define GOX_LMAX    $7E9099     ; word: the group's longest label
+#define GOX_ROWP    $7E909B     ; word: a row of the group being looked at
+#define GOX_CAP     $7E909D     ; word: the longest "Default (..)" the group can show
+#define GOX_CORE    $7E909F     ; word: the option's GOB_OFF bits $6000 (gox_match)
+#define GOX_LP      $7E90A1     ; word: the next free byte of GOX_LBL
+#define GOX_LBL     $7E9100     ; the labels gox_core writes, to GOX_LBLE (the saves screen's)
+#define GOX_LBLE    $7E9400
+; A group opens at column 10 (GOX_TOP's 8 + show_menu's submenu step): its right border at
+; column 62 at most, so label + value <= 53 - 7 (show_menu's borders, pads and gap).
+#define GOX_LV      46
+#define GOX_PBAK    $7E9E20     ; 8 B: MCU_PARAM[0..7] (the browser's entry / a list index)
+#define GOX_GBAK    GI_PBAK     ; 4 B: MCU_PARAM[0..3] across the screen (game info screen, memmap.i65)
+#define GOX_WHERE   $7E9E40     ; SVW_*: where the game is
+
+; ======================================================================
+;  The context menus' row.
+; ======================================================================
+
+; gopt_ctx_row: fm_ctx_build, after the browser table was copied.  Only a game's own table
+; (the one with Saves, Cheats...) gets the row.  .as/.xl, DP 0, DB $7E, [print_ptr] = the
+; table show_menu was given.
+gopt_ctx_row:
+  .as : .xl
+  lda print_ptr+2
+  ldx print_ptr
+  cmp #^menu_enttab_filesel_context_file
+  bne gcr_gi
+  cpx #!menu_enttab_filesel_context_file
+  beq gcr_go
+gcr_gi:
+  .as : .xl
+  cmp #^menu_enttab_filesel_context_file_gi
+  bne gcr_out
+  cpx #!menu_enttab_filesel_context_file_gi
+  bne gcr_out
+gcr_go:
+  .as : .xl
+  lda #SVW_BROWSER
+  jmp gopt_row
+gcr_out:
+  .as : .xl
+  rts
+
+; gopt_list_build: show_menu's first act on the Recents / Favorites context menu (fmres.a65
+; fm_menu_hook, A = SVW_*, DBR:X = the table).  The table goes to FM_TAB with our row after
+; its own, and show_menu continues on FM_TAB, like fm_ctx_build.
+gopt_list_build:
+  php
+  phd
+  sep #$20 : .as
+  rep #$10 : .xl
+  pha                       ; SVW_*
+  phb
+  pla                       ; A = the table's bank
+  jsr fm_ctx_copy
+  pla
+  jsr gopt_row
+  jsr fm_ctx_del            ; Delete stays the last row
+  jsr fm_tab_end
+  pld
+  plp
+  pea $7e7e
+  plb
+  plb
+  rep #$10 : .xl
+  ldx #!FM_TAB
+  rtl
+
+; gopt_row: the "Game options" row for a game that is A (SVW_*).  .as/.xl, DP 0, DB $7E.
+gopt_row:
+  .as : .xl
+  ldy #!gopt_h_browser-1
+  cmp #SVW_RECENT
+  bne gro_fav
+  ldy #!gopt_h_recent-1
+gro_fav:
+  .as : .xl
+  cmp #SVW_FAV
+  bne gro_put
+  ldy #!gopt_h_fav-1
+gro_put:
+  .as : .xl
+  ldx #!mdesc_gopt_row
+  stx !FMX_DESC
+  ldx #!mtext_gopt_row
+  jsr fm_row                ; X = the row
+  lda #MTYPE_FUNC           ; not FUNC_CLOSE: leaving the screen goes back to the context menu
+  sta @$7e0000, x
+  rts
+
+; ======================================================================
+;  Entry points.  The rows' handlers (show_menu's MTYPE_FUNC_CLOSE: any DP/DB in, rtl out;
+;  MCU_PARAM holds the game as for the rows around them).
+; ======================================================================
+gopt_h_browser:
+  php
+  phb
+  phd
+  jsr fm_enter
+  .as : .xl
+  lda #SVW_BROWSER
+  bra goh_go
+gopt_h_recent:
+  php
+  phb
+  phd
+  jsr fm_enter
+  .as : .xl
+  lda #SVW_RECENT
+  bra goh_go
+gopt_h_fav:
+  php
+  phb
+  phd
+  jsr fm_enter
+  .as : .xl
+  lda #SVW_FAV
+goh_go:
+  .as : .xl
+  sta @GOX_WHERE
+  jsr gopt_screen
+  jmp fm_h_out
+
+; gopt_gi: L on the game info screen (fmres.a65 gopt_from_gi, after fm_bank_ok; rtl back to
+; gameinfo.a65).  The shape of saves_from_gi (saves.a65): the browser comes back behind the
+; screen, dimmed like under a context menu, and the info screen is queried and rebuilt on
+; the way back.  MCU_PARAM[0..3] is kept across (for Recents/Favorites its low byte IS the
+; index the query needs).
+gopt_gi:
+  php
+  phb
+  phd
+  jsr fm_env
+  .as : .xl
+  ldx #$0003
+ggi_pbak:
+  lda @MCU_PARAM, x
+  sta @GOX_GBAK, x
+  dex
+  bpl ggi_pbak
+  jsr gopt_db0
+  jsl @gi_call_dc_restore                    ; menu graphics back, screen_dma_disable = 0
+  jsr fm_env
+  jsr gopt_nmi                               ; the menu NMI's tile DMA draws the windows
+  lda #$02
+  sta @SFX_MAILBOX                           ; confirm blip, after the restore's cover burst
+  lda @gi_query_cmd
+  ldx #SVW_RECENT
+  cmp #CMD_GAME_INFO_RECENT
+  beq ggi_where
+  ldx #SVW_FAV
+  cmp #CMD_GAME_INFO_FAVORITE
+  beq ggi_where
+  jsr gopt_db0
+  jsl @gi_call_fill_param                    ; browser: MCU_PARAM = cwd + the selected entry
+  jsr fm_env
+  ldx #SVW_BROWSER
+ggi_where:
+  .as : .xl
+  txa
+  sta @GOX_WHERE
+  jsr fm_backdrop
+  jsl @ui_call_wpush
+  jsl @ui_call_greyout
+  jsr fm_env
+  jsr gopt_screen
+  jsr fm_backdrop
+  jsl @ui_call_wclose
+  jsr fm_env
+  ldx #$0003
+ggi_prst:
+  lda @GOX_GBAK, x
+  sta @MCU_PARAM, x
+  dex
+  bpl ggi_prst
+  jsr gopt_db0
+  jsl @gi_call_query
+  jsr gopt_db0
+  jsr gopt_nmi                               ; NMI on before gi_dc_show / gin_syncread
+  jsl @gi_call_dc_show
+  pld
+  plb
+  plp
+  rtl
+
+gopt_nmi:
+  .as
+  lda #$81
+  sta @$004200
+  lda #$00
+  sta @isr_done
+  rts
+
+; DB = 0 for the $C0 game info routines (saves_from_gi calls them the same way)
+gopt_db0:
+  sep #$20 : .as
+  rep #$10 : .xl
+  lda #$00
+  pha
+  plb
+  rts
+
+; ======================================================================
+;  gopt_screen: ask the firmware, show the options, send back what changed.  GOX_WHERE set.
+;  .as/.xl, DP 0, DB $7E in and out.
+; ======================================================================
+gopt_screen:
+  .as : .xl
+  ldx #$0007
+gs_pbak:
+  lda @MCU_PARAM, x
+  sta @GOX_PBAK, x
+  dex
+  bpl gs_pbak
+  jsr gopt_db0
+  jsl @ui_call_coversync                     ; a cover request in flight answers $55 too
+  jsl @ui_call_coveroff                      ; and the cover goes (back when the browser is)
+  jsr fm_env
+  lda #GOOP_INFO
+  jsr gopt_cmd
+  lda @GAMEOPT_BLK
+  cmp #$47                                  ; 'G': a firmware without the command just ACKs
+  bne gs_none
+  lda @GAMEOPT_BLK+2
+  cmp #GO_VERSION                           ; the block of a firmware with this list
+  bne gs_none
+  ldx #GO_MAX-1
+gs_old:
+  lda @GAMEOPT_BLK+GOB_VAL, x
+  sta @GOX_OLD, x
+  dex
+  bpl gs_old
+  jsr gopt_build
+  bcs gs_show
+gs_none:
+  .as : .xl
+  lda #$04
+  sta @SFX_MAILBOX                          ; error blip: nothing to show
+  rts
+gs_show:
+  .as : .xl
+  lda #$08                                  ; one step in from the context menu's window,
+  sta window_x                              ;   and high enough for a group of MENU_VISMAX
+  lda #$0b                                  ;   rows to scroll below it (window_y <= 13,
+  sta window_y                              ;   memmap.i65)
+  rep #$20 : .al
+  lda #!GOX_TOP
+  sta FMX_TBL
+  sep #$20 : .as
+  jsr fm_show
+  lda #$ff                                  ; the bar goes with the list: the info screen is
+  sta bar_xl                                ;   rebuilt after this with the NMI on, and the
+  sta bar_yl                                ;   bar showed over it for a few frames
+  sta bar_wl
+  ; Every reply republishes the whole block with the card's values, so the new ones are
+  ; taken before the first command goes out.
+  ldx #GO_MAX-1
+gs_new:
+  lda @GAMEOPT_BLK+GOB_VAL, x
+  sta @GOX_NEW, x
+  dex
+  bpl gs_new
+  ldx #$0000
+gs_send:
+  .as : .xl
+  lda @GOX_NEW, x
+  cmp @GOX_OLD, x
+  beq gs_next
+  sta @MCU_PARAM+11
+  txa
+  sta @MCU_PARAM+10
+  phx
+  lda #GOOP_SET
+  jsr gopt_cmd
+  plx
+  lda @GAMEOPT_BLK
+  cmp #$47
+  bne gs_fail
+  lda @GAMEOPT_BLK+GOB_RESULT
+  beq gs_next
+gs_fail:
+  .as : .xl
+  lda #$04
+  sta @SFX_MAILBOX                          ; error blip: the card refused the write
+gs_next:
+  .as : .xl
+  inx
+  cpx #GO_MAX
+  bne gs_send
+  rts
+
+; gopt_cmd: SNES_CMD_GAMEOPT with A = GOOP_* (+10/+11 as the caller set them), MCU_PARAM
+; [0..7] as the screen found them, and wait for the firmware's ready.  The magic is zeroed
+; first, so a firmware without the command (which ACKs it) leaves no block behind.
+gopt_cmd:
+  .as : .xl
+  pha
+  ldx #$0007
+gc_prst:
+  lda @GOX_PBAK, x
+  sta @MCU_PARAM, x
+  dex
+  bpl gc_prst
+  jsr gopt_db0                               ; cover_show's DMA writes $43xx absolute
+  jsl @ui_call_coversync                     ; a cover request in flight answers $55 too
+  jsr fm_env
+  pla
+  sta @MCU_PARAM+9
+  lda @GOX_WHERE
+  sta @MCU_PARAM+8
+  lda #$00
+  sta @GAMEOPT_BLK
+  sta @SNES_CMD
+  lda #CMD_GAMEOPT
+  sta @MCU_CMD
+gc_wait:
+  .as : .xl
+  lda @SNES_CMD
+  cmp #$55
+  beq gc_done
+  cmp #$aa
+  bne gc_wait
+gc_done:
+  .as : .xl
+  lda #$00                                  ; #$00, never #$55: it would run as a command
+  sta @MCU_CMD
+  rts
+
+
+; ======================================================================
+;  gopt_build: GOX_TOP and the groups' tables, from Settings and GAMEOPT_BLK.  Carry set =
+;  there is at least one option to show.  .as/.xl, DP 0, DB $7E in and out.
+; ======================================================================
+gopt_build:
+  .as : .xl
+  rep #$20 : .al
+  lda #!GOX_TOP
+  sta FMX_TBL
+  sep #$20 : .as
+  ldx #!mtext_gopt_row
+  jsr fm_tab_head                           ; the title (FMX_TLEN = 4)
+  rep #$20 : .al
+  lda #!GOX_TOP+4
+  sta !GOX_TT
+  lda #!GOX_SUB
+  sta !GOX_TP
+  lda #!GOX_KV
+  sta !GOX_KP
+  lda #!GOX_TXT
+  sta !GOX_XP
+  lda #!GOX_LBL
+  sta !GOX_LP
+  lda #!menu_enttab_cfg+4                   ; Settings' first row
+  sta !GOX_RN
+  sep #$20 : .as
+gb_group:
+  .as : .xl
+  ; the next Settings row into GOX_R
+  ldy !GOX_RN
+  ldx #!GOX_R
+  lda #^menu_enttab_cfg
+  jsr gox_copy23
+  lda !GOX_R
+  bne gb_have_r
+  jmp gb_done                               ; type 0: the end of Settings
+gb_have_r:
+  .as : .xl
+  rep #$20 : .al
+  lda !GOX_RN
+  clc
+  adc #MENU_ENTRY_SIZE
+  sta !GOX_RN
+  sep #$20 : .as
+  lda !GOX_R
+  cmp #MTYPE_SUBMENU
+  bne gb_group                              ; Settings rows that open nothing of ours
+  ; a group: its table is built at GOX_TP, header copied as Settings has it
+  rep #$20 : .al
+  lda !GOX_TP
+  sta !GOX_TS
+  tax
+  lda !GOX_R+4
+  sta !GOX_CUR
+  tay
+  sep #$20 : .as
+  lda !GOX_R+6
+  sta !GOX_CUR+2
+  lda #$04
+  jsr gox_copy                              ; step + title
+  rep #$20 : .al
+  stx !GOX_TP
+  lda !GOX_CUR
+  clc
+  adc #$0004
+  sta !GOX_CUR
+  sep #$20 : .as
+gb_row:
+  .as : .xl
+  rep #$20 : .al
+  ldx !GOX_TP
+  cpx #!GOX_KV-MENU_ENTRY_SIZE-1            ; room for one more row and the end
+  sep #$20 : .as
+  bcc gb_row_room
+  jmp gb_group_end
+gb_row_room:
+  .as : .xl
+  ldy !GOX_CUR
+  ldx #!GOX_E
+  lda !GOX_CUR+2
+  jsr gox_copy23
+  lda !GOX_E
+  bne gb_have_e
+  jmp gb_group_end
+gb_have_e:
+  .as : .xl
+  rep #$20 : .al
+  lda !GOX_CUR
+  clc
+  adc #MENU_ENTRY_SIZE
+  sta !GOX_CUR
+  sep #$20 : .as
+  jsr gox_match                             ; one of the firmware's options? (GOX_I)
+  bcc gb_row
+  ; the row, as Settings has it, onto the group's table
+  rep #$20 : .al
+  ldx !GOX_TP
+  ldy #!GOX_E
+  sep #$20 : .as
+  lda #$7e
+  jsr gox_copy23
+  rep #$20 : .al
+  ldx !GOX_TP
+  lda !GOX_KP
+  sta @$7e0004, x                           ; +4: its value table, built below
+  lda !GOX_I
+  clc
+  adc #!GAMEOPT_BLK+GOB_VAL
+  sta @$7e0008, x                           ; +8: the game's byte
+  lda #$0000
+  sta @$7e000e, x                           ; +14..+16: no change hook (it acts on the global)
+  sta @$7e0014, x                           ; +20..+22: no greying predicate (it reads the
+  txa                                       ;   global too)
+  clc
+  adc #MENU_ENTRY_SIZE
+  sta !GOX_TP
+  sep #$20 : .as
+  lda #$00
+  sta @$7e0010, x
+  sta @$7e0016, x
+  lda #$7e
+  sta @$7e0006, x
+  lda #^GAMEOPT_BLK
+  sta @$7e000a, x
+  jsr gox_core                              ; a Game Boy core's name after the label
+  jsr gox_kv                                ; the value table and its "Default (..)"
+  jmp gb_row
+gb_group_end:
+  .as : .xl
+  rep #$20 : .al
+  lda !GOX_TS
+  clc
+  adc #$0004
+  cmp !GOX_TP
+  sep #$20 : .as
+  beq gb_skip                               ; a group with none of the options: dropped
+  jsr gox_fit
+  ldx !GOX_TP
+  lda #$00
+  sta @$7e0000, x                           ; the group table's end
+  inx
+  stx !GOX_TP
+  ; its row on the screen's table: Settings' submenu row, opening the group built here
+  rep #$20 : .al
+  ldx !GOX_TT
+  cpx #!GOX_SUB-MENU_ENTRY_SIZE-1
+  sep #$20 : .as
+  bcs gb_skip
+  ldy #!GOX_R
+  lda #$7e
+  jsr gox_copy23
+  rep #$20 : .al
+  ldx !GOX_TT
+  lda !GOX_TS
+  sta @$7e0004, x
+  txa
+  clc
+  adc #MENU_ENTRY_SIZE
+  sta !GOX_TT
+  sep #$20 : .as
+  lda #$7e
+  sta @$7e0006, x
+  jmp gb_group
+gb_skip:
+  .as : .xl
+  rep #$20 : .al
+  lda !GOX_TS
+  sta !GOX_TP                               ; the group's table is given back
+  sep #$20 : .as
+  jmp gb_group
+gb_done:
+  .as : .xl
+  ldx !GOX_TT
+  lda #$00
+  sta @$7e0000, x                           ; the screen's table's end
+  rep #$20 : .al
+  txa
+  cmp #!GOX_TOP+4
+  sep #$20 : .as
+  beq gb_empty
+  sec
+  rts
+gb_empty:
+  .as : .xl
+  clc
+  rts
+
+; gox_copy23 / gox_copy: A bytes (gox_copy23: one menu entry) from A_bank:Y ... to $7E:X.
+; gox_copy takes the count in A and the bank in GOX_CUR+2; gox_copy23 the bank in A.
+; Returns X, Y past them.  .as/.xl, DB $7E (kept).
+gox_copy23:
+  .as : .xl
+  pha
+  lda #MENU_ENTRY_SIZE
+  sta !GOX_CNT
+  pla
+  bra gxc_go
+gox_copy:
+  .as : .xl
+  sta !GOX_CNT
+  lda !GOX_CUR+2
+gxc_go:
+  .as : .xl
+  phb
+  pha
+  plb
+gxc_l:
+  .as : .xl
+  lda !0, y
+  sta @$7e0000, x
+  inx
+  iny
+  lda @GOX_CNT
+  dec
+  sta @GOX_CNT
+  bne gxc_l
+  plb
+  rts
+
+; gox_match: carry set when GOX_E is the row of one of the firmware's options, GOX_I = it.
+; The row has to be one show_menu edits from a value table, on a CFG byte.  .as/.xl.
+gox_match:
+  .as : .xl
+  lda !GOX_E
+  cmp #MTYPE_VALUE
+  bne gxm_no
+  lda !GOX_E+7
+  cmp #OPTTYPE_KVBYTE
+  bne gxm_no
+  lda !GOX_E+10
+  cmp #^CFG_ADDR
+  bne gxm_no
+  rep #$20 : .al
+  lda !GOX_E+8
+  sec
+  sbc #!CFG_ADDR                            ; the cfg_t offset
+  sta !GOX_OFF
+  lda @GAMEOPT_BLK+GOB_COUNT
+  and #$00ff
+  beq gxm_no16
+  tay                                       ; options left
+  ldx #$0000
+gxm_l:
+  .al : .xl
+  lda @GAMEOPT_BLK+GOB_OFF, x
+  and #$1fff
+  cmp !GOX_OFF
+  beq gxm_hit
+  inx
+  inx
+  dey
+  bne gxm_l
+gxm_no16:
+  .al : .xl
+  sep #$20 : .as
+gxm_no:
+  .as : .xl
+  clc
+  rts
+gxm_hit:
+  .al : .xl
+  lda @GAMEOPT_BLK+GOB_OFF, x
+  and #$6000
+  sta !GOX_CORE                             ; the core of a Game Boy game it is for
+  txa
+  lsr
+  sta !GOX_I
+  tax
+  sep #$20 : .as
+  lda @GAMEOPT_BLK+GOB_VAL, x
+  cmp #GOV_NA                               ; not on this board
+  beq gxm_no
+  sec
+  rts
+
+;  gox_core: the row just added (at X) is one only one core of a Game Boy game uses (the
+;  firmware's GOB_OFF bits, GOX_CORE): its label becomes "<label> (SGB)" / "(GBC)" in
+;  GOX_LBL, so the screen can show what either core of the game uses (a per-game GbcMode
+;  can move it from one to the other).  A label too long for it, or no room left: the label
+;  as it is.  .as/.xl, DP 0, DB $7E.
+gox_core:
+  .as : .xl
+  rep #$20 : .al
+  lda !GOX_CORE
+  beq gco_out
+  lda !GOX_LP
+  cmp #!GOX_LBLE-48
+  bcs gco_out
+  stx !GOX_ROWP
+  lda !GOX_E+1                              ; the label, as Settings has it
+  sta print_src
+  sep #$20 : .as
+  lda !GOX_E+3
+  sta print_bank
+  jsl @ui_call_resolve
+  jsr fm_env
+  .as : .xl
+  jsr gox_plen
+  .al : .xl
+  cmp #$0023                                ; + 6 within mtext_*'s 40
+  bcs gco_out
+  lda !GOX_LP
+  tay
+  clc
+  adc #$0028
+  sta !GOX_CNT
+  sep #$20 : .as
+  jsr gox_cat
+  .as : .xl
+  ldx #$0000
+  lda !GOX_CORE+1
+  cmp #$40
+  bne gco_c
+  ldx #$0007                                ; gco_gbc
+gco_c:
+  .as : .xl
+  lda @gco_sgb, x
+  sta !0, y
+  beq gco_end
+  inx
+  iny
+  bra gco_c
+gco_end:
+  .as : .xl
+  iny
+  rep #$20 : .al
+  ldx !GOX_ROWP
+  lda !GOX_LP
+  sta @$7e0001, x
+  sty !GOX_LP
+  sep #$20 : .as
+  lda #$7e
+  sta @$7e0003, x
+  rts
+gco_out:
+  .al : .xl
+  sep #$20 : .as
+  rts
+gco_sgb:
+  .byt " (SGB)", 0
+gco_gbc:
+  .byt " (GBC)", 0
+
+; gox_kv: the value table of the row just added (option GOX_I, its own table in GOX_E+4..6)
+; at GOX_KP: "Default (..)" first, keyed GOV_DEFAULT, then the option's own entries.
+; .as/.xl, DB $7E.
+gox_kv:
+  .as : .xl
+  rep #$20 : .al
+  ldx !GOX_KP
+  stx !GOX_TK
+  lda #GOV_DEFAULT                          ; a word key; the byte the menu edits is $ff
+  sta @$7e0000, x
+  lda !GOX_XP
+  sta @$7e0002, x
+  sep #$20 : .as
+  lda #$7e
+  sta @$7e0004, x
+  rep #$20 : .al
+  txa
+  clc
+  adc #$0005
+  tax
+  ldy !GOX_E+4
+  sep #$20 : .as
+  lda !GOX_E+6
+  phb
+  pha
+  plb
+gxk_l:
+  .as : .xl
+  rep #$20 : .al
+  lda !0, y
+  cmp #$ffff
+  beq gxk_end
+  cpx #!GOX_TXT-7                           ; room for this one and the end
+  bcs gxk_end
+  sta @$7e0000, x
+  lda !2, y
+  sta @$7e0002, x
+  sep #$20 : .as
+  lda !4, y
+  sta @$7e0004, x
+  rep #$20 : .al
+  txa
+  clc
+  adc #$0005
+  tax
+  tya
+  clc
+  adc #$0005
+  tay
+  bra gxk_l
+gxk_end:
+  .al : .xl
+  lda #$ffff
+  sta @$7e0000, x
+  inx
+  inx
+  plb
+  stx !GOX_KP
+  sep #$20 : .as
+  ; fall through
+
+; gox_deftxt: "Default (<the global's value>)" at GOX_XP for the table at GOX_TK, the value
+; named by the table's own entry for the global.  No room left: "Default" alone, where it
+; is.  A global the table does not name: "Default" alone.  .as/.xl, DB $7E.
+gox_deftxt:
+  .as : .xl
+  ldx #!text_gopt_default
+  jsr fm_str                                ; print_src/bank = the word, resolved
+  rep #$20 : .al
+  ldy !GOX_XP
+  cpy #!GOX_END-GOX_TXTMAX
+  bcc gxd_room
+  ldx !GOX_TK                               ; no room: the Default entry names the word itself
+  lda print_src
+  sta @$7e0002, x
+  sep #$20 : .as
+  lda print_bank
+  sta @$7e0004, x
+  rts
+gxd_room:
+  .al : .xl
+  tya
+  clc
+  adc #$0014                                ; the word: 20 bytes at most (even: a CJK pair
+  sta !GOX_CNT                              ;   is never cut)
+  sep #$20 : .as
+  jsr gox_cat
+  rep #$20 : .al
+  tya
+  sec
+  sbc !GOX_XP
+  sta !GOX_WLEN                             ; (gox_fit cuts a text back to it)
+  sep #$20 : .as
+  ldx !GOX_I
+  lda @GAMEOPT_BLK+GOB_GLOBAL, x
+  sta !GOX_OFF
+  stz !GOX_OFF+1
+  rep #$20 : .al
+  ldx !GOX_TK
+gxd_find:
+  .al : .xl
+  txa
+  clc
+  adc #$0005
+  tax
+  lda @$7e0000, x
+  cmp #$ffff
+  beq gxd_close
+  cmp !GOX_OFF
+  bne gxd_find
+  lda @$7e0002, x
+  sta print_src
+  sep #$20 : .as
+  lda @$7e0004, x
+  sta print_bank
+  phy
+  jsl @ui_call_resolve                      ; the menu language's word for the value
+  jsr fm_env
+  ply
+  lda #$20
+  sta !0, y
+  iny
+  lda #$28                                  ; '('
+  sta !0, y
+  iny
+  rep #$20 : .al
+  lda !GOX_XP
+  clc
+  adc #GOX_TXTMAX-2                         ; room for ')' and the end
+  sta !GOX_CNT
+  sep #$20 : .as
+  jsr gox_cat
+  lda #$29                                  ; ')'
+  sta !0, y
+  iny
+gxd_close:
+  .as : .xl
+  sep #$20 : .as
+  lda #$00
+  sta !0, y
+  iny
+  sty !GOX_XP
+  rts
+
+; gox_cat: the string at print_bank:print_src to $7E:Y, without its NUL, up to GOX_CNT;
+; Y = past it.  .as/.xl, DP 0, DB $7E.
+gox_cat:
+  .as : .xl
+  rep #$20 : .al
+  lda print_src
+  sta print_ptr
+  sep #$20 : .as
+  lda print_bank
+  sta print_ptr+2
+  tyx
+  ldy #$0000
+gxc2_l:
+  .as : .xl
+  cpx !GOX_CNT
+  bcs gxc2_d
+  lda [print_ptr], y
+  beq gxc2_d
+  sta !0, x
+  inx
+  iny
+  bra gxc2_l
+gxc2_d:
+  .as : .xl
+  txy
+  rts
+
+; gox_fit: the group just built (GOX_TS+4 .. GOX_TP) has to fit the screen: its longest
+; label plus its widest value at most GOX_LV.  A "Default (X)" that would pass that keeps
+; only its word -- the global's value is one row up in Settings.  The in-game screen
+; applies the same rule (igopt.i65 igo_geom1).  .as/.xl, DP 0, DB $7E.
+gox_fit:
+  .as : .xl
+  rep #$20 : .al
+  stz !GOX_LMAX
+  lda !GOX_TS
+  clc
+  adc #$0004
+  sta !GOX_ROWP
+gf_lbl:
+  .al : .xl
+  lda !GOX_ROWP
+  cmp !GOX_TP
+  bcs gf_cap
+  tax
+  lda @$7e0001, x                           ; the row's label
+  sta print_src
+  sep #$20 : .as
+  lda @$7e0003, x
+  sta print_bank
+  jsl @ui_call_resolve
+  jsr fm_env
+  jsr gox_plen
+  cmp !GOX_LMAX
+  bcc gf_lnext
+  sta !GOX_LMAX
+gf_lnext:
+  .al : .xl
+  lda !GOX_ROWP
+  clc
+  adc #MENU_ENTRY_SIZE
+  sta !GOX_ROWP
+  bra gf_lbl
+gf_cap:
+  .al : .xl
+  lda #GOX_LV
+  sec
+  sbc !GOX_LMAX
+  bcs gf_capok
+  lda #$0000
+gf_capok:
+  .al : .xl
+  sta !GOX_CAP
+  lda !GOX_TS
+  clc
+  adc #$0004
+  sta !GOX_ROWP
+gf_def:
+  .al : .xl
+  lda !GOX_ROWP
+  cmp !GOX_TP
+  bcs gf_done
+  tax
+  lda @$7e0004, x                           ; the row's value table (WRAM)
+  tax
+  lda @$7e0002, x                           ; its first entry's text: "Default (..)"
+  cmp #!GOX_TXT
+  bcc gf_dnext                              ; the plain word, where it is: nothing to cut
+  sta print_src
+  sep #$20 : .as
+  lda #$7e
+  sta print_bank
+  jsr gox_plen
+  cmp !GOX_CAP
+  bcc gf_dnext
+  beq gf_dnext
+  lda print_src
+  clc
+  adc !GOX_WLEN
+  tax
+  sep #$20 : .as
+  lda #$00
+  sta @$7e0000, x                           ; "Default" alone
+  rep #$20 : .al
+gf_dnext:
+  .al : .xl
+  lda !GOX_ROWP
+  clc
+  adc #MENU_ENTRY_SIZE
+  sta !GOX_ROWP
+  bra gf_def
+gf_done:
+  .al : .xl
+  sep #$20 : .as
+  rts
+
+; gox_plen: A(16) = the length of the string at print_bank:print_src.  .as in, .al out.
+gox_plen:
+  .as : .xl
+  rep #$20 : .al
+  lda print_src
+  sta print_ptr
+  sep #$20 : .as
+  lda print_bank
+  sta print_ptr+2
+  ldy #$0000
+gpl_l:
+  .as : .xl
+  lda [print_ptr], y
+  beq gpl_d
+  iny
+  cpy #$00ff
+  bne gpl_l
+gpl_d:
+  .as : .xl
+  rep #$20 : .al
+  tya
+  rts

@@ -566,6 +566,11 @@
    ever READS it. 32 B in the free $F483BC..$F48FFF gap, clear of the mh_* guide-picker
    block below ($F483B0..$F483BB) and of OVL_TMBUF ($F49000). */
 #define OVL_NONAME_BUF              $F483C0 /* 32 B: NUL-terminated placeholder, font-encoded. */
+/* MCU_PARAM[0..3] across a screen opened from the game info screen (cheats / guides in
+   manhost.a65 as mh_pbak, saves.a65, gameopt.a65 -- one at a time). In PSRAM because the
+   way there runs gi_dc_restore -> setup_gfx, which zeroes WRAM $7E8000-$7EFFFF: a backup in
+   that range came back as 0, and a Recents/Favorites info screen was rebuilt on entry #0. */
+#define GI_PBAK                     $F483B0
 #define OVL_NONAME_A                $83C0   /* 16-bit abs alias of OVL_NONAME_BUF for abs,Y stores under DBR=$F4 (the 65816 has long,X but NO long,Y). KEEP IN LOCKSTEP with OVL_NONAME_BUF -- same convention as OVL_RB/OVL_TMBUF in cheatlist.i65 and IGM_THM_GRAD_A above. */
 #define OVL_NONAME_MAX              32      /* buffer size: at most 31 visible chars + the NUL. */
 /* ---- localized ON/OFF token of each row of the in-game cheat list ----
@@ -579,6 +584,7 @@
 #define OVL_FLAG_ON                 0       /* slot offsets inside OVL_FLAG_BUF (8 B each: up to 4 */
 #define OVL_FLAG_OFF                8       /*   chars + NUL, padded so a slot is a pure index)    */
 #define OVL_FLAG_W                  4       /* token width in cells: the Russian OFF is the longest (cheatlist.i65 OVL_FLAG_COL). */
+/* $F48420-$F48425: the in-game GAME OPTIONS screen's scratch (igo_* in snes/igopt.i65). */
 #define OVL_CUR_OFF                 $F482E8 /* 1B: 0 = the cheat list draws its own '>' cursor (the $C0 fail-safe path); 1 = the $C8 shell suppresses it because the BAR marks the selection. Zeroed by the overlay on EVERY open, BEFORE the first list paint (ss_ovl_draw_full_row is the reader) -- PSRAM $F4 is not auto-cleared and survives reopens. The reader does a 16-bit lda + and #$00ff, so $F482E9 is fetched and discarded: keep it unallocated. */
 #define SS_OBC1_GATE                $FF0718 /* OBC1 savestate present flag (firmware-armed = fpga_conf==FPGA_OBC1, on Mk.II and Mk.III -- the OBC1 is purely reactive, no chip halt needed). Handler reads it to decide whether to capture/restore the OBC1 window. Free $FF0701..$FF07FF gap, after SRM_SLOT_STATUS (below the BPS breadcrumbs $FF0720-2E). Lockstep with SS_OBC1_GATE_ADDR in src/memmap.h. */
 #define SS_OBC1_SCRATCH             $F47000 /* PSRAM scratch for the OBC1 window image (2 KB = the SNES-visible $7800-$7FFF window: obc_lower + obc_upper mirror image + the 8 regs). Shares the coprocessor scratch slot (SA-1 IRAM / GSU cache / DSP snapshot); a game is never two chips. Captures/restores the state VISIBLE to the SNES, not the chip's internal BRAM (on Mk.II the unreachable obc_lower[512:1023] never enters the window). */
@@ -776,7 +782,9 @@
 #define MENU_CAP_MARKER             $C0FF02 /* DOCUMENTAL: the 4-byte menu capability marker in snes/header.a65 ('S','2',ver,rsvd). The MCU reads it with sram_readblock(SRAM_MENU_ADDR + 0xFF02) once per sysinfo entry to tell a v2-capable menu from an old one; nothing on the menu side reads this address. */
 #define MENU_CAP_FEAT_HXPAD         $01 /* bit 0 of MENU_CAP_FEAT: the menu publishes the far address of hx_pad at $C0FF06-08 (3 bytes, lo/hi/bank). Set in snes/header.a65, read by the firmware before it patches `jsl @hx_pad` into the nmihook stub. Lockstep with MENU_CAP_FEAT_HXPAD in src/memmap.h. */
 #define MENU_CAP_FEAT_EXPWARN       $02 /* bit 1 of MENU_CAP_FEAT: the menu answers EXP_ASK (the experimental-core warning). Lockstep with MENU_CAP_FEAT_EXPWARN in src/memmap.h. */
-#define MENU_CAP_FEAT               MENU_CAP_FEAT_HXPAD|MENU_CAP_FEAT_EXPWARN /* the feature bitmask the header stamps at $C0FF05 (the marker's old reserved byte). Add new bits here; never reuse one. */
+#define MENU_CAP_FEAT_GOPT          $04 /* bit 2 of MENU_CAP_FEAT: the menu publishes at $C0FF09-$C0FF13 what the in-game menu's game options screen reads of it (MENU_GOPT_PTRS). Read by snes/igopt.i65 only. */
+#define MENU_CAP_FEAT               MENU_CAP_FEAT_HXPAD|MENU_CAP_FEAT_EXPWARN|MENU_CAP_FEAT_GOPT /* the feature bitmask the header stamps at $C0FF05 (the marker's old reserved byte). Add new bits here; never reuse one. */
+#define MENU_GOPT_PTRS              $C0FF09 /* MENU_CAP_FEAT_GOPT: one bank byte ($C1, all five live there; utils/hdrcheck.py checks it at build), then the words of menu_enttab_cfg, strtab_lo, strtab_hi, strpool_bank, strtab_nlang_latin (snes/header.a65). */
 #define MENU_ADDR_HXPAD             $C0FF06 /* DOCUMENTAL: 3-byte far address of hx_pad, valid only when MENU_CAP_FEAT bit 0 is set. Lockstep with MENU_ADDR_HXPAD in src/memmap.h. */
 #define MENU_HXPAD_BANK             $C1 /* the bank hookxlate.a65 is linked into, stamped as a LITERAL into the far address at MENU_ADDR_HXPAD because header.a65 assembles to IPS and snescom refuses a segment-type extern (`^label`) there. If hookxlate.a65 ever changes banks this literal must change with it -- the link would stay silent, and the firmware would `jsl` into the wrong bank. Lockstep with MENU_HXPAD_BANK in src/memmap.h and with the `.link page` in snes/hookxlate.a65. */
 #define LAST_GAME                   $FF1420
@@ -869,6 +877,19 @@
 #define SVE_FLAGS                   0   /* bit0 = the file exists */
 #define SVE_DATE                    1   /* 16 chars + NUL, the menu language's date order */
 #define SVE_SIZE                    18  /* "8 KB" + NUL */
+#define CMD_GAMEOPT                 $51 /* per-game settings (src/gameopt.h): MCU_PARAM+8 = SVW_* (menu only; +0..7 as for that family's other commands), +9 = GOOP_*, +10 = option, +11 = value. In game it acts on the running game and the value takes effect at once (only an option with the live bit). The answer is GAMEOPT_BLK. Lockstep with SNES_CMD_GAMEOPT in src/snes.h. */
+#define GOOP_INFO                   0
+#define GOOP_SET                    1
+#define GAMEOPT_BLK                 $FF4900 /* 168 B, layout GAMEOPT_* in src/gameopt.h. Lockstep with SRAM_GAMEOPT_ADDR in src/memmap.h */
+#define GO_VERSION                  2   /* +2: the layout below */
+#define GOB_COUNT                   3   /* options in the firmware's list (gameopt_list) */
+#define GOB_RESULT                  4   /* 0 ok, 1 the file could not be written / the option cannot change now */
+#define GOB_VAL                     8   /* +8.. each option's value for this game: GOV_DEFAULT, GOV_NA, or the value */
+#define GOB_GLOBAL                  48  /* +48.. the global option's value */
+#define GOB_OFF                     88  /* +88.. word: the option's cfg_t offset (CFG_ADDR+it is its Settings row's value), $8000 = it may change while the game runs, $2000 / $4000 = a Game Boy game: only its SGB / GBC core uses it */
+#define GO_MAX                      40  /* GAMEOPT_MAX */
+#define GOV_DEFAULT                 $FF /* follow the global option */
+#define GOV_NA                      $FE /* not on this board: the row is left out */
 #define SVRES_OK                    0
 #define PCM_CTL_STOP                0
 #define PCM_CTL_PAUSE               1   /* freezes the DAC only -- the file stays open at its position */

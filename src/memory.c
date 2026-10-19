@@ -58,6 +58,7 @@ memory.c: RAM operations
 #include "sgb.h"
 #include "gbc.h"
 #include "fileman.h"
+#include "gameopt.h"
 #include "module.h"
 #include "nes.h"
 #include "nesave.h"
@@ -800,9 +801,8 @@ static void load_set_features(const load_ctx_t *c) {
     }
   }
 
-  if(cfg_is_onechip_transient_fixes() && !is_menu) {
-    romprops.fpga_features |= FEAT_2100;
-  }
+  /* 1CHIP transient fixes (CFG carries the game's own choice, gameopt_apply) */
+  if(!is_menu && CFG.onechip_transient_fixes) romprops.fpga_features |= FEAT_2100;
   romprops.fpga_features |= FEAT_2100_LIMIT(cfg_get_brightness_limit());
 
   /* enable Satellaview Base emulation only if no physical Satellaview Base unit is present */
@@ -1647,6 +1647,18 @@ uint32_t load_rom(uint8_t* filename, uint32_t base_addr, uint8_t flags) {
      NACK -> back to menu) must leave the menu sound intact, and the confirm blip
      gets to play across the SNES-side iris animation instead of being cut off. */
 
+  /* Per-game settings (gameopt.h): from here to the next load CFG holds the game's values
+     over the globals -- identification (smc_id, gbc_id...), the cores' feature bits, the
+     hooks, the savestates and the console players all read CFG after this point.  BEFORE
+     load_open: reading the file goes through file_handle, which from load_open on holds
+     the ROM being streamed.  Keyed off the game as picked (filename here, before a console
+     player takes its place) and current_ips_srm_source (its patch), like its saves.  Not on
+     the recore reload: the same game, and CFG already holds its values. */
+  if(!ips_recore_active) {
+    gameopt_restore();
+    if(!c.is_menu) gameopt_apply(game_sidecar_src(filename));
+  }
+
   if(!load_open(&c)) return 0;
 
   if(!load_stage_consoles(&c)) return 0;
@@ -1863,6 +1875,10 @@ void init(uint8_t *filename) {
     igmenu_stage();
     /* Stage the SAVES-tab status block for the in-game menu (game load only). */
     saveinfo_stage(filename);
+    /* and the game options screen's (Y at the tab bar); the in-game readers of the CFG
+       block (the HELP screen's combos, the STATES tab) see the game's values */
+    gameopt_stage(GAMEOPT_RES_OK);
+    cfg_load_to_menu();
     /* Stage the in-game MANUAL-tab meta (<rom>.man header/index -> MANUAL_META $FF0760).
        Bounded + fail-safe: absent/bad/CFG-off just leaves the tab "not found".
        INVARIANT -- the game load MUST keep calling the NON-cached manual_stage_meta():
@@ -2156,38 +2172,15 @@ static const char *save_src(uint8_t *filename) {
   return current_ips_srm_source[0] ? (const char *)current_ips_srm_source : (const char *)filename;
 }
 
-/* The .slot sidecar, <saves>/<BB>/<stem>.slot, keyed like the .srm: byte 0 = the battery
-   save slot the game starts with, byte 1 = its savestate slot, each ASCII '1'..'4'.  A
-   sidecar from before the savestate byte has one byte (savestate slot 1), and a firmware of
-   then reads byte 0 only.  0xff = no valid byte. */
-static void slot_sidecar_read(const char *src, uint8_t *srm, uint8_t *ss) {
-  char sc[256];
-  uint8_t b[2];
-  UINT br = 0;
-  *srm = *ss = 0xff;
-  if(path_asset(sc, sizeof(sc), SAVE_BASEDIR, src, ".slot") < 0) return;
-  file_open((uint8_t*)sc, FA_READ);
-  if(!file_res) f_read(&file_handle, b, 2, &br);
-  file_close();
-  file_res = 0;   /* absent/unreadable sidecar is fine -> slot 1 */
-  if(br >= 1 && b[0] >= '1' && b[0] < '1' + SRM_SLOT_COUNT) *srm = b[0] - '1';
-  if(br >= 2 && b[1] >= '1' && b[1] < '1' + SS_SLOT_COUNT) *ss = b[1] - '1';
+const char *game_sidecar_src(uint8_t *filename) {
+  return save_src(filename);
 }
 
-static int slot_sidecar_write(const char *src, uint8_t srm, uint8_t ss) {
-  char sc[256];
-  uint8_t b[2];
-  UINT bw = 0;
-  if(path_asset(sc, sizeof(sc), SAVE_BASEDIR, src, ".slot") < 0) return 0;   /* would truncate */
-  path_asset_mkdir(sc);                       /* create only AFTER the name exists */
-  b[0] = '1' + (srm < SRM_SLOT_COUNT ? srm : 0);
-  b[1] = '1' + (ss < SS_SLOT_COUNT ? ss : 0);
-  file_open((uint8_t*)sc, FA_CREATE_ALWAYS | FA_WRITE);
-  if(!file_res) f_write(&file_handle, b, 2, &bw);
-  file_close();
-  file_res = 0;
-  return bw == 2;
-}
+/* The slots a game starts with (the battery save's and the savestate's, 0..3; 0xff = none):
+   SaveGameSlot / SaveStateSlot of the game's per-game file, keyed like the .srm
+   (gameopt.h, which also reads the .slot sidecar of before). */
+#define slot_sidecar_read  gameopt_slots
+#define slot_sidecar_write gameopt_slots_set
 
 /* Slot-aware .srm path for the load that is starting.  Unlike migrate_and_load_srm this
    never renames a <rom>.srm out of the ROM's folder (that path rewrites `filename` in
@@ -2222,7 +2215,7 @@ void srm_slot_save(uint8_t *filename, uint8_t slot) {
   srm_slot_sel = slot;   /* NEVER touch the live srm_slot -- applies on the next load */
 }
 
-/* The savestate slot a game starts with (0..3), from its .slot sidecar; src = the
+/* The savestate slot a game starts with (0..3), from its per-game file; src = the
    savestates' key (ss_base in savestate.c). */
 uint8_t slot_sidecar_state(const char *src) {
   uint8_t srm, ss;

@@ -23,7 +23,7 @@ extern snes_romprops_t romprops;
    cfg_get_listed_game. */
 /* The savestate slot the running game started with (1..4), 0 when it has no savestate
    slots: the slot picked in the game (the in-game menu's STATES tab, the change-slot combo)
-   is written back to its .slot sidecar when it differs (savestate_slot_persist). */
+   is written back to its per-game file (SaveStateSlot, gameopt.h) when it differs (savestate_slot_persist). */
 static uint8_t ss_slot_start;
 
 static const char *ss_base(void) {
@@ -227,7 +227,7 @@ void savestate_program() {
   if(savestate_ok) {
     sram_writeshort(0x0101, SS_REQ_ADDR);
     sram_writebyte(CFG.loadstate_delay, SS_DELAY_ADDR);
-    /* the slot the game starts with: the saves screen's choice (.slot sidecar), 1..4 */
+    /* the slot the game starts with: the saves screen's choice (SaveStateSlot of the per-game file), 1..4 */
     ss_slot_start = CFG.enable_savestate_slots ? 1 + slot_sidecar_state(ss_base()) : 0;
     sram_writebyte(ss_slot_start, SS_SLOTS_ADDR);
     sram_writebyte(CFG.enable_ingame_savestate, SS_CTRL_ADDR);
@@ -512,7 +512,7 @@ void save_backup_state() {
   savestate_slot_persist();
 }
 
-/* The game's savestate slot, when it changed since the game started, to its .slot sidecar:
+/* The game's savestate slot, when it changed since the game started, to its per-game file:
    the next start of the game comes back on it.  From a savestate save/load (the SNES is
    frozen and the card busy anyway) and from prepare_reset (leaving the game).  No-op for a
    game without savestate slots. */

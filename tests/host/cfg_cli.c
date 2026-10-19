@@ -42,6 +42,11 @@ extern const cfg_t CFG_DEFAULT;
    the link honest if that ever changes. */
 mcu_status_t STM;
 
+/* cfg_save / cfg_get_from_menu step around a game's per-game values (src/gameopt.c);
+   with no game loaded both are no-ops.  Weak: run_gameopt.sh links the real ones. */
+__attribute__((weak)) void gameopt_swap(void) { }
+__attribute__((weak)) void gameopt_restore(void) { }
+
 /* ---- virtual SD card ----------------------------------------------------
  * Every firmware path is absolute; re-root it under build/ so "/sd2snes/x"
  * becomes "build/sd2snes/x".  Callers may hold two mapped paths at once
@@ -286,6 +291,9 @@ static void host_sram_init(void) {
   host_sram = calloc(SDRAM_SIZE, 1);
   if (!host_sram) { fprintf(stderr, "cfg_cli: calloc failed\n"); exit(99); }
 }
+
+/* for a CLI that links this file without its main (run_gameopt.sh) */
+void cfg_cli_sram_init(void) { if (!host_sram) host_sram_init(); }
 
 void sram_writebyte(uint8_t val, uint32_t addr) { host_sram[addr & SDRAM_MASK] = val; }
 uint8_t sram_readbyte(uint32_t addr) { return host_sram[addr & SDRAM_MASK]; }

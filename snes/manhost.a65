@@ -41,7 +41,7 @@
 ; end at $F483AD, OVL_TMBUF starts at $F49000).  Words, accessed @long, always written
 ; before read (PSRAM is stale).
 #define man_pad_prev    $F4810A    ; previous pad word (edge detection)
-#define mh_pbak         $F483B0    ; 4B: MCU_PARAM[0..3] across the viewer + the restore READDIR
+#define mh_pbak         GI_PBAK    ; 4B: MCU_PARAM[0..3] across the viewer + the restore READDIR (memmap.i65)
 #define mh_cursor       $F483B4    ; word: guide picker cursor 0..count-1
 #define mh_count        $F483B6    ; word: guide count, clamped to MH_MAX_GUIDES
 #define mh_k            $F483B8    ; word: picker draw-loop index

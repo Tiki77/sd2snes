@@ -68,7 +68,7 @@ extern uint8_t srm_slot_sel;  /* selected/next slot (== sidecar). == srm_slot at
                                  SET command writes the sidecar + updates this; applies next load. */
 /* Build the slot's file extension (".srm" for slot 0, ".0N.srm" N=slot+1 for 1..3) into ext. */
 void srm_slot_ext(char *ext, size_t extlen, uint8_t slot);
-/* Read the /sd2snes/saves/<stem>.slot sidecar into srm_slot/srm_slot_sel (both 0 when
+/* Read the game's SaveGameSlot (its per-game file, gameopt.h) into srm_slot/srm_slot_sel (both 0 when
    CFG off / absent / invalid). Called at game load. Bounded (one f_read). */
 void srm_slot_load(uint8_t *filename);
 /* Write the sidecar (in-game SET). Updates srm_slot_sel; NEVER touches the live srm_slot.
@@ -132,6 +132,9 @@ void sram_readlongblock(uint32_t* buf, uint32_t addr, uint16_t count);
 uint16_t sram_writeblock(void* buf, uint32_t addr, uint16_t size);
 void save_srm(uint8_t* filename, uint32_t sram_size, uint32_t base_addr);
 void saveinfo_stage(uint8_t *filename);
+/* The name a game's sidecars in /sd2snes/saves are keyed off: the patch of a patched
+   load, the ROM otherwise (what the .srm and the per-game .yml use). */
+const char *game_sidecar_src(uint8_t *filename);
 extern uint8_t current_ips_srm_source[256];
 extern uint8_t current_ips_flags;
 extern uint8_t rom_export_active;

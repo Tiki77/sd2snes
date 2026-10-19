@@ -409,7 +409,10 @@ def main():
     # (const_lang_fm.a65, its own tables + pool), so they cost nothing in the full $C0-$C2.
     # The bank is not resident everywhere (the Ficha's guide viewer borrows it), so these
     # labels must never be reached from code outside $C3: resolve_str would not know them.
-    FM_PREFIXES = ("text_fm_", "mtext_fm_", "mdesc_fm_")
+    # text_gopt_* / mtext_gopt_* / mdesc_gopt_*: the game options screen (gameopt.a65), the
+    # other tenant of $C3, same rules.
+    FM_PREFIXES = ("text_fm_", "mtext_fm_", "mdesc_fm_",
+                   "text_gopt_", "mtext_gopt_", "mdesc_gopt_")
     out, order, fm_neutral = [], [], []
     for line in lines:
         m = LINE_RE.match(line)

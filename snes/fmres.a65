@@ -195,16 +195,72 @@ fm_menu_hook:
   php
   sep #$20 : .as
   lda @FM_ARM
-  beq fmh_out
+  beq fmh_lists
   lda #$00
   sta @FM_ARM
   jsl @fm_bank_ok
   bcc fmh_out
   plp
   jmp @fm_ctx_build         ; rtl straight back into show_menu
+; Unarmed: the Recents / Favorites context menus get the game options row (gameopt.a65),
+; recognised by their table (DBR:X, both the plain and the game info variant).
+fmh_lists:
+  .as
+  rep #$10 : .xl
+  phb
+  pla
+  cmp #^menu_enttab_recent_context
+  bne fmh_l2
+  cpx #!menu_enttab_recent_context
+  beq fmh_recent
+fmh_l2:
+  .as : .xl
+  cmp #^menu_enttab_recent_context_gi
+  bne fmh_l3
+  cpx #!menu_enttab_recent_context_gi
+  beq fmh_recent
+fmh_l3:
+  .as : .xl
+  cmp #^menu_enttab_filesel_favorites_context
+  bne fmh_l4
+  cpx #!menu_enttab_filesel_favorites_context
+  beq fmh_fav
+fmh_l4:
+  .as : .xl
+  cmp #^menu_enttab_filesel_favorites_context_gi
+  bne fmh_out
+  cpx #!menu_enttab_filesel_favorites_context_gi
+  bne fmh_out
+fmh_fav:
+  .as : .xl
+  lda #SVW_FAV
+  bra fmh_list
+fmh_recent:
+  .as : .xl
+  lda #SVW_RECENT
+fmh_list:
+  .as : .xl
+  jsl @fm_bank_ok           ; keeps A
+  bcc fmh_out
+  plp
+  jmp @gopt_list_build      ; gameopt.a65, rtl straight back into show_menu
 fmh_out:
   plp
   rtl
+
+; L on the game info screen (gameinfo.a65): the game options screen (gameopt.a65, which
+; rtl's back to the info screen).
+gopt_from_gi:
+  jsl @fm_bank_ok
+  bcs gfg_go
+  php
+  sep #$20 : .as
+  lda #$04                  ; error blip
+  sta @SFX_MAILBOX
+  plp
+  rtl
+gfg_go:
+  jmp @gopt_gi
 
 ; ======================================================================
 ;  fm_ctx_only: Y on an entry with no context menu of its own (a folder, "..", a card

@@ -48,6 +48,7 @@
 #include "hwinfo.h"
 #include "msu1.h"   /* menu_sfx_* : menu sound effects via the MSU-1 DAC */
 #include "module.h" /* module_idle: the open card module (PCM / NSF player, SPC7110 RTC) */
+#include "gameopt.h"
 #include "gameinfo.h" /* gameinfo_fmv_idle_check : stop a lingering FMV when its screen closes */
 #include "cheat.h"
 #include "cheatedit.h"
@@ -568,6 +569,18 @@ uint8_t game_cmd_serve(uint8_t cmd) {
       msu_dac_hold();
       srm_slot_save(file_lfn, (uint8_t)(snes_get_mcu_param() & 0x03));
       saveinfo_stage(file_lfn);
+      msu_dac_release();
+      break;
+    case SNES_CMD_GAMEOPT:
+      /* in-game game options screen: persist the option to the game's per-game file and
+         apply it to the running game at once (gameopt.c) -- the same frozen-SNES SD write as
+         SET_SRM_SLOT.  current_filename, not file_lfn: a savestate's slot scan rereads
+         Recents into file_lfn. */
+      msu_dac_hold();
+      gameopt_command(game_sidecar_src((uint8_t*)current_filename),
+                      snescmd_readbyte(SNESCMD_MCU_PARAM + 9),
+                      snescmd_readbyte(SNESCMD_MCU_PARAM + 10),
+                      snescmd_readbyte(SNESCMD_MCU_PARAM + 11), 1);
       msu_dac_release();
       break;
     case SNES_CMD_CHEAT_EDIT:

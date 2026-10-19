@@ -288,6 +288,8 @@ gin_loop:
   bne gin_cheats
   lda pad_r                  ; R -> the game's saves (normal screen only too)
   bne gin_saves
+  lda pad_l                  ; L -> the game's options (normal screen only too)
+  bne gin_gopt
   lda gi_query_fill          ; Up/Down jump games -- FILE BROWSER only (Recents/Favorites
   beq gin_loop               ; carry a list index in MCU_PARAM, not filesel_sel)
   lda pad_up
@@ -315,6 +317,10 @@ gin_saves:
   ; saves_from_gi ($C1): the same shape as cheathost_from_gi -- the screen over the
   ; browser, this one rebuilt on the way back, gin_drain for the B still held.
   jsl @saves_from_gi
+  jmp gin_drain
+gin_gopt:
+  ; gopt_from_gi (fmres.a65 -> gameopt.a65, $C3): the same shape as saves_from_gi
+  jsl @gopt_from_gi
   jmp gin_drain
 gin_full:
   ; --- full-description (Y) mode ---

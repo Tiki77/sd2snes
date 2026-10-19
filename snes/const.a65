@@ -237,6 +237,7 @@ text_igm_pergame                  .byt "* combo set for this game (savestate_inp
 text_igm_hdr_keys                 .byt "MENU KEYS", 0
 text_igm_keys1                    .byt "Left/Right: tab   L/R: first/last   A: open", 0
 text_igm_keys2                    .byt "B: back   START: close   SELECT: this help", 0
+text_igm_keys3                    .byt "Y: options for this game", 0
 text_igm_unavail                  .byt "unavailable for this game", 0
 ; ---- D-pad direction names used INSIDE a rendered combo (ig_combo_draw). The other button
 ;      names (A B X Y L R Start Select) are printed on the pad and stay neutral ASCII in
@@ -801,7 +802,7 @@ text_cheat      .byt "Cheats for ", 0
 ; directly, and the in-game list (a separate $C2 link that cannot reach this pool)
 ; gets text_igm_cheat_noname staged into OVL_NONAME_BUF by whichever host opened it.
 text_igm_ch_none      .byt "No cheats", 0
-text_igm_ft_tab       .byt "<>:TAB L/R:ENDS A:OPEN SEL:HELP B:CLOSE", 0
+text_igm_ft_tab       .byt "<>:TAB A:OPEN Y:OPTIONS SEL:HELP B:CLOSE", 0
 text_igm_ft_cheats    .byt "A:ON/OFF Y:EDIT SEL:ADD X:CHEATS B:BACK", 0
 text_igm_ft_generic   .byt "A:SELECT B:BACK", 0
 text_igm_master_on    .byt "CHEATS: ON", 0
@@ -809,6 +810,14 @@ text_igm_master_off   .byt "CHEATS: OFF", 0
 text_igm_ft_ce_edit   .byt "A:EDIT SEL:ADD CODE Y:REMOVE B:BACK", 0
 text_igm_ft_ce_kbd    .byt "A:TYPE Y:DELETE SEL:SPACE X:OK B:CANCEL", 0
 text_igm_ft_help      .byt "B:BACK START:CLOSE", 0
+text_igm_ft_gopt      .byt "A:CHANGE B:BACK START:CLOSE", 0
+text_igm_ft_gopt_ed   .byt 241, 242, ":VALUE A:OK B:CANCEL", 0
+; ---- In-game GAME OPTIONS screen (Y at the tab bar, igopt.i65). Lockstep with GOPT_LABELS +
+;      the IGM_GO_* indices. The options' names and values are the menu's own (read in game).
+text_igm_go_title     .byt "Game options", 0
+text_igm_go_default   .byt "Default", 0
+text_igm_go_fail      .byt "Could not write to the SD card", 0
+text_igm_go_locked    .byt "Change it from the menu, before the game starts", 0
 ; ---- In-game cheat EDITOR (CHEATS tab: Y = edit, Select = add). ENGLISH base; per-language
 ;      dicts carry the translations; gen_igmenu_lang.py emits igm_cheatedit_tbl (bank $C8).
 ;      Lockstep with CHEATEDIT_LABELS + the IGM_CE_* indices in snes/cheatedit_defs.i65.
@@ -866,15 +875,17 @@ text_gi_publisher .byt "Publisher", 0
 text_gi_year      .byt "Year", 0
 text_gi_players   .byt "Players", 0
 text_gi_genre     .byt "Genre", 0
-text_gi_footer    .byt "A: Play   B: Back   Y: Description   Sel: Cheats   R: Saves", 0
-text_gi_footer_nav .byt "A:Play B:Back Y:Desc Sel:Cheats R:Saves ", 241, 242, ":Game", 0
+; No "B: Back" on the four main footers: L (the game's options) took its room, and B goes
+; back on every screen of the menu.
+text_gi_footer    .byt "A: Play  Y: Description  Sel: Cheats  L: Options  R: Saves", 0
+text_gi_footer_nav .byt "A:Play Y:Desc Sel:Cheats L:Options R:Saves ", 241, 242, ":Game", 0
 text_gi_footer_full .byt "B: Back   Up/Down: Scroll", 0
 ; Footer variants shown when the game HAS a readable guide, i.e. when X opens the viewer
 ; (gi_man_avail in gameinfo.a65 is the single gate both these and the handler answer to).
 ; "Guides" tracks the in-game GUIDES tab label per language, not the document-type slug.
 ; Plus the key legend the guide PICKER puts on the same row while it owns the body.
-text_gi_footer_man .byt "A:Play B:Back Y:Desc X:Guides Sel:Cheats R:Saves", 0
-text_gi_footer_nav_man .byt "A:Play B:Back Y:Desc X:Guides Sel:Cheats R:Saves ", 241, 242, ":Game", 0
+text_gi_footer_man .byt "A:Play Y:Desc X:Guides Sel:Cheats L:Options R:Saves", 0
+text_gi_footer_nav_man .byt "A:Play Y:Desc X:Guides Sel:Cheats L:Options R:Saves ", 241, 242, ":Game", 0
 text_gi_footer_pick .byt "A: Open   B: Back", 0
 ; Document-type labels for the GUIDES picker on the game-info screen (X). Same five slugs
 ; as the in-game shell's text_igm_mn_slug_*, but build_const.py DROPS every text_igm_*
@@ -984,3 +995,8 @@ mdesc_fm_scut           .byt "Put the marked entries on the clipboard, to move t
 mdesc_fm_selall         .byt "Mark every entry of this folder", 0
 mdesc_fm_selnone        .byt "Unmark every entry", 0
 mdesc_fm_selexit        .byt "Leave the selection mode", 0
+
+; ---- the game options screen (gameopt.a65, bank $C3, same rules as text_fm_*) ----
+mtext_gopt_row          .byt "Game options", 0
+mdesc_gopt_row          .byt "Settings for this game only. Default follows the global option", 0
+text_gopt_default       .byt "Default", 0

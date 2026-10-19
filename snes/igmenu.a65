@@ -654,6 +654,12 @@ ig_not_viewer:
 	bcc ig_b_leave                          ;   consume B first (same contract as trainer_back)
 	jmp ig_loop_tail
 ig_b_not_cheats:
+	cmp #$0006
+	bne ig_b_not_gopt
+	jsr gopt_back                           ; GAME OPTIONS: B cancels a value being edited
+	bcc ig_b_leave                          ;   first (igopt.i65), like the menu's options
+	jmp ig_loop_tail
+ig_b_not_gopt:
 	cmp #$0004
 	bne ig_b_leave
 	jsr trainer_back                        ; TRAINER has screens of its own (results ->
@@ -745,8 +751,17 @@ ig_tb_chk_sel:
 	lda @ovl_edge
 	bit #$2000                              ; SELECT -> the HELP screen (every shortcut)
 	sep #$20 : .as
-	beq ig_loop_tail
+	beq ig_tb_chk_y
 	jsr help_open
+	bra ig_loop_tail
+ig_tb_chk_y:
+	.as
+	rep #$20 : .al
+	lda @ovl_edge
+	bit #$4000                              ; Y -> the GAME OPTIONS screen (igopt.i65)
+	sep #$20 : .as
+	beq ig_loop_tail
+	jsr gopt_open
 ig_loop_tail:
 	sep #$20 : .as
 	- lda @$004212 : bmi -                  ; wait out of vblank
@@ -790,10 +805,10 @@ ig_focus_leave:
 	php
 	rep #$30 : .al : .xl
 	lda @active_tab : and #$00ff
-	cmp #$0005
-	bne ifl_normal
-	jsr help_close                                        ; HELP screen: B goes back to the tab
-	plp                                                   ;   it was opened over
+	cmp #IGMENU_TABS
+	bcc ifl_normal
+	jsr help_close                                        ; HELP / GAME OPTIONS (off the bar): B
+	plp                                                   ;   goes back to the tab it was opened over
 	rts
 ifl_normal:
 	.al : .xl
@@ -1020,6 +1035,9 @@ cde_lang_ok:
 #define IGM_SH_FT_CE_EDIT 5
 #define IGM_SH_FT_CE_KBD  6
 #define IGM_SH_FT_HELP    7
+#define IGM_SH_FT_GOPT    8
+#define IGM_SH_FT_GOPT_ED 9
+#define igo_editing       $F48434   ; GAME OPTIONS: 1 = a value is being edited (igopt.i65)
 
 ; ---- draw shell-chrome string A(16)=line index centered on absolute row X(16).
 ;      Sets sst_lang itself, so it works from any tab. DBR is set here. ----
@@ -3190,8 +3208,19 @@ ig_ft_cheats:
 ig_ft_generic:
 	.al : .xl
 	cmp #$0005
-	bne ig_ft_gen2
+	bne ig_ft_gopt
 	lda #IGM_SH_FT_HELP                       ; HELP screen: nothing to select
+	bra ig_ft_go
+ig_ft_gopt:
+	.al : .xl
+	cmp #$0006
+	bne ig_ft_gen2
+	lda @igo_editing
+	beq ig_ft_gopt_l
+	lda #IGM_SH_FT_GOPT_ED                    ; GAME OPTIONS, a value being edited
+	bra ig_ft_go
+ig_ft_gopt_l:
+	lda #IGM_SH_FT_GOPT                       ; GAME OPTIONS screen: A edits a value
 	bra ig_ft_go
 ig_ft_gen2:
 	.al : .xl
@@ -3534,6 +3563,9 @@ igb_content:
 	cmp #$0002 : beq igb_t_saves
 	cmp #$0003 : beq igb_t_guides
 	cmp #$0004 : beq igb_t_trainer
+	cmp #$0006 : bne igb_t_help
+	jmp igb_gopt_target                          ; tab 6 (GAME OPTIONS, igopt.i65): the option row
+igb_t_help:
 	jmp igb_help_target                          ; tab 5 (HELP): no cursor -> hide the BAR
 	                                             ;   (body in ighelp.i65, same reason as below)
 
@@ -3970,6 +4002,8 @@ ig_frame_if_static:
 	lda @active_tab
 	and #$00ff
 	beq ifs_skip                                  ; tab 0 (Cheats) -> no frame
+	cmp #$0006
+	beq ifs_skip                                  ; tab 6 (GAME OPTIONS) frames its own boxes
 	dec
 	asl : asl                                     ; (tab-1)*4 -> geometry record
 	tax
@@ -4080,6 +4114,7 @@ iot_done:
 #include "trainer.i65"
 #include "cheatedit.i65"           ; cheat EDITOR code (uses tr_nav_repeat / tr_side_repair)
 #include "ighelp.i65"              ; HELP screen (SELECT at the bar) + the pad-combo renderer
+#include "igopt.i65"               ; GAME OPTIONS screen (Y at the bar): the per-game options
 
 ; ======================================================================
 ;  Data (bank $C8; never executed).
@@ -4091,6 +4126,7 @@ tab_enter_tbl:
 	.word manual_enter                       ; 3 GUIDES (image viewer prompt)
 	.word trainer_enter                      ; 4 TRAINER (WRAM search)
 	.word help_enter                         ; 5 HELP   (off the bar: SELECT opens it, ighelp.i65)
+	.word gopt_enter                         ; 6 GAME OPTIONS (off the bar: Y opens it, igopt.i65)
 tab_input_tbl:
 	.word cheats_input                       ; 0 CHEATS
 	.word states_input                       ; 1 SAVESTATES
@@ -4098,6 +4134,7 @@ tab_input_tbl:
 	.word manual_input                       ; 3 GUIDES: list nav / A -> enter the viewer
 	.word trainer_input                      ; 4 TRAINER
 	.word help_input                         ; 5 HELP  (SELECT closes it; B comes via ig_focus_leave)
+	.word gopt_input                         ; 6 GAME OPTIONS (Y closes it; B via ig_focus_leave)
 tab_tick_tbl:
 	.word cheats_tick                        ; 0 CHEATS
 	.word ig_noop                            ; 1 SAVESTATES
@@ -4105,6 +4142,7 @@ tab_tick_tbl:
 	.word ig_noop                            ; 3 GUIDES
 	.word ig_noop                            ; 4 TRAINER
 	.word ig_noop                            ; 5 HELP
+	.word ig_noop                            ; 6 GAME OPTIONS
 tab_leave_tbl:
 	.word cheats_leave                       ; 0 CHEATS
 	.word ig_noop                            ; 1 SAVESTATES
@@ -4112,6 +4150,7 @@ tab_leave_tbl:
 	.word ig_noop                            ; 3 GUIDES
 	.word trainer_leave                      ; 4 TRAINER (persist the session block)
 	.word ig_noop                            ; 5 HELP
+	.word ig_noop                            ; 6 GAME OPTIONS
 
 ; ---- two-level focus: A at the tab bar drills into a tab's content. Tab 0 (Cheats) un-greys +
 ;      shows the cursor; tabs 1-4 just take content focus (their input becomes live). ----
@@ -4122,6 +4161,7 @@ tab_focus_tbl:
 	.word ig_focus_setbit1                   ; 3 GUIDES (manual_input then A -> viewer)
 	.word ig_focus_setbit1                   ; 4 TRAINER
 	.word ig_focus_setbit1                   ; 5 HELP
+	.word ig_focus_setbit1                   ; 6 GAME OPTIONS
 
 ; Tab icons: 6 x 8x8 1bpp (bit set = ink). Order = tab order (Cheats/Savestates/Saves/Guides/Trainer/Help).
 ; Uploaded to OBJ tiles 0..4 by ig_obj_load; ig_obj_tabbar draws ONE sprite (tile = active_tab)

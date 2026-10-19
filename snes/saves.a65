@@ -56,7 +56,7 @@
 #define SV_CROW     $7E92E7     ; the row whose text a confirm box shows
 #define SV_ROWMAP   $7E92E8     ; 8 B: row -> kind << 4 | slot
 #define SV_DSTMAP   $7E92F0     ; 4 B: destination row -> slot
-#define SV_PBAK     $7E92F4     ; 4 B: MCU_PARAM[0..3] across the screen (game info screen)
+#define SV_PBAK     GI_PBAK      ; 4 B: MCU_PARAM[0..3] across the screen (game info screen, memmap.i65)
 #define SV_SAVE     $7E92F8     ; 4 levels x SV_SAVEW: the caller's window/list state
 #define SV_SAVEW    11
 #define SV_E        $7E9330     ; the entry being written, as it goes into a table (23 B)

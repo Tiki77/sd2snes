@@ -11,6 +11,7 @@
 #include "rtc.h"
 #include "snes.h"
 #include "util.h"
+#include "gameopt.h"
 
 /* The SNES menu pokes config bytes by hard-coded offset (snes/memmap.i65,
    CFG_*=CFG_ADDR+$nn).  Pinning the C layout to that map is what stops an
@@ -353,9 +354,38 @@ static const cfg_item_t cfg_items[] = {
 
 #define CFG_NITEMS (sizeof(cfg_items) / sizeof(cfg_items[0]))
 
+/* The byte options (true/false and numbers) by their cfg_t offset: the per-game file
+   (gameopt.c) takes their keys, values and clamps from here, never a copy. */
+static const cfg_item_t *cfg_byte_item(uint16_t off) {
+  for(unsigned i = 0; i < CFG_NITEMS; i++)
+    if(cfg_items[i].off == off && cfg_items[i].kind <= CK_NIB) return &cfg_items[i];
+  return NULL;
+}
+
+const char *cfg_key_at(uint16_t off, uint8_t *isbool) {
+  const cfg_item_t *it = cfg_byte_item(off);
+  if(isbool) *isbool = it && it->kind == CK_BOOL;
+  return it ? it->key : NULL;
+}
+
+/* A scalar as cfg_load stores it: non-zero is true, a nibble is masked, and the range
+   check is on the long, both ways, before the narrowing (see the clamp note above). */
+static uint8_t cfg_scalar(const cfg_item_t *it, long v) {
+  if(it->kind == CK_BOOL) return v != 0;
+  if(it->kind == CK_NIB)  return v & 0xf;
+  if(it->clamp && (v < 0 || v > (long)(it->clamp >> 4))) return it->clamp & 0xf;
+  return (uint8_t)v;
+}
+
+uint8_t cfg_scalar_at(uint16_t off, long v) {
+  const cfg_item_t *it = cfg_byte_item(off);
+  return it ? cfg_scalar(it, v) : 0;
+}
+
 int cfg_save() {
   char buttons[13];
 
+  gameopt_swap();      /* a game's own values never reach config.yml: the globals go */
   file_open((uint8_t*)CFG_FILE, FA_CREATE_ALWAYS | FA_WRITE);
   f_puts("---\n", &file_handle);
   for(unsigned i = 0; i < CFG_NITEMS; i++) {
@@ -394,6 +424,7 @@ int cfg_save() {
     f_printf(&file_handle, "%s: %s\n", it->key, str);
   }
   file_close();
+  gameopt_swap();
   return 0;
 }
 
@@ -439,12 +470,7 @@ int cfg_load() {
           if(tok.type == YAML_BOOL)      v = tok.boolvalue ? 1 : 0;
           else if(tok.type == YAML_LONG) v = tok.longvalue;
           else break;
-          if(it->kind == CK_BOOL)     v = v ? 1 : 0;
-          else if(it->kind == CK_NIB) v &= 0xf;
-          /* Range check on the LONG, both ends, before the narrowing below: either
-             half alone has a blind spot (see the clamp note above). */
-          else if(it->clamp && (v < 0 || v > (long)(it->clamp >> 4))) v = it->clamp & 0xf;
-          *p = (uint8_t)v;
+          *p = cfg_scalar(it, v);
           break;
       }
     }
@@ -921,6 +947,7 @@ void cfg_load_to_menu() {
 
 /* dump binary config from menu */
 void cfg_get_from_menu() {
+  gameopt_restore();   /* the menu's copy is the globals: no game's values may stay behind */
   sram_readblock(&CFG, SRAM_MENU_CFG_ADDR, sizeof(cfg_t));
 }
 

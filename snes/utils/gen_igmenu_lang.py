@@ -54,6 +54,7 @@ HELP_LABELS = [
     "text_igm_keys1",         # 13 menu keys, line 1 (centered)
     "text_igm_keys2",         # 14 menu keys, line 2 (centered)
     "text_igm_unavail",       # 15 value-column text when savestates are off for this game
+    "text_igm_keys3",         # 16 menu keys, line 3 (centered): Y = the game options screen
 ]
 
 # HELP geometry (ighelp.i65): action labels start at col 6 and the combo column at 32, so
@@ -63,8 +64,20 @@ HELP_LABEL_MAX = {lbl: 24 for lbl in HELP_LABELS[1:11]}
 HELP_LABEL_MAX.update({
     "text_igm_hdr_controls": 40, "text_igm_hdr_keys": 40,
     "text_igm_pergame": 56, "text_igm_keys1": 56, "text_igm_keys2": 56,
-    "text_igm_unavail": 28,
+    "text_igm_keys3": 56, "text_igm_unavail": 28,
 })
+
+# The GAME OPTIONS screen (Y at the tab bar, snes/igopt.i65), IN INDEX ORDER. Lockstep with
+# the IGM_GO_* indices there. The options themselves -- names, descriptions, value words --
+# are read from the menu's own Settings rows in game, so only the screen's chrome is here.
+GOPT_LABELS = [
+    "text_igm_go_title",      # 0 the groups' window title
+    "text_igm_go_default",    # 1 value: follow the global option ("<Default> (<value>)")
+    "text_igm_go_fail",       # 2 note line: the card refused the write
+    "text_igm_go_locked",     # 3 note line: the option cannot change while the game runs
+]
+GOPT_LABEL_MAX = {lbl: 52 for lbl in GOPT_LABELS}
+GOPT_LABEL_MAX.update({"text_igm_go_title": 40, "text_igm_go_default": 16})
 
 # D-pad direction names printed INSIDE a rendered combo, IN PAD-BIT ORDER
 # ($0800 Up, $0400 Down, $0200 Left, $0100 Right). Lockstep with igc_tok_tbl in
@@ -201,6 +214,8 @@ SHELL_LABELS = [
     "text_igm_ft_ce_edit",    # 5 footer, cheat editor (item list / confirm)
     "text_igm_ft_ce_kbd",     # 6 footer, cheat editor keyboard
     "text_igm_ft_help",       # 7 footer, HELP screen
+    "text_igm_ft_gopt",       # 8 footer, GAME OPTIONS screen
+    "text_igm_ft_gopt_ed",    # 9 footer, GAME OPTIONS while a value is edited
 ]
 
 # The cheat EDITOR (CHEATS tab: add / edit / delete a cheat), IN INDEX ORDER. Lockstep with
@@ -315,6 +330,8 @@ def cap_for(label):
         return CHEATEDIT_LABEL_MAX[label]
     if label in TRAINER_LABEL_MAX:
         return TRAINER_LABEL_MAX[label]
+    if label in GOPT_LABEL_MAX:
+        return GOPT_LABEL_MAX[label]
     if label in TRAINER_LABELS:
         return TRAINER_MSG_MAX
     return STATES_LABEL_MAX.get(label, IGM_WIDTH_MAX)
@@ -358,7 +375,7 @@ def main():
             problems.append(f"{lbl}: in lang_{name}.py but not in {base.name}")
     all_labels = (HELP_LABELS + KEYS_LABELS + STATES_LABELS + SAVES_LABELS + TAB_LABELS
                   + MANUAL_LABELS + CHEATS_LABELS + SHELL_LABELS + TRAINER_LABELS
-                  + CHEATEDIT_LABELS)
+                  + CHEATEDIT_LABELS + GOPT_LABELS)
     for lbl in all_labels:
         if lbl not in en_args:
             problems.append(f"{lbl}: listed in a *_LABELS table but not in {base.name}")
@@ -445,6 +462,7 @@ def main():
         f"#define IGM_CHEATS_NLINES {len(CHEATS_LABELS)}",
         f"#define IGM_TRAINER_NLINES {len(TRAINER_LABELS)}",
         f"#define IGM_CHEATEDIT_NLINES {len(CHEATEDIT_LABELS)}",
+        f"#define IGM_GOPT_NLINES {len(GOPT_LABELS)}",
         f"#define IGM_LANG_COUNT {nlang}",
         f"#define IGM_LANG_STRIDE {IGM_LANG_STRIDE}",
         f"#define IGM_LANG_SHIFT {IGM_LANG_SHIFT}",
@@ -460,6 +478,7 @@ def main():
     out += emit_table("igm_shell_tbl", "igm_sh", SHELL_LABELS)
     out += emit_table("igm_trainer_tbl", "igm_tr", TRAINER_LABELS)
     out += emit_table("igm_cheatedit_tbl", "igm_ce", CHEATEDIT_LABELS)
+    out += emit_table("igm_gopt_tbl", "igm_go", GOPT_LABELS)
 
     out_path.write_text("\n".join(out) + "\n")
     print(f"generated {out_path}: HELP {len(HELP_LABELS)} + KEYS {len(KEYS_LABELS)} "
