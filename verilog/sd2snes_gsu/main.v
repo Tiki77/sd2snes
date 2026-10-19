@@ -279,10 +279,11 @@ end
 // grants give it ONE slot per such cycle (at SNES_cycle_start), which starves the
 // pipelined core.  The same decision, taken at the same point (SNES_cycle_start,
 // where the decode of the current S-CPU address is trusted), opens a window in which
-// the FX may take back-to-back slots until the cycle ends.  A slot started at the
-// very end of the window runs into the next cycle by at most one access -- the
-// exposure the SNES_cycle_end / SNES_PULSE_end grants already have -- and nothing can
-// chain behind it, because the next window only opens at the next SNES_cycle_start.
+// the FX may take back-to-back slots until the cycle ends.  Nothing can chain into
+// the next cycle, because the next window only opens at the next SNES_cycle_start.
+// On the Mk.III a slot must also END inside the window (fx3_late below); on the Mk.II
+// a slot started at the very end of the window runs into the next cycle by at most
+// one access -- the exposure the SNES_cycle_end / SNES_PULSE_end grants already have.
 reg fx3_rom_own_r; initial fx3_rom_own_r = 0;
 reg fx3_ram_own_r; initial fx3_ram_own_r = 0;
 always @(posedge CLK2) begin
@@ -295,8 +296,30 @@ always @(posedge CLK2) begin
     fx3_ram_own_r <= ~(ROM_HIT & IS_SAVERAM);
   end
 end
+`ifndef MK2
+// An FX slot may only start if it ends before the S-CPU cycle does: a ROM access that
+// runs past the end of the window still holds the PSRAM when the S-CPU's next cycle
+// starts, and on consoles with a short bus margin the S-CPU then reads a wrong byte
+// (Ultimate Doom froze at the end of a level on one Mk.III).  The budget is the
+// shortest CPU-clock high phase seen on this console (SNES_cycle_start ->
+// SNES_cycle_end, in CLK2; phases under 12 are ignored as glitches); a ROM access
+// takes ROM_CYCLE_LEN + 3 CLK2, plus 2 of margin = 12.
+reg [7:0] fx3_hi_cnt; initial fx3_hi_cnt = 8'hff;
+reg [7:0] fx3_hi_min; initial fx3_hi_min = 8'hff;
+always @(posedge CLK2) begin
+  if (SNES_cycle_start) fx3_hi_cnt <= 8'd0;
+  else if (fx3_hi_cnt != 8'hff) fx3_hi_cnt <= fx3_hi_cnt + 8'd1;
+  if (SNES_cycle_end && fx3_hi_cnt >= 8'd12 && fx3_hi_cnt < fx3_hi_min) fx3_hi_min <= fx3_hi_cnt;
+end
+wire fx3_late = ({1'b0, fx3_hi_cnt} + 9'd12) >= {1'b0, fx3_hi_min};
+wire fx3_rom_own = fx3_rom_own_r & ~SNES_cycle_end & ~fx3_late;
+wire fx3_ram_own = fx3_ram_own_r & ~SNES_cycle_end & ~fx3_late;
+`else
+// Mk.II: the half-rate core keeps the original window (its strict timing fit was
+// closed with it).
 wire fx3_rom_own = fx3_rom_own_r & ~SNES_cycle_end;
 wire fx3_ram_own = fx3_ram_own_r & ~SNES_cycle_end;
+`endif
 // FX3 also trims the FX <-> memory handshake: a read starts on the request pulse
 // itself (the address register is loaded on that same edge; reads drive no strobe,
 // so nothing can glitch), and RDY rises as the access completes rather than one
