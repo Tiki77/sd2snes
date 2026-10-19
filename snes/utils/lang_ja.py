@@ -569,5 +569,7 @@ TRANSLATIONS = {
     'text_igm_go_locked': 'ゲーム開始前にメニューで変更してください',
     'mtext_gopt_row': 'ゲーム設定',
     'mdesc_gopt_row': 'このゲームだけの設定です。標準は全体の設定に従います',
+    'mtext_gims_stop': ' {129}ゲーム情報でBGM停止',
+    'mdesc_gims_stop': 'ゲーム情報の表示中はメニューBGMを止め、戻ると再開します。開くのに約1秒長くかかります',
     'text_gopt_default': '標準',
 }

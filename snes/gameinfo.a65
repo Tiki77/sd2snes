@@ -169,6 +169,7 @@ gameinfo_maybe_show_favorite:
   stz gi_query_fill
   lda #CMD_GAME_INFO_FAVORITE : sta gi_query_cmd
 gms_common:
+  jsl @gims_enter           ; fork: "Stop music on game info" stops it here (gimusic.a65)
   jsr gameinfo_query
   lda @GI_STATUS
   cmp #GI_STATUS_OK
@@ -177,6 +178,7 @@ gms_common:
   sta @gi_ctx_pending       ; served -- consume the gate so gms_noinfo below and the next Y
                             ; press both see a clean flag. A is 8-bit (.as from gms_common).
   jsr gi_dc_show
+  jsl @gims_shown           ; fork: ...and fades the screen in after that stop (gimusic.a65)
   jsr gi_input
   lda gi_result
   bne gms_cancel            ; gi_result != 0 -> BACK: tear the ficha down, return to browser/list

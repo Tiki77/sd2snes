@@ -569,5 +569,7 @@ TRANSLATIONS = {
     'text_igm_go_locked': '请在游戏开始前于菜单中更改',
     'mtext_gopt_row': '游戏设置',
     'mdesc_gopt_row': '仅对本游戏生效的设置。默认跟随全局选项',
+    'mtext_gims_stop': ' {129}游戏信息中停止音乐',
+    'mdesc_gims_stop': '显示游戏信息时停止菜单音乐，返回后重新播放。打开约多需1秒',
     'text_gopt_default': '默认',
 }

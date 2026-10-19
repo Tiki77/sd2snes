@@ -585,5 +585,7 @@ TRANSLATIONS = {
     'text_igm_go_locked': 'Mude pelo menu, antes de o jogo começar',
     'mtext_gopt_row': 'Opções do jogo',
     'mdesc_gopt_row': 'Ajustes só para este jogo. Padrão segue a opção global',
+    'mtext_gims_stop': ' {129}Parar música ao abrir ficha',
+    'mdesc_gims_stop': 'Silencia a música do menu na ficha do jogo e a retoma ao sair. Abrir a ficha leva cerca de 1 s a mais',
     'text_gopt_default': 'Padrão',
 }

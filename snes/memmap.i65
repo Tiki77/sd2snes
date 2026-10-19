@@ -860,6 +860,7 @@
 #define SVW_BROWSER                 0
 #define SVW_RECENT                  1
 #define SVW_FAV                     2
+#define SVW_GIMS                    $ff /* menu only, never sent to the firmware: fm_menu_hook's code for the browser settings table (gimenu.a65) */
 #define SVOP_INFO                   0
 #define SVOP_USE                    1
 #define SVOP_COPY                   2
@@ -1086,6 +1087,7 @@
 #define CFG_BROWSER_ICONS               CFG_ADDR+$01D8 /* 0/1: the file-type icon at the start of every browser row (dirent_icon, snes/diricon.a65; 0 = the name starts in the icon's column). YAML BrowserIcons. Lockstep with src/cfg.h. */
 #define CFG_PLAYER_REPEAT               CFG_ADDR+$01D9 /* 0/1: the music players (.spc / .pcm / .nsf) repeat the track that ends instead of moving on. X on a player screen flips it (media_rep_toggle, pcmplay.a65) and the player sends SAVE_CFG when it closes; the card modules read this live byte (SRAM_CFG_PLAYER_REPEAT_ADDR). YAML PlayerRepeat, no menu entry. Lockstep with src/cfg.h. */
 #define CFG_GB_ROTATE_BUTTONS           CFG_ADDR+$01DA /* 0/1: SNES B plays the Game Boy's A and Y alone its B, on both Game Boy cores. YAML GbRotateButtons; menu row "Rotate Game Boy buttons" in the SGB menu (kv_onoff, NOT greyed: it applies to the SGB on the Mk.II too). The menu only edits it: at game load the MCU patches the SGB BIOS (sgb_stage_config) or the GBC player's "GBCF" block +6 (gbc_stage_config). Lockstep with src/cfg.h. */
+#define CFG_STOP_MUSIC_GI               CFG_ADDR+$01DB /* 0/1: stop the menu music while the game info screen is up, start it again on the way back (snes/gimusic.a65). $1D9/$1DA are reserved in cfg_t. YAML StopMusicOnGameInfo. Lockstep with src/cfg.h. */
 #define ONB_VERSION                     2              /* the first-boot tour's version: bump it when a release adds cards to the tour (tag them with it, +ONB_FD_SINCE), and the tour comes back once showing only them. Lockstep with snes/onboarding/onb_memmap.i65. */
 
 #define MENU_ENTRY_SIZE             23

@@ -590,5 +590,7 @@ TRANSLATIONS = {
     'text_igm_go_locked': 'Wijzig dit in het menu, voordat het spel start',
     'mtext_gopt_row': 'Spelopties',
     'mdesc_gopt_row': 'Instellingen alleen voor dit spel. Standaard volgt de algemene optie',
+    'mtext_gims_stop': ' {129}Muziek uit bij spelinfo',
+    'mdesc_gims_stop': 'Zet de menu muziek uit bij de spel informatie en weer aan bij het verlaten. Openen duurt ongeveer 1 s langer',
     'text_gopt_default': 'Standaard',
 }

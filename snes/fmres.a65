@@ -228,9 +228,19 @@ fmh_l3:
 fmh_l4:
   .as : .xl
   cmp #^menu_enttab_filesel_favorites_context_gi
-  bne fmh_out
+  bne fmh_l5
   cpx #!menu_enttab_filesel_favorites_context_gi
+  beq fmh_fav
+; The browser settings get the "Stop music on game info" row (gimenu.a65), whose strings
+; live in bank $C3 with the file manager's.
+fmh_l5:
+  .as : .xl
+  cmp #^menu_enttab_browser
   bne fmh_out
+  cpx #!menu_enttab_browser
+  bne fmh_out
+  lda #SVW_GIMS
+  bra fmh_list
 fmh_fav:
   .as : .xl
   lda #SVW_FAV

@@ -1056,6 +1056,8 @@ bgm_upd_stub24:
 bgm_upd_unstub:
   ; music re-enabled while the stub runs: warm-reset back to IPL, then the
   ; next frame (state 0, enabled) does the fresh music load.
+  jsl @gims_resume         ; fork: the game info screen's stub goes back to the IPL by
+  bcc bgm_upd_done         ; itself and the track comes back (gimusic.a65): no reset
   lda #$00
   sta @BGM_STATE
   jsr bgm_silence_reset    ; resumes here after the warm boot (APU back at IPL)
@@ -2402,6 +2404,7 @@ slfcm_normal:
   jsr disable_screen_update
   jmp select_last_redraw
 select_last_file_done:
+  jsl @gims_list_close       ; fork: music stopped by the info screen -> back in the dark (gimusic.a65)
   jsr pop_window
 select_last_file_out:
   stz listcover_active       ; leaving the list -> reload the browser cover
@@ -2573,6 +2576,7 @@ sffcm_normal:
   jsr disable_screen_update
   jmp select_favorite_redraw   ; redraw favorite list
 select_favorite_file_done
+  jsl @gims_list_close       ; fork: music stopped by the info screen -> back in the dark (gimusic.a65)
   jsr pop_window
 select_favorite_file_out
   stz listcover_active       ; leaving the list -> reload the browser cover

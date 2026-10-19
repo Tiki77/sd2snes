@@ -585,5 +585,7 @@ TRANSLATIONS = {
     'text_igm_go_locked': 'À changer dans le menu, avant de lancer le jeu',
     'mtext_gopt_row': 'Options du jeu',
     'mdesc_gopt_row': "Réglages pour ce jeu seulement. Par défaut suit l'option globale",
+    'mtext_gims_stop': ' {129}Couper en infos du jeu',
+    'mdesc_gims_stop': "Coupe la musique du menu dans les infos du jeu et la relance en sortant. L'ouverture prend environ 1 s de plus",
     'text_gopt_default': 'Par défaut',
 }

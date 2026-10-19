@@ -117,6 +117,11 @@ gopt_list_build:
   phd
   sep #$20 : .as
   rep #$10 : .xl
+  cmp #SVW_GIMS             ; not a list: the browser settings (gimenu.a65)
+  bne glb_list
+  jmp gims_menu_body
+glb_list:
+  .as : .xl
   pha                       ; SVW_*
   phb
   pla                       ; A = the table's bank

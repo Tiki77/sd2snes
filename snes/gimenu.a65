@@ -1,0 +1,148 @@
+; ===========================================================================
+; The "Stop music on game info" row of the browser settings (the option itself is
+; gimusic.a65).  Its two strings live in this bank's pool with the file manager's
+; (mtext_gims_* / mdesc_gims_*, FM_PREFIXES in utils/build_const.py), so the row cannot
+; sit in menu_enttab_browser: show_menu would hand those labels to resolve_str.  Instead
+; fm_menu_hook (fmres.a65) recognises that table, fm_bank_ok makes sure this bank is the
+; menu's, and the table is copied to FM_TAB with our row right after "Random music",
+; its strings already resolved for the menu language -- the way the context menus get
+; their file rows.  Everything else on the row is an ordinary on/off value.
+; ===========================================================================
+.link page $c3
+#include "memmap.i65"
+; memmap.i65 re-asserts '.link page $c0' on include; re-declare $c3 AFTER it.
+.link page $c3
+
+; lockstep with fileman.a65 (the table builders' scratch)
+#define FMX_TLEN    $7E9800     ; word: bytes written into the table being built
+#define FMX_T2      $7E9804     ; word scratch
+#define FMX_TBL     $7E9820     ; the table the builders write into, word
+
+; ---------------------------------------------------------------------------
+; gims_menu_body: gopt_list_build's code for SVW_GIMS, with its php/phd already pushed,
+; .as/.xl, DBR:X = menu_enttab_browser.  Leaves like gopt_list_build: DB $7E, X = !FM_TAB,
+; rtl straight back into show_menu.
+; ---------------------------------------------------------------------------
+gims_menu_body:
+  .as : .xl
+  phb
+  pla                       ; A = the table's bank
+  pea $0000
+  pld
+  pea $7e7e
+  plb
+  plb
+  sta print_ptr+2           ; DP 0: [print_ptr] = the table
+  stx print_ptr
+  rep #$20 : .al
+  lda #!FM_TAB
+  sta !FMX_TBL
+  sep #$20 : .as
+  ldy #$0000                ; the header, as given
+gmb_head:
+  .as : .xl
+  lda [print_ptr], y
+  tyx
+  sta @FM_TAB, x
+  iny
+  cpy #$0004
+  bne gmb_head
+  sty !FMX_TLEN
+gmb_entry:
+  .as : .xl
+  lda [print_ptr], y        ; type 0 = the end
+  beq gmb_end
+  sty !FMX_T2               ; where this entry starts in the table
+  rep #$20 : .al
+  lda !FMX_TLEN
+  clc
+  adc #!FM_TAB
+  tax
+  lda !FMX_TLEN
+  clc
+  adc #MENU_ENTRY_SIZE
+  sta !FMX_TLEN
+  sep #$20 : .as
+  jsr fcb_copy1             ; fileman.a65: the entry to $7E:X, Y past it
+  phy
+  ldy !FMX_T2               ; was it "Random music"? Our row comes right after it
+  iny
+  rep #$20 : .al
+  lda [print_ptr], y
+  cmp #!mtext_browser_menumusic_random
+  sep #$20 : .as
+  bne gmb_next
+  iny
+  iny
+  lda [print_ptr], y
+  cmp #^mtext_browser_menumusic_random
+  bne gmb_next
+  jsr gims_row
+gmb_next:
+  .as : .xl
+  ply
+  bra gmb_entry
+gmb_end:
+  .as : .xl
+  jsr fm_tab_end
+  pld
+  plp
+  pea $7e7e
+  plb
+  plb
+  rep #$10 : .xl
+  ldx #!FM_TAB
+  rtl
+
+; gims_row: the row at FM_TAB + FMX_TLEN -- an MTYPE_VALUE like its neighbours (on/off,
+; greyed while the menu music is off), text and description resolved here.  .as/.xl,
+; DP 0, DB $7E.
+gims_row:
+  .as : .xl
+  ldx #!mtext_gims_stop
+  jsr fm_str                ; -> print_src / print_bank
+  rep #$20 : .al
+  lda !FMX_TLEN
+  clc
+  adc #!FM_TAB
+  tax
+  lda print_src
+  sta !$0001, x
+  lda #!kv_onoff
+  sta !$0004, x
+  lda #!CFG_STOP_MUSIC_GI
+  sta !$0008, x
+  lda #$0000
+  sta !$000e, x             ; +14..+19: no change hook
+  sta !$0010, x
+  sta !$0012, x
+  lda #!(mfunc_isenabled_menumusic-1)
+  sta !$0014, x
+  sep #$20 : .as
+  lda #MTYPE_VALUE
+  sta !$0000, x
+  lda print_bank
+  sta !$0003, x
+  lda #^kv_onoff
+  sta !$0006, x
+  lda #OPTTYPE_KVBYTE
+  sta !$0007, x
+  lda #^CFG_STOP_MUSIC_GI
+  sta !$000a, x
+  lda #^(mfunc_isenabled_menumusic-1)
+  sta !$0016, x
+  phx
+  ldx #!mdesc_gims_stop
+  jsr fm_str
+  plx
+  rep #$20 : .al
+  lda print_src
+  sta !$000b, x
+  lda !FMX_TLEN
+  clc
+  adc #MENU_ENTRY_SIZE
+  sta !FMX_TLEN
+  sep #$20 : .as
+  lda print_bank
+  sta !$000d, x
+  rts

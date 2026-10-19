@@ -441,6 +441,7 @@ static void cfg_make_allchanged(void) {
   CFG.browser_icons = 0;                         /* no file-type icons in the browser */
   CFG.player_repeat = 1;                         /* the music players repeat the track */
   CFG.gb_rotate_buttons = 1;                     /* SNES B plays the Game Boy's A */
+  CFG.stop_music_game_info = 1;                  /* the menu music stops on the game info screen */
 }
 
 /* ---- the alternating-booleans config ------------------------------------

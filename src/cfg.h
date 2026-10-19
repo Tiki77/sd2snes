@@ -91,6 +91,7 @@
 #define CFG_BROWSER_ICONS                ("BrowserIcons")
 #define CFG_PLAYER_REPEAT                ("PlayerRepeat")
 #define CFG_GB_ROTATE_BUTTONS            ("GbRotateButtons")
+#define CFG_STOP_MUSIC_GAME_INFO         ("StopMusicOnGameInfo")
 
 #define CFG_MENU_COMBO_MIN_BUTTONS       (3)
 
@@ -281,6 +282,10 @@ typedef struct __attribute__ ((__packed__)) _cfg_block {
      the SNES BIOS in PSRAM (src/sgb.c), on the GBC core gbc_stage_config() writes it into the
      player's "GBCF" block (+6). YAML GbRotateButtons + menu "Rotate Game Boy buttons" (SGB
      menu). Default 0. */
+  uint8_t  stop_music_game_info;    /* CFG @ $1DB: stop the menu music while the game info screen
+     is up and start it again on the way back (snes/gimusic.a65). Stopping an SPC takes a console
+     reset, so opening the screen takes about a second longer while it is on. YAML
+     StopMusicOnGameInfo + menu "Stop music on game info" (browser settings). Default 0. */
 } cfg_t;
 
 int cfg_save(void);

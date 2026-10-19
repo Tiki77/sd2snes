@@ -72,6 +72,7 @@ gi_back_dark:
   beq gbd_out
   lda #$01
   sta @gi_relight
+  jsr gims_leave            ; "Stop music on game info": the track back while still black (gimusic.a65)
 gbd_out:
   .as
   plp

@@ -1000,3 +1000,8 @@ mdesc_fm_selexit        .byt "Leave the selection mode", 0
 mtext_gopt_row          .byt "Game options", 0
 mdesc_gopt_row          .byt "Settings for this game only. Default follows the global option", 0
 text_gopt_default       .byt "Default", 0
+
+; ---- the "Stop music on game info" row of the browser settings (gimenu.a65, bank $C3, same
+; rules as text_fm_*) ----
+mtext_gims_stop         .byt " ", 129, "Stop music on game info", 0
+mdesc_gims_stop         .byt "Silence the menu music on the game info screen. It starts again on leaving. Opening the screen takes about 1 s longer", 0

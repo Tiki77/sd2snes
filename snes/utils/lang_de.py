@@ -589,5 +589,7 @@ TRANSLATIONS = {
     'text_igm_go_locked': 'Im Menue aendern, bevor das Spiel startet',
     'mtext_gopt_row': 'Spieloptionen',
     'mdesc_gopt_row': 'Einstellungen nur für dieses Spiel. Standard folgt der globalen Option',
+    'mtext_gims_stop': ' {129}Musik in Spielinfo aus',
+    'mdesc_gims_stop': 'Schaltet die Menue-Musik in der Spielinfo aus und beim Verlassen wieder an. Das Laden dauert etwa 1 s länger',
     'text_gopt_default': 'Standard',
 }

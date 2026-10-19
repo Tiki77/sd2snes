@@ -727,6 +727,11 @@ di_name_w       .byt 0     ; the name's width in cells: 51 with the icons, 54 wi
 nsf_seen_song   .byt 0     ; NSF_SONG the last redraw rendered
 media_rep0      .byt 0     ; CFG_PLAYER_REPEAT when a player opened: a change is saved on the way out
 
+;----------"Stop music on game info" (gimusic.a65) ---------------------------------------------
+; GIMS_LIGHT / GIMS_PAUSED while the menu music is stopped for the game info screen; anything
+; else (clear_wram's $55 included) = not ours, so no init is needed.
+gims_state      .byt 0
+
 ;----------Title row of the game info screen (gicrc.a65): marquee + CRC32 ---------------------
 gic_off         .byt 0     ; first title byte shown (marquee)
 gic_wait        .byt 0     ; frames to the next marquee step

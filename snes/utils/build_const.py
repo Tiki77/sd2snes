@@ -411,8 +411,11 @@ def main():
     # labels must never be reached from code outside $C3: resolve_str would not know them.
     # text_gopt_* / mtext_gopt_* / mdesc_gopt_*: the game options screen (gameopt.a65), the
     # other tenant of $C3, same rules.
+    # mtext_gims_* / mdesc_gims_*: the "Stop music on game info" row (gimenu.a65), built in
+    # $C3 like the context menus' file rows, same rules.
     FM_PREFIXES = ("text_fm_", "mtext_fm_", "mdesc_fm_",
-                   "text_gopt_", "mtext_gopt_", "mdesc_gopt_")
+                   "text_gopt_", "mtext_gopt_", "mdesc_gopt_",
+                   "mtext_gims_", "mdesc_gims_")
     out, order, fm_neutral = [], [], []
     for line in lines:
         m = LINE_RE.match(line)

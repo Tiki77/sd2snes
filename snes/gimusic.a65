@@ -1,0 +1,371 @@
+; ===========================================================================
+; "Stop music on game info" (CFG_STOP_MUSIC_GI): the menu music stops while the game
+; info screen is up and starts again on the way back.
+;
+; WHY IT COSTS A RESET.  The music is an SPC snapshot running on the S-SMP, and the
+; S-CPU cannot reach the S-DSP while that program runs: there is no way to fade it or
+; pause it, only to reset the console (the menu's usual warm reset, bgm_silence_reset /
+; the launch ARAM wipe).  So the sound simply stops, and what is smooth is the picture:
+; the browser fades to black, the reset happens in the dark, and the info screen fades in.
+;
+; WHY IT DOES NOT COST A SECOND RESET.  The info screen still needs the S-DSP running and
+; unmuted (the cartridge DAC carries its clip's .qoa/.pcm and the menu's blips, and the
+; console gates it while the DSP sits in reset), so after the reset a small program is
+; uploaded in place of the music: the same scrub as sfx_dsp_unmute (sfxdsp.i65), but
+; instead of idling forever it waits for a word on APU port 1 and then jumps back to the
+; IPL.  Coming back, that word is all it takes to have the S-SMP at the IPL again, and the
+; track goes up from the copy the firmware staged for it (SPC_DATA / SPC_HEADER, still in
+; PSRAM): the SAME track again, from its start, with no SD read -- with "Random music" on,
+; leaving the info screen does not draw a new one.
+;
+; THE HOOKS (bank $C0 pays only the jsl's):
+;   gims_enter   gameinfo.a65 gms_common, before the info query -- every way the screen
+;                opens (A in the browser, the context menu, Recents / Favorites, a folder
+;                that opens as its MSU-1 game); Up/Down inside the screen never come here.
+;   gims_shown   right after gi_dc_show in gms_common: the fade-in.
+;   gims_leave   gi_back_dark (msufolder.a65): B back to the browser -- the info screen
+;                fades out, the track goes up in the dark, then the browser fades in.
+;   gims_list_close  a Recents / Favorites list closing (filesel.a65), before its window
+;                goes: the list fades out, the track goes up in the dark, the browser fades in.
+;   gims_resume  bgm_update's "music on, stub running" arm (filesel.a65): every other way
+;                back (a cancelled patch dialog, a refused launch), with the same fade out /
+;                upload / fade in.
+; With the option off the hooks cost one byte test each.  BGM_STATE stays truthful: 3 while
+; our program runs, so every other path (the PCM player, a launch, music turned off) sees
+; "stub up, ARAM clean", which is exactly the case -- and a launch from the info screen does
+; not wipe ARAM again.
+; ===========================================================================
+
+.link page $c1
+#include "memmap.i65"
+; memmap.i65 re-asserts '.link page $c0' on include; re-declare $c1 AFTER it.
+.link page $c1
+
+#define GIMS_LIGHT      $a6       /* gims_state: music stopped, the info screen still to fade in */
+#define GIMS_PAUSED     $a7       /* gims_state: music stopped, our program on the S-SMP */
+#define GIMS_IPL_WORD   $a7       /* port-1 byte that sends our program back to the IPL (never $cc) */
+#define GIMS_STUB_ADDR  $0200
+#define GIMS_STUB_LEN   92
+
+; ---------------------------------------------------------------------------
+; gims_enter -- jsl from gms_common (gameinfo.a65), before the info query.  .as in, any
+; DB/DP; every register but A kept.  With the option on and the music playing: fade to
+; black, warm reset (MCU_PARAM kept: the Recents / Favorites queries carry the list index
+; there), our program on the S-SMP, and the screen left black for gims_shown.
+; ---------------------------------------------------------------------------
+gims_enter:
+  php
+  sep #$20 : .as
+  lda @CFG_STOP_MUSIC_GI
+  beq gse_out
+  lda @BGM_STATE
+  cmp #$01
+  beq gse_stop
+gse_out:
+  .as
+  plp
+  rtl
+gse_stop:
+  .as
+  phb
+  phd
+  rep #$30 : .al : .xl
+  phx
+  phy
+  sep #$20 : .as
+  pea $0000
+  pld
+  lda #$00
+  pha
+  plb                         ; DB = 0: the $21xx/$214x writes below are absolute
+  ; a cover still loading would answer the reset's command and the reset would be lost
+  ; (the MCU would come back to its loop and clear it): drain it first, like pcmplay.a65
+  jsl @ui_call_coversync
+  sep #$20 : rep #$10 : .as : .xl
+  jsr mt_fade_out             ; to black, forced blank, the brightness variables pinned at 0
+  ; The warm reset: back to the IPL with ARAM zeroed (apu_ram_init), MCU_PARAM put back,
+  ; BGM_STATE 0, filesel_dirty 1.  It returns here through the warm boot, which restored
+  ; this stack (low WRAM) and so the registers pushed above.
+  jsl @gh_bcal_trampoline
+  sep #$20 : rep #$10 : .as : .xl
+  lda #$80
+  sta @$002100                ; the boot lit the screen again: black before anything shows
+  lda #$00
+  sta @cur_bright
+  sta @tgt_bright
+  sta @menu_brightness        ; the NMI pulls tgt up to this while a key reads as held
+  jsr gims_stub_up            ; waits out the ARAM clear apu_ram_init started (~0.75 s)
+  lda #$03
+  sta @BGM_STATE              ; "stub running": what every other path should believe
+  lda #GIMS_LIGHT
+  sta @gims_state
+  rep #$30 : .al : .xl
+  ply
+  plx
+  pld
+  plb
+  plp
+  rtl
+
+; ---------------------------------------------------------------------------
+; gims_shown -- jsl from gms_common right after gi_dc_show, which returned in the VBlank in
+; which it lit the screen: put it back to 0 before that frame shows, and let the NMI ramp
+; it up to the level gi_dc_show set (one step a frame).  .as in, all registers but A kept.
+; ---------------------------------------------------------------------------
+gims_shown:
+  php
+  sep #$20 : .as
+  lda @gims_state
+  cmp #GIMS_LIGHT
+  bne gsh_out
+  lda #GIMS_PAUSED
+  sta @gims_state
+  lda #$00
+  sta @$002100
+  sta @cur_bright
+  lda #$01
+  sta @fade_speed
+  sta @fade_count
+gsh_out:
+  .as
+  plp
+  rtl
+
+; ---------------------------------------------------------------------------
+; gims_leave -- jsr from gi_back_dark (msufolder.a65): B on an info screen opened from the
+; browser, before gi_dc_restore.  The way in, backwards: the info screen fades out, the
+; track goes up in the dark, and the browser only lights up (gi_relight_check's fade-in)
+; once it is whole and the music already plays -- never a frozen list on screen.  The
+; Recents / Favorites returns keep the silence until the list closes (gims_resume).
+; Any widths/DB/DP in, everything kept.
+; ---------------------------------------------------------------------------
+gims_leave:
+  php
+  sep #$20 : rep #$10 : .as : .xl
+  lda @gims_state
+  cmp #GIMS_PAUSED
+  bne gl_out
+  lda @CFG_ENABLE_MENU_MUSIC
+  beq gl_out
+  lda @BGM_STATE
+  cmp #$03
+  bne gl_out
+  phb
+  phd
+  rep #$30 : .al : .xl
+  pha
+  phx
+  phy
+  sep #$20 : .as
+  pea $0000
+  pld
+  lda #$00
+  pha
+  plb
+  jsr mt_fade_out             ; the info screen fades to black (forced blank at the end)
+  jsr gims_bring_back         ; no answer: bgm_update's warm reset brings it back later
+  rep #$30 : .al : .xl
+  ply
+  plx
+  pla
+  pld
+  plb
+gl_out:
+  plp
+  rts
+
+; ---------------------------------------------------------------------------
+; gims_list_close -- jsl from select_last_file_done / select_favorite_file_done (filesel.a65),
+; BEFORE the list's window is popped: with the music stopped by an info screen opened from
+; the list, the list itself fades out, the track goes up in the dark, and the screen comes
+; back (the NMI's ramp, a step a frame from the second frame on) only once the browser
+; under the list is in the tile buffers -- the browser is never seen lit and silent.
+; Any widths/DB in, DP = 0 (both lists force it), every register kept.
+; ---------------------------------------------------------------------------
+gims_list_close:
+  php
+  sep #$20 : .as
+  lda @CFG_ENABLE_MENU_MUSIC
+  beq glc_out
+  lda @BGM_STATE
+  cmp #$03
+  bne glc_out
+  rep #$30 : .al : .xl
+  pha
+  phx
+  phy
+  jsl @gims_resume            ; not ours: nothing done, bgm_update decides later as before
+  rep #$30 : .al : .xl
+  ply
+  plx
+  pla
+glc_out:
+  plp
+  rtl
+
+; ---------------------------------------------------------------------------
+; gims_resume -- jsl from bgm_update when the music is on and BGM_STATE says a stub runs:
+; the way back that did not go through gims_leave (a Recents / Favorites list closing, a
+; cancelled patch dialog, a refused launch).  Same order: fade out, the track up in the
+; dark, fade back in.  Carry CLEAR = handled here; carry SET = not our program (or no
+; answer): bgm_update warm-resets as it always did.  Any DB/DP in.
+; ---------------------------------------------------------------------------
+gims_resume:
+  php
+  sep #$20 : rep #$10 : .as : .xl
+  lda @gims_state
+  cmp #GIMS_PAUSED
+  beq grs_mine
+  cmp #GIMS_LIGHT
+  beq grs_light
+  plp
+  sec
+  rtl
+grs_light:
+  ; the info screen never came up (gms_noinfo): the level to come back to is the menu's
+  .as : .xl
+  lda @CFG_BRIGHTNESS_LIMIT
+  sta @menu_brightness
+grs_mine:
+  .as : .xl
+  phb
+  lda #$00
+  pha
+  plb
+  jsr mt_fade_out             ; level kept in mt_bright_bak
+  jsr gims_bring_back
+  bcs grs_fail
+  lda #$00                    ; and back in, the NMI's ramp, a step a frame
+  sta @fade_count
+  lda #$01
+  sta @fade_speed
+  jsr mt_fade_in
+  plb
+  plp
+  clc
+  rtl
+grs_fail:
+  .as : .xl
+  plb
+  plp
+  sec
+  rtl
+
+; ---------------------------------------------------------------------------
+; gims_bring_back -- our program back to the IPL and the staged track up (the screen is
+; black: the upload stops the NMI for ~0.8 s).  Carry SET = no IPL hello (not our program:
+; BGM_STATE left at 3).  .as/.xl, DB = 0.  gims_state cleared either way.
+; ---------------------------------------------------------------------------
+gims_bring_back:
+  .as : .xl
+  lda #$00
+  sta @gims_state
+  stz APUIO0                  ; never $cc there: the IPL would take it for a transfer
+  lda #GIMS_IPL_WORD
+  sta APUIO1
+  ldx #$0000                  ; the IPL hello, bounded (65536 polls, ~0.3 s; it takes ~1 ms)
+gbb_hello:
+  .as : .xl
+  ldy APUIO0
+  cpy #$bbaa
+  beq gbb_at_ipl
+  dex
+  bne gbb_hello
+  sec
+  rts
+gbb_at_ipl:
+  .as : .xl
+  stz APUIO1
+  lda #$00
+  sta @BGM_STATE              ; at the IPL: if the staged copy is gone, bgm_update loads
+  ldx #$000a                  ; the staged snapshot is still the menu's (as menu_bgm_load checks)
+gbb_hdr:
+  .as : .xl
+  lda @SPC_HEADER, x
+  cmp @text_spcid, x
+  bne gbb_done
+  dex
+  bne gbb_hdr
+  jsl @ui_call_spcload        ; the same track, from its start
+  sep #$20 : rep #$10 : .as : .xl
+  lda #$01
+  sta @BGM_STATE
+gbb_done:
+  .as : .xl
+  clc
+  rts
+
+; ---------------------------------------------------------------------------
+; gims_stub_up -- upload gims_stub through the IPL and start it.  The same protocol as
+; sfx_dsp_unmute (spc_begin_upload / spc_upload_byte), here because those are near $C0
+; routines.  The hello wait is unbounded on purpose, like sfx_dsp_unmute's: right after
+; the warm boot the S-SMP is still clearing ARAM.  .as/.xl, DB = 0.
+; ---------------------------------------------------------------------------
+gims_stub_up:
+  .as : .xl
+  ldy #GIMS_STUB_ADDR
+  sty APUIO2
+  ldy #$bbaa
+gsu_hello:
+  .as : .xl
+  cpy APUIO0
+  bne gsu_hello
+  lda #$cc
+  sta APUIO1
+  sta APUIO0
+gsu_ack:
+  .as : .xl
+  cmp APUIO0
+  bne gsu_ack
+  ldx #$0000
+gsu_byte:
+  .as : .xl
+  lda @gims_stub, x
+  sta APUIO1
+  txa
+  sta APUIO0
+gsu_echo:
+  .as : .xl
+  cmp APUIO0
+  bne gsu_echo
+  inx
+  cpx #GIMS_STUB_LEN
+  bne gsu_byte
+  ldx #GIMS_STUB_ADDR         ; execute at $0200
+  stx APUIO2
+  stz APUIO1
+  lda APUIO0
+  inc
+  inc
+  sta APUIO0
+gsu_run:
+  .as : .xl
+  cmp APUIO0
+  bne gsu_run
+  rts
+
+; SPC700: sfx_dsp_unmute's scrub (sfxdsp.i65 explains every step), then wait for
+; GIMS_IPL_WORD on port 1 and go back to the IPL.  Port 0 is zeroed on the way out, so the
+; IPL's $BBAA hello is the only thing the S-CPU can read as an answer.
+gims_stub:
+  .byt $8f, $6c, $f2, $8f, $60, $f3   ; FLG = $60: muted while scrubbing
+  .byt $8f, $5c, $f2, $8f, $ff, $f3   ; KOFF all
+  .byt $8f, $4c, $f2, $8f, $00, $f3   ; KON none
+  .byt $8f, $4d, $f2, $8f, $00, $f3   ; EON 0
+  .byt $8f, $2c, $f2, $8f, $00, $f3   ; EVOL_L 0
+  .byt $8f, $3c, $f2, $8f, $00, $f3   ; EVOL_R 0
+  .byt $8f, $0d, $f2, $8f, $00, $f3   ; EFB 0
+  .byt $8d, $00                       ; mov y,#0
+  .byt $e8, $00                       ; mov a,#0   (DSP address)
+  .byt $c4, $f2, $cb, $f3             ; vol loop: VOL_L = 0
+  .byt $bc, $c4, $f2, $cb, $f3        ;   VOL_R = 0
+  .byt $60, $88, $0f                  ;   a += 15 -> next voice
+  .byt $68, $80, $d0, $f0             ;   until $80
+  .byt $8f, $0c, $f2, $8f, $7f, $f3   ; MVOL_L $7f
+  .byt $8f, $1c, $f2, $8f, $7f, $f3   ; MVOL_R $7f
+  .byt $8f, $6c, $f2, $8f, $20, $f3   ; FLG = $20: unmuted, echo writes off
+  .byt $e4, $f5                       ; wait: mov a,$f5
+  .byt $68, GIMS_IPL_WORD             ;       cmp a,#GIMS_IPL_WORD
+  .byt $d0, $fa                       ;       bne wait
+  .byt $8f, $00, $f4                  ; mov $f4,#0
+  .byt $5f, $c0, $ff                  ; jmp $ffc0 (the IPL)

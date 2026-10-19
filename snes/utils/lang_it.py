@@ -590,5 +590,7 @@ TRANSLATIONS = {
     'text_igm_go_locked': 'Si cambia dal menu, prima di avviare il gioco',
     'mtext_gopt_row': 'Opzioni del gioco',
     'mdesc_gopt_row': "Impostazioni solo per questo gioco. Predefinito segue l'opzione globale",
+    'mtext_gims_stop': ' {129}Silenzia in Info Gioco',
+    'mdesc_gims_stop': "Silenzia la musica del menu in Info Gioco e la riprende all'uscita. L'apertura richiede circa 1 s in più",
     'text_gopt_default': 'Predefinito',
 }
