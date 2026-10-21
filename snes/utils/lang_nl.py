@@ -416,7 +416,7 @@ TRANSLATIONS = {
     'text_pcm_ended': 'Einde',
     'text_spc_prompt': 'A: Volgend nummer   B: Sluit',
     'text_spc_prompt2': 'L/R: Vorig/volgend nummer',
-    'text_media_mouse2': 'Y: Vorig nummer   Z: Volgend nummer',
+    'text_media_mouse2': '[MRH]: Vorig nummer   [MLH]: Volgend nummer',
     'text_media_repeat': 'X: Herhalen',
     'text_pcm_promptb': 'B: Sluit',
     'text_pcm_paused': 'Pauzeer',

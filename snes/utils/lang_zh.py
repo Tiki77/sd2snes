@@ -415,7 +415,7 @@ TRANSLATIONS = {
     'text_pcm_ended': '已结束',
     'text_spc_prompt': 'A:下一首  B:关闭',
     'text_spc_prompt2': 'L/R:上/下一首',
-    'text_media_mouse2': 'Y:上一首  Z:下一首',
+    'text_media_mouse2': '[MRH]:上一首  [MLH]:下一首',
     'text_media_repeat': 'X:单曲循环',
     'text_pcm_promptb': 'B:关闭',
     'text_pcm_paused': '已暂停',

@@ -124,6 +124,7 @@
    =========================================================================== */
 #define ONB_CJK_MARK                $B0     /* a CJK string's first byte: aligns its glyphs */
 #define ONB_CJK_LEAD0               $FA
+#define ONB_MOUSE_ESC               $04     /* the next byte is a plain cell (a mouse glyph): gen_onb_lang.py MOUSE_ESC */
 #define OCJ_NSLOTS                  128
 #define OCJ_G2S                     $7F4000 /* 768 B: glyph -> slot + 1 (0 = not cached) */
 #define OCJ_S2G                     $7F4300 /* 128 words: slot -> glyph + 1 (0 = free) */

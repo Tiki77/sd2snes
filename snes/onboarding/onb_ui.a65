@@ -137,6 +137,10 @@ onb_hp_bg2:
   bcs +
   jsr onb_hp_toggle
   bra onb_hp_bg2
++ cmp #ONB_MOUSE_ESC          ; MOUSE_ESC (gen_onb_lang.py): the next byte is a plain cell,
+  bne +                       ; a mouse glyph whose code would read as a CJK marker/lead
+  inc onb_print_ptr
+  bra onb_hp2_raw
 + cmp #ONB_CJK_MARK           ; a CJK string's marker: at an even column it takes none
   bne +
   inc onb_print_ptr
@@ -144,7 +148,10 @@ onb_hp_bg2:
 + cmp #ONB_CJK_LEAD0          ; a CJK glyph: one BG2 cell over this column and the next
   bcc +
   jmp onb_hp2_cjk
-+ lda [onb_print_ptr]
++
+onb_hp2_raw:
+  .al : .xl
+  lda [onb_print_ptr]
   ror
   and #$007f
   beq onb_hp_end
@@ -165,6 +172,10 @@ onb_hp_bg1:
   bcs +
   jsr onb_hp_toggle
   bra onb_hp_bg1
++ cmp #ONB_MOUSE_ESC          ; a mouse glyph (see onb_hp_bg2)
+  bne +
+  inc onb_print_ptr
+  bra onb_hp1_raw
 + cmp #ONB_CJK_MARK           ; the marker at an odd column: a blank, so the glyphs that
   bne +                       ; follow start on BG2's even columns -- or, for a label made
   jsr onb_hp1_pairs           ; only of glyphs, pair cells that start them right here
@@ -176,6 +187,8 @@ onb_hp1_mark:
   bra onb_hp1_blank
 + cmp #ONB_CJK_LEAD0          ; a glyph at an odd column (not aligned): a blank first
   bcs onb_hp1_blank
+onb_hp1_raw:
+  .al : .xl
   lda [onb_print_ptr]
   ror
   and #$007f

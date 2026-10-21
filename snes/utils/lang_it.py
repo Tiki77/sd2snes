@@ -436,7 +436,7 @@ TRANSLATIONS = {
     'text_pcm_ended': 'Fine',
     'text_spc_prompt': 'A: Traccia succ.   B: Chiudi',
     'text_spc_prompt2': 'L/R: Traccia prec./succ.',
-    'text_media_mouse2': 'Y: Traccia prec.   Z: Traccia succ.',
+    'text_media_mouse2': '[MRH]: Traccia prec.   [MLH]: Traccia succ.',
     'text_media_repeat': 'X: Ripeti',
     'text_pcm_promptb': 'B: Chiudi',
     'text_pcm_paused': 'In pausa',

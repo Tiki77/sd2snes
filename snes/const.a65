@@ -674,9 +674,10 @@ text_pcm_prompt2  .byt "<>: -5s/+5s   L/R: Prev/Next track", 0
 text_pcm_ended    .byt "End", 0
 text_spc_prompt   .byt "A: Next track   B: Close", 0
 text_spc_prompt2  .byt "L/R: Prev/Next track", 0
-; the players' second key row with a mouse in: Y = the right button held, Z = the left one
-; held (mouselegend.a65 draws both as mouse glyphs); no seek keys, the bar takes a click
-text_media_mouse2 .byt "Y: Prev track   Z: Next track", 0
+; the players' second key row with a mouse in: [MRH] = the right button held, [MLH] = the left
+; one held (build_const.py mouse_keys turns them into the Y and Z keys that mouselegend.a65
+; draws as mouse glyphs); no seek keys, the bar takes a click
+text_media_mouse2 .byt "[MRH]: Prev track   [MLH]: Next track", 0
 text_media_repeat .byt "X: Repeat", 0
 text_pcm_promptb  .byt "B: Close", 0
 text_pcm_paused   .byt "Paused", 0

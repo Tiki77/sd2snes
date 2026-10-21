@@ -128,8 +128,36 @@ CJK_HDR = 16                   # "SDL1", column, version, pool_len, sheet_addr, 
 CJK_FILE_MAX = 0xDF00          # $7F2000..$7FFEFF; the menu's launch trampoline sits at $7FFFE0
 
 
+# The SNES Mouse's gestures, written in the source by name so nobody reads a key letter as a
+# button: [ML] left click, [MR] right click, [MB] both, [MRH] the right one held, [MLH] the left
+# one held. The menu's key legends draw a mouse glyph pair in place of a key LETTER
+# (mouselegend.a65 mouse_keys/mouse_keypair; Z is the held left button, which no pad key has),
+# so in a menu string a gesture becomes that letter; the tour draws the glyph pair itself
+# (gen_onb_lang.py). Glyphs: fontedit.py MOUSE_GLYPHS.
+MOUSE_TOKENS = {"ML": ("A", (250, 251)), "MR": ("B", (252, 253)), "MB": ("X", (254, 255)),
+                "MRH": ("Y", (252, 176)), "MLH": ("Z", (250, 31))}
+MOUSE_RE = re.compile(r"\[(M[A-Z]{1,2})\]")
+# the menu strings drawn through a key legend while a mouse is in (a gesture anywhere else
+# would print a plain letter)
+MOUSE_LEGEND_LABELS = {"text_media_mouse2"}
+
+
+def mouse_keys(label, text):
+    """A menu string: each [M..] gesture -> the key letter its legend draws as the glyphs."""
+    def key(m):
+        if m.group(1) not in MOUSE_TOKENS:
+            sys.exit(f"build_const.py: unknown mouse gesture [{m.group(1)}] in {label} "
+                     f"(known: {', '.join('[%s]' % k for k in MOUSE_TOKENS)})")
+        if label not in MOUSE_LEGEND_LABELS:
+            sys.exit(f"build_const.py: mouse gesture [{m.group(1)}] in {label}: only a key "
+                     f"legend draws it (MOUSE_LEGEND_LABELS)")
+        return MOUSE_TOKENS[m.group(1)][0]
+    return MOUSE_RE.sub(key, text)
+
+
 def is_cjk(ch):
-    return ord(ch) >= CJK_FIRST_CP
+    # the Private Use Area is not a script (gen_onb_lang.py writes its mouse gestures there)
+    return ord(ch) >= CJK_FIRST_CP and not 0xE000 <= ord(ch) <= 0xF8FF
 
 
 def encode_string(text, zero_width=()):
@@ -277,20 +305,23 @@ def load_dict(path):
     return dict(getattr(mod, "TRANSLATIONS", {}))
 
 
-def parse_base(base_path):
-    """Return (lines, en_args). lines preserves order; en_args maps label->args."""
+def parse_base(base_path, mouse=True):
+    """Return (lines, en_args). lines preserves order; en_args maps label->args. mouse: the
+    [M..] gestures turned into their legend letters (mouse_keys); False keeps the names."""
     lines = base_path.read_text().splitlines()
     en_args = {}
-    for line in lines:
+    for i, line in enumerate(lines):
         m = LINE_RE.match(line)
         if m:
-            en_args[m.group(2)] = m.group(4)
+            if mouse:
+                lines[i] = line = mouse_keys(m.group(2), line)
+            en_args[m.group(2)] = LINE_RE.match(line).group(4)
     return lines, en_args
 
 
 def dump_en_scaffold(base_path, out_path, keys):
     """Write a translation scaffold (label -> decoded English text) for `keys`."""
-    _, en_args = parse_base(base_path)
+    _, en_args = parse_base(base_path, mouse=False)
     out = ['"""Translated strings for the sd2snes menu. Translate each value.',
            '',
            'Pre-seeded with the English source. Any label left in English (or removed)',
@@ -327,7 +358,8 @@ def main():
 
     out_i = sys.argv.index("-o")
     lang_paths = [p for p in sys.argv[2:out_i] if p.endswith(".py")]
-    langs = [(lang_code(p), load_dict(p)) for p in lang_paths]
+    langs = [(lang_code(p), {k: mouse_keys(k, v) for k, v in load_dict(p).items()})
+             for p in lang_paths]
     out_path = Path(sys.argv[sys.argv.index("-o") + 1])
 
     # CJK glyph registries (see CJK_LANGS). The resident range holds what the menu shows in

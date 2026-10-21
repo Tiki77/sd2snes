@@ -431,7 +431,7 @@ TRANSLATIONS = {
     'text_pcm_ended': 'Fin',
     'text_spc_prompt': 'A: Piste suivante   B: Fermer',
     'text_spc_prompt2': 'L/R: Piste préc./suiv.',
-    'text_media_mouse2': 'Y: Piste préc.   Z: Piste suiv.',
+    'text_media_mouse2': '[MRH]: Piste préc.   [MLH]: Piste suiv.',
     'text_media_repeat': 'X: Répéter',
     'text_pcm_promptb': 'B: Fermer',
     'text_pcm_paused': 'En pause',

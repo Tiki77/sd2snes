@@ -431,7 +431,7 @@ TRANSLATIONS = {
     'text_pcm_ended': 'Fim',
     'text_spc_prompt': 'A: Próxima faixa   B: Fechar',
     'text_spc_prompt2': 'L/R: Faixa ant./próx.',
-    'text_media_mouse2': 'Y: Faixa anterior   Z: Próxima faixa',
+    'text_media_mouse2': '[MRH]: Faixa anterior   [MLH]: Próxima faixa',
     'text_media_repeat': 'X: Repetir',
     'text_pcm_promptb': 'B: Fechar',
     'text_pcm_paused': 'Pausado',

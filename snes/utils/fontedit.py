@@ -738,17 +738,21 @@ def add_tour_glyphs():
 # mode 5 a tilemap entry spans 16 pixels and flipping it moves the glyph onto its neighbour.
 # The held right button shares the right button's first cell; its second is slot 176.
 # Legend: '#' stroke (colour 1), 'o' dark (2), '.' transparent. Columns 14-15: the gap
-# before the label.
-def _mouse_art(left, right, body_right="oooo"):
+# before the label (most legends write the label right after the ':', "A:Select").
+# text=True: the tour's copy of the font (onb_font.a65, tour_font), where a glyph sits in a
+# line of text between blanks: one pixel further right, so the blank before it and the one
+# after it look the same (a letter's contour takes one pixel on each side).
+def _mouse_art(left, right, body_right="oooo", text=False):
     lb, rb = left * 4, right * 4
-    return ["..##########....",
-            "##" + lb + "##" + rb + "##..",
-            "##" + lb + "##" + rb + "##..",
-            "##############..",
-            "##oooooo" + body_right + "##..",
-            "##oooooo" + body_right + "##..",
-            "..##########....",
-            "................"]
+    art = ["..##########....",
+           "##" + lb + "##" + rb + "##..",
+           "##" + lb + "##" + rb + "##..",
+           "##############..",
+           "##oooooo" + body_right + "##..",
+           "##oooooo" + body_right + "##..",
+           "..##########....",
+           "................"]
+    return ["." + row[:-1] for row in art] if text else art
 
 
 def _mouse_cells(art):
@@ -756,23 +760,52 @@ def _mouse_cells(art):
     return [r[:8] for r in px], [r[8:] for r in px]
 
 
-_ML = _mouse_cells(_mouse_art("#", "o"))
-_MR = _mouse_cells(_mouse_art("o", "#"))
-_MB = _mouse_cells(_mouse_art("#", "#"))
-_MH = _mouse_cells(_mouse_art("o", "#", "####"))
-_MLH = _mouse_cells(_mouse_art("#", "o", "####"))
-# code -> (the char a screen reader decodes it as, the tile's pixels)
-MOUSE_GLYPHS = {
-    250: ("\u24c1", _ML[0]), 251: ("", _ML[1]),      # left click (A)
-    252: ("\u24c7", _MR[0]), 253: ("", _MR[1]),      # right click (B); held: 252 + 176
-    254: ("\u24b7", _MB[0]), 255: ("", _MB[1]),      # both (X)
-    176: ("\u24bd", _MH[1]),                         # right held (Y), after 252
-    # left held (the music players: next track), after 250. The font has no free printable
-    # slot left, but a legend glyph is written as a tile, never as a string byte, so it can
-    # live at 31: below 32 no string ever reaches hiprint (0/1 end it, 2..22 are sysinfo's
-    # placeholders, resolved before printing) and the tile was empty.
-    31: ("\u24bd", _MLH[1]),
-}
+def _mouse_glyphs(text=False):
+    """code -> (the char a screen reader decodes it as, the tile's pixels)"""
+    ml = _mouse_cells(_mouse_art("#", "o", text=text))
+    mr = _mouse_cells(_mouse_art("o", "#", text=text))
+    mb = _mouse_cells(_mouse_art("#", "#", text=text))
+    mh = _mouse_cells(_mouse_art("o", "#", "####", text=text))
+    mlh = _mouse_cells(_mouse_art("#", "o", "####", text=text))
+    return {
+        250: ("\u24c1", ml[0]), 251: ("", ml[1]),        # left click (A)
+        252: ("\u24c7", mr[0]), 253: ("", mr[1]),        # right click (B); held: 252 + 176
+        254: ("\u24b7", mb[0]), 255: ("", mb[1]),        # both (X)
+        176: ("\u24bd", mh[1]),                          # right held (Y), after 252
+        # left held (the music players: next track), after 250. The font has no free
+        # printable slot left, but a legend glyph is written as a tile, never as a string
+        # byte, so it can live at 31: below 32 no string ever reaches hiprint (0/1 end it,
+        # 2..22 are sysinfo's placeholders, resolved before printing) and the tile was empty.
+        # The tour prints them from strings, behind ONB_MOUSE_ESC (gen_onb_lang.py).
+        31: ("\u24bd", mlh[1]),
+    }
+
+
+MOUSE_GLYPHS = _mouse_glyphs()
+
+
+def tour_font(src, dst):
+    """The tour's copy of the font (Makefile: onboarding/onb_font.a65): font.a65 linked in
+    $C2 instead of $C1, with the mouse glyphs drawn for text (_mouse_art text=True)."""
+    lines = Path(src).read_text().splitlines()
+    header, tiles = [], []
+    i = 0
+    while i < len(lines) and ".byt" not in lines[i]:
+        header.append(re.sub(r"^\.link page \$c1\b", ".link page $c2", lines[i]))
+        i += 1
+    pending = []
+    for line in lines[i:]:
+        if ".byt" in line:
+            pending.extend(int(b, 16) for b in BYTE_RE.findall(line))
+            while len(pending) >= 16:
+                tiles.append(pending[:16])
+                pending = pending[16:]
+    for code, (_, px) in _mouse_glyphs(text=True).items():
+        tiles[code] = pixels_to_tile(px)
+    out = list(header)
+    for code, tile in enumerate(tiles):
+        out.extend(encode_tile_lines(tile, label="font" if code == 0 else None))
+    Path(dst).write_text("\n".join(out) + "\n")
 
 
 def add_mouse_glyphs():
@@ -1423,6 +1456,8 @@ def main():
         add_browser_icons()
     elif cmd == "addmouseglyphs":
         add_mouse_glyphs()
+    elif cmd == "tourfont":
+        tour_font(sys.argv[2], sys.argv[3])
     elif cmd == "addprogressbar":
         add_progressbar()
     elif cmd == "export":

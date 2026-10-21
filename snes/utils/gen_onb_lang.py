@@ -652,15 +652,15 @@ TEXTS = [
    'Xeno Crisis, la cartuccia del 2019 con un chip RP2040, ora funziona. Serve il dump della flash RP2040 della tua cartuccia, salvato come |/sd2snes/xenocrisis_rp2040.bin| sulla scheda. La musica arriva da un pack |MSU-1| accanto alla ROM. Senza pack, il gioco ha solo gli effetti sonori.',
    'Теперь запускается Xeno Crisis - картридж 2019 года с чипом RP2040. Нужен дамп флеш-памяти RP2040 твоего картриджа, сохранённый как |xenocrisis_rp2040.bin| в папке |/sd2snes| на карте. Музыка берётся из |MSU-1| пака в папке рядом с ROM-файлом. Без него в игре будут только звуковые эффекты.',
    'Xeno Crisis, de cartridge uit 2019 met een RP2040-chip, draait nu. Hij heeft de RP2040-flashdump van je cartridge nodig, bewaard als |/sd2snes/xenocrisis_rp2040.bin| op de kaart. De muziek komt uit een |MSU-1|-pack naast de ROM. Zonder pack heeft het spel alleen geluidseffecten.'),
-  # 43 the SNES Mouse in the menu (2.18)
-  ('Plug a SNES Mouse into either port and the menu shows a pointer. Left click is [A], right click is [B], both together are [X] and holding the right one is [Y]. Push the pointer against the top or bottom edge to scroll the list.',
-   'Ligue um SNES Mouse em qualquer porta e o menu mostra um ponteiro. O clique esquerdo é [A], o direito é [B], os dois juntos são [X] e segurar o direito é [Y]. Encoste o ponteiro na borda de cima ou de baixo para rolar a lista.',
-   'Conecta un SNES Mouse en cualquier puerto y el menú muestra un puntero. El clic izquierdo es [A], el derecho es [B], los dos juntos son [X] y mantener el derecho es [Y]. Lleva el puntero al borde de arriba o de abajo para desplazar la lista.',
-   'Steck eine SNES Mouse in einen der beiden Ports, und das Menü zeigt einen Zeiger. Linksklick ist [A], Rechtsklick [B], beide zusammen [X], rechts gedrückt halten [Y]. Schieb den Zeiger an den oberen oder unteren Rand, um die Liste zu blättern.',
-   "Branche une SNES Mouse sur l'un des ports et le menu affiche un pointeur. Le clic gauche fait [A], le droit [B], les deux ensemble [X] et le droit maintenu [Y]. Pousse le pointeur contre le bord haut ou bas pour faire défiler la liste.",
-   'Collega un SNES Mouse a una delle due porte e il menu mostra un puntatore. Il clic sinistro è [A], il destro è [B], i due insieme sono [X] e tenere premuto il destro è [Y]. Spingi il puntatore contro il bordo in alto o in basso per scorrere la lista.',
-   'Подключи мышь для SNES к любому порту, и в меню появится курсор. [Левая] кнопка работает как [A], [Правая] как [B], [Обе] как [X], а удержание [Правой] как [Y]. Упри курсор в верхний или нижний край, чтобы прокрутить список.',
-   'Sluit een SNES Mouse aan op een van beide poorten en het menu toont een aanwijzer. Linksklikken is [A], rechtsklikken [B], beide samen [X] en rechts ingedrukt houden [Y]. Duw de aanwijzer tegen de boven- of onderrand om door de lijst te scrollen.'),
+  # 43 the SNES Mouse in the menu (2.18); [ML] [MR] [MB] [MRH] [MLH] draw the mouse glyphs
+  ('Plug a SNES Mouse into either port and the menu shows a pointer. A left click [ML] is [A], a right click [MR] is [B], both together [MB] are [X] and holding the right one [MRH] is [Y]. In the music players, holding the left one [MLH] plays the next track and [MRH] the previous one. Push the pointer against the top or bottom edge to scroll the list.',
+   'Ligue um SNES Mouse em qualquer porta e o menu mostra um ponteiro. O clique esquerdo [ML] é [A], o direito [MR] é [B], os dois juntos [MB] são [X] e segurar o direito [MRH] é [Y]. Nos tocadores de música, segurar o esquerdo [MLH] passa para a próxima faixa e [MRH] volta para a anterior. Encoste o ponteiro na borda de cima ou de baixo para rolar a lista.',
+   'Conecta un SNES Mouse en cualquier puerto y el menú muestra un puntero. El clic izquierdo [ML] es [A], el derecho [MR] es [B], los dos juntos [MB] son [X] y mantener el derecho [MRH] es [Y]. En los reproductores de música, mantener el izquierdo [MLH] pasa a la pista siguiente y [MRH] vuelve a la anterior. Lleva el puntero al borde de arriba o de abajo para desplazar la lista.',
+   'Steck eine SNES Mouse in einen der beiden Ports, und das Menü zeigt einen Zeiger. Linksklick [ML] ist [A], Rechtsklick [MR] ist [B], beide zusammen [MB] sind [X], rechts gedrückt halten [MRH] ist [Y]. In den Musik-Playern springt links gedrückt halten [MLH] zum nächsten Titel und [MRH] zum vorherigen. Schieb den Zeiger an den oberen oder unteren Rand, um die Liste zu blättern.',
+   "Branche une SNES Mouse sur l'un des ports et le menu affiche un pointeur. Le clic gauche [ML] fait [A], le clic droit [MR] fait [B], les deux ensemble [MB] font [X] et le droit maintenu [MRH] fait [Y]. Dans les lecteurs de musique, le gauche maintenu [MLH] passe à la piste suivante et [MRH] revient à la précédente. Pousse le pointeur contre le bord haut ou bas pour faire défiler la liste.",
+   'Collega un SNES Mouse a una delle due porte e il menu mostra un puntatore. Il clic sinistro [ML] è [A], il destro [MR] è [B], i due insieme [MB] sono [X] e tenere premuto il destro [MRH] è [Y]. Nei lettori musicali, tenere premuto il sinistro [MLH] passa alla traccia successiva e [MRH] torna alla precedente. Spingi il puntatore contro il bordo in alto o in basso per scorrere la lista.',
+   'Подключи мышь для SNES к любому порту, и в меню появится курсор. Левая кнопка [ML] работает как [A], правая [MR] как [B], обе [MB] как [X], а удержание правой [MRH] как [Y]. В проигрывателях удержание левой [MLH] включает следующий трек, а [MRH] - предыдущий. Упри курсор в верхний или нижний край, чтобы прокрутить список.',
+   'Sluit een SNES Mouse aan op een van beide poorten en het menu toont een aanwijzer. Linksklikken [ML] is [A], rechtsklikken [MR] is [B], beide samen [MB] is [X] en rechts ingedrukt houden [MRH] is [Y]. In de muziekspelers gaat links ingedrukt houden [MLH] naar het volgende nummer en [MRH] naar het vorige. Duw de aanwijzer tegen de boven- of onderrand om door de lijst te scrollen.'),
   # 44 the music players: |.pcm| (seek, playlist) and |.spc| (2.18)
   ("A |.pcm| or |.spc| in the list opens its player, and the folder is a playlist: the next track plays when one ends, [L]/[R] skip tracks. On a |.pcm|, [Left]/[Right] jump 5 s (hold for more) and a click on the bar seeks. An |.spc| shows its length, then moves on.",
    'Um |.pcm| ou |.spc| na lista abre o tocador, e a pasta vira playlist: quando uma faixa acaba toca a próxima, [L]/[R] trocam de faixa. No |.pcm|, [Esquerda]/[Direita] pulam 5 s (segure para mais) e um clique na barra pula para lá. O |.spc| mostra a duração e depois segue.',
@@ -835,6 +835,33 @@ TEXTS = [
    'Elke optie in {cfg} toont in een kader een zin die uitlegt wat ze doet, in de taal van het menu, zodat elke instelling zonder handleiding duidelijk is.'),
 ]
 
+# The SNES Mouse's gestures in a paragraph, [ML] [MR] [MB] [MRH] [MLH] (build_const.py
+# MOUSE_TOKENS), are drawn as the menu legends' mouse glyph pairs, green like a key. Their
+# codes (176, 250-255) are the CJK marker and leads to onb_hiprint, so each glyph goes behind
+# MOUSE_ESC (onb_memmap.i65 ONB_MOUSE_ESC: "the next byte is a plain cell", no column of its
+# own). From the format to the encode a gesture is ONE private-use character, two cells wide,
+# so the wrap never splits it.
+MOUSE_ESC = 4
+_MOUSE_PUA = {k: chr(0xE000 + i) for i, k in enumerate(bc.MOUSE_TOKENS)}
+_PUA_GLYPHS = {_MOUSE_PUA[k]: g for k, (_, g) in bc.MOUSE_TOKENS.items()}
+
+
+def _mouse(text):
+    """A paragraph's [M..] gestures -> [<one private-use character>] (still green)."""
+    def sub(m):
+        if m.group(1) not in bc.MOUSE_TOKENS:
+            sys.exit("gen_onb_lang: unknown mouse gesture [%s] in %r (known: %s)"
+                     % (m.group(1), text, ", ".join("[%s]" % k for k in bc.MOUSE_TOKENS)))
+        return "[%s]" % _MOUSE_PUA[m.group(1)]
+    return bc.MOUSE_RE.sub(sub, text)
+
+
+def _mouse_bytes(text):
+    """The private-use characters -> their escaped glyph bytes ({N} raw bytes)."""
+    return "".join("".join("{%d}{%d}" % (MOUSE_ESC, c) for c in _PUA_GLYPHS[ch])
+                   if ch in _PUA_GLYPHS else ch for ch in text)
+
+
 def _has_cjk(text):
     return any(bc.is_cjk(ch) for ch in text)
 
@@ -852,6 +879,8 @@ def _cjk_cells(text):
             continue
         if ch in "[]|":
             pass
+        elif ch in _PUA_GLYPHS:                 # a mouse gesture: two plain cells
+            off += 2
         elif ch == ';':
             sys.exit("gen_onb_lang: %r is not allowed in %r" % (ch, text))
         elif bc.is_cjk(ch):
@@ -873,6 +902,9 @@ def _cells(text):
     n = 0
     for ch in text:
         if ch in "[]|":                 # colour markup ([green], |blue|): no cell (see _encode_line)
+            continue
+        if ch in _PUA_GLYPHS:           # a mouse gesture: its glyph pair
+            n += 2
             continue
         if ch == ';':
             # the font has no ';' (it draws as //)
@@ -994,11 +1026,12 @@ def _encode_line(line):
     _check_markup(line)
     if _has_cjk(line):
         # one encode for the whole line: a CJK string carries ONE marker, at its start, and
-        # the toggles take no column in its alignment
+        # the toggles (and the mouse escapes) take no column in its alignment
         t = "".join("{%d}" % _TOGGLES[ch] if ch in _TOGGLES else ch for ch in line)
         while t.endswith(("{%d}" % BTN_TOGGLE, "{%d}" % BLUE_TOGGLE)):
             t = t[:-3]
-        return encode_string(t, zero_width=(BTN_TOGGLE, BLUE_TOGGLE))[:-3]
+        return encode_string(_mouse_bytes(t), zero_width=(BTN_TOGGLE, BLUE_TOGGLE, MOUSE_ESC))[:-3]
+    line = _mouse_bytes(line)
     toks, seg = [], ""
     for ch in line + "\0":
         if ch in _TOGGLES or ch == "\0":
@@ -1115,7 +1148,7 @@ for _n, (_names, _texts) in enumerate(zip(NAMES, TEXTS), 1):
             sys.exit("gen_onb_lang: {placeholder} inside |blue| in %r" % _t)
         _t = _t.format(**{key: "|%s|" % STRINGS[lab][_k] for key, lab in _LABELS.items()},
                        **{key: "|%s|" % words[_k] for key, words in _MENU_WORDS.items()})
-        cols.append(_carry_blue(_wrap(_t, TEXT_W)))
+        cols.append(_carry_blue(_wrap(_mouse(_t), TEXT_W)))
     _wrapped.append(cols)
 # pad: every language of a card to its longest, and the "and more" items to each other
 _MORE = range(MORE_FIRST, len(_wrapped))

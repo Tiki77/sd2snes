@@ -76,12 +76,13 @@ all: $(OUT) $(IGMENU) $(ONB_OUT) $(MAP) lang_ja.fnt lang_zh.fnt
 # every other language's (onb_str_<bank>.a65) and a glyph sheet each (onb_cjk_sheets.a65 = ja + the
 # common glyphs, onb_cjk_sheets_zh.a65).
 # The tour's copy of the menu font, in the picture bank $C2: the tour's $C1 is full with pool A and
-# the Chinese pool. The same data as font.a65, only its .link page differs (it is read
+# the Chinese pool. The same data as font.a65 but its .link page and the mouse glyphs (it is read
 # bank-agnostically, #^font / @font,x / the _GFXPTR_ bank byte). It must stay in $C0-$C2: the
 # firmware remaps a theme's font edges only inside the first THEME_MENU_SIZE bytes (src/theme.c).
-# The menu's own font stays in $C1.
-onboarding/onb_font.a65: font.a65
-	sed -e 's/^\.link page \$$c1/.link page $$c2/' $< > $@
+# The menu's own font stays in $C1. The copy draws the mouse glyphs for text: one pixel
+# further right than the menu's legend glyphs (utils/fontedit.py tour_font).
+onboarding/onb_font.a65: font.a65 utils/fontedit.py
+	python3 utils/fontedit.py tourfont $< $@
 
 onboarding/onb_const_lang.a65 onboarding/onb_const_lang_b.a65 onboarding/onb_const_lang_t.a65 onboarding/onb_str_c2.a65 onboarding/onb_str_c3.a65 onboarding/onb_str_c5.a65 onboarding/onb_str_c6.a65 onboarding/onb_str_c7.a65 onboarding/onb_str_c8.a65 onboarding/onb_str_c9.a65 onboarding/onb_str_ca.a65 onboarding/onb_str_cb.a65 onboarding/onb_cjk_sheets.a65 onboarding/onb_cjk_sheets_zh.a65 &: utils/gen_onb_lang.py utils/build_const.py const.a65 utils/lang_ptbr.py utils/lang_es.py utils/lang_de.py utils/lang_fr.py utils/lang_it.py utils/lang_ru.py utils/lang_nl.py utils/lang_ja.py utils/lang_zh.py utils/onb_lang_ja.json utils/onb_lang_zh.json fonts/misaki_gothic_2nd.hex fonts/fusion8_zh_hans.hex
 	python3 utils/gen_onb_lang.py -o onboarding/onb_const_lang.a65
