@@ -1145,7 +1145,7 @@
 #define TYPE_PARENT                 $80
 
 #define DIM_BRIGHTNESS              $03
-/* ---- the browser's file manager (src/fileman.h; menu side: fmres.a65 resident in $C2,
+/* ---- the browser's file manager (src/fileman.h; menu side: fmres.a65 resident in $C1,
    fileman.a65 in $C3) ---------------------------------------------------------------- */
 #define FM_MARKS                    $FFA000 /* 2048 B: bit i = directory entry i marked (SNES-written). Lockstep with SRAM_FM_MARKS_ADDR */
 #define FM_STAT                     $FFA800 /* fm_stat_t (fileops.bin). Lockstep with SRAM_FM_STAT_ADDR */

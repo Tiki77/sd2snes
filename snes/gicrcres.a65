@@ -3,10 +3,10 @@
 ; magic first (fmr_magic, fmres.a65). Without it the title row is drawn the old way by
 ; gi_build_body_normal and nothing ticks. .as in.
 
-.link page $c2
+.link page $c1
 #include "memmap.i65"
-; memmap.i65 re-asserts '.link page $c0' on include; re-declare $c2 AFTER it.
-.link page $c2
+; memmap.i65 re-asserts '.link page $c0' on include; re-declare $c1 AFTER it.
+.link page $c1
 
 ; carry CLEAR = the row is drawn (gicrc_title rtl's straight back to the caller)
 gicrc_title_c2:

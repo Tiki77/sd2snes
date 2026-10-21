@@ -8,7 +8,7 @@
 ;  bank only asks and shows.  The contract is src/fileman.h (FM_* in memmap.i65).
 ;
 ;  WHERE IT LIVES.  Bank $C3, which the Ficha's guide viewer borrows: nothing outside this
-;  bank may reach in without fm_bank_ok (fmres.a65, $C2), and that is also where the
+;  bank may reach in without fm_bank_ok (fmres.a65, $C1), and that is also where the
 ;  browser's every-frame parts are (the selection mode's keys and boxes, the clipboard's
 ;  icon).  Its strings are its own too (const_lang_fm.a65: text_fm_* / mtext_fm_*, read
 ;  through fm_str, never through resolve_str).

@@ -7,7 +7,7 @@
 ; browser's way of showing a long name): it never reaches into the CRC. Without the magic (an
 ; older firmware) the row is the old one: GI_TITLE across the whole width, no CRC.
 ;
-; Bank $C3 (the others are full), so it is reached only through the stubs of gicrcres.a65 ($C2),
+; Bank $C3 (the others are full), so it is reached only through the stubs of gicrcres.a65 ($C1),
 ; which check the bank's magic first: the Ficha's guide viewer borrows $C3, and gameinfo_query
 ; has it put back (fm_bank_ok) before it asks for the next game. Entered with DBR = 0 (the redraw
 ; goes through gi_call_sel_flush, which writes the PPU registers by absolute address). Every

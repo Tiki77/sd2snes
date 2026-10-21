@@ -11,10 +11,10 @@
 ; fileops.bin (src/modules/fileops/), the contract src/fileman.h.  A firmware without the
 ; file manager never publishes FM_CLIPINFO, and then nothing here does anything.
 
-.link page $c2
+.link page $c1
 #include "memmap.i65"
-; memmap.i65 re-asserts '.link page $c0' on include; re-declare $c2 AFTER it.
-.link page $c2
+; memmap.i65 re-asserts '.link page $c0' on include; re-declare $c1 AFTER it.
+.link page $c1
 
 
 ; ======================================================================
