@@ -191,7 +191,11 @@ static void prepare_audio_track(uint16_t msu_track, uint32_t audio_offset) {
   if(f_open(&msuaudio, (const TCHAR*)file_buf, FA_READ) == FR_OK) {
     msuaudio.cltbl = pcm_cltbl;
     pcm_cltbl[0] = CLTBL_SIZE;
-    f_lseek(&msuaudio, CREATE_LINKMAP);
+    /* A track in more fragments than the table holds (49) gets a truncated, unterminated
+       map: past the last stored fragment f_read picks clusters out of whatever follows the
+       table, plays the wrong data and finally fails for good (FatFs keeps the error), and
+       the DAC loops its 2 KB buffer.  Such a file streams by the FAT chain instead. */
+    if(f_lseek(&msuaudio, CREATE_LINKMAP) != FR_OK) msuaudio.cltbl = NULL;
     f_lseek(&msuaudio, MSU_PCM_OFFSET_LOOPPOINT);
     f_read(&msuaudio, &msu_loop_point, sizeof(msu_loop_point), &msu_audio_bytes_read);
     DBG_MSU1 printf("loop point: %ld samples\n", msu_loop_point);
@@ -326,6 +330,7 @@ int msu1_check(uint8_t* filename) {
   msu_cltbl[0] = CLTBL_SIZE;
   if(f_lseek(&msudata, CREATE_LINKMAP)) {
     printf("Error creating FF linkmap for MSU file!\n");
+    msudata.cltbl = NULL;  /* truncated map: use the FAT chain (see prepare_audio_track) */
   }
   romprops.fpga_features |= FEAT_MSU1;
   return 1;
