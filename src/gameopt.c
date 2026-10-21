@@ -30,6 +30,7 @@
 #include "smc.h"
 #include "util.h"
 #include "gameopt.h"
+#include "scratch.h"
 
 extern cfg_t CFG;
 extern snes_romprops_t romprops;
@@ -130,11 +131,18 @@ static const char go_key_ss[]  = "SaveStateSlot";
 /* While a game runs CFG holds its values and go_glob the globals (gameopt_swap).  Both
    arrays are written by gameopt_apply before anything reads them. */
 static uint8_t go_active;
-static uint8_t go_val[GO_N] IN_AHBRAM;
-static uint8_t go_glob[GO_N] IN_AHBRAM;
-/* The lines of the file this firmware does not know, kept for the rewrite. */
+static uint8_t go_val[GO_N];
+static uint8_t go_glob[GO_N];
+/* The lines of the file this firmware does not know, kept for the rewrite: the scratch
+   LEAF, held from the read to the write by the two callers that write (go_keep_take).
+   NULL = not held: the read keeps nothing and the write refuses.  Not a buffer of its
+   own in AHB RAM: those bytes come out of the card modules' block (module.c), and the
+   336 B these three arrays took there left fileops.bin without room for its buffers --
+   every paste / rename / new folder failed as a card error on the LPC boards. */
 #define GO_KEEP 256
-static char go_keep[GO_KEEP] IN_AHBRAM;
+typedef char go_keep_t[GO_KEEP];
+SCRATCH_FITS(go_keep_t, SCRATCH_LEAF_BYTES);
+static char *go_keep;
 static uint16_t go_keep_len;
 static uint8_t go_keep_full;
 static uint16_t go_any;                      /* go_write: something went into the file */
@@ -229,7 +237,7 @@ static const char *go_key(unsigned i, uint8_t *isbool) {
    "Key: value" as config.yml writes them (the key from the start of the line to the colon). */
 void gameopt_line(gameopt_file_t *f, char *line) {
   size_t len = strlen(line);
-  int fits = go_keep_len + len + 2 <= GO_KEEP;     /* + the '\n' a last line lacks + NUL */
+  int fits = go_keep && go_keep_len + len + 2 <= GO_KEEP;   /* + the '\n' a last line lacks + NUL */
   char *c = strchr(line, ':'), *v, *e;
   if(fits) memcpy(go_keep + go_keep_len, line, len + 1);
   if((unsigned char)*line <= ' ' || *line == '-') return;     /* blank, or the "---" */
@@ -253,6 +261,7 @@ void gameopt_line(gameopt_file_t *f, char *line) {
       return;
     }
   }
+  if(!go_keep) return;                       /* a read that will not be written back */
   if(!fits) { go_keep_full = 1; return; }
   go_keep_len += len;
   if(go_keep[go_keep_len - 1] != '\n') go_keep[go_keep_len++] = '\n';
@@ -266,7 +275,7 @@ static __attribute__((noinline)) void go_read(const char *src, gameopt_file_t *f
   f->legacy = 0;
   go_keep_len = 0;
   go_keep_full = 0;
-  go_keep[0] = 0;
+  if(go_keep) go_keep[0] = 0;
   if(path_asset(path, 256, SAVE_BASEDIR, src, ".yml") >= 0) {
     file_open((uint8_t *)path, FA_READ);
     if(!file_res) while(f_gets(line, sizeof(line), &file_handle)) gameopt_line(f, line);
@@ -300,7 +309,7 @@ static void go_put(const char *key, int v, uint8_t isbool) {
    Nothing left to say = no file.  0 = the card refused it. */
 static __attribute__((noinline)) int go_write(const char *src, const gameopt_file_t *f, char *path) {
   int ok;
-  if(go_keep_full) return 0;                 /* a line we could not hold would be lost */
+  if(!go_keep || go_keep_full) return 0;     /* a line we could not hold would be lost */
   if(path_asset(path, 256, SAVE_BASEDIR, src, ".yml") < 0) return 0;
   path_asset_mkdir(path);
   file_open((uint8_t *)path, FA_CREATE_ALWAYS | FA_WRITE);
@@ -409,11 +418,25 @@ static void go_live(void) {
   fpga_set_dac_boost(CFG.msu_volume_boost);
 }
 
+/* The scratch LEAF for the kept lines; 0 = someone holds it (the write then fails). */
+static int go_keep_take(void) {
+  if(!scratch_leaf_take(SCR_GAMEOPT)) return 0;
+  go_keep = (char *)SCRATCH_LEAF(go_keep_t);
+  return 1;
+}
+
+static void go_keep_drop(void) {
+  if(!go_keep) return;
+  go_keep = NULL;
+  scratch_leaf_drop();
+}
+
 void gameopt_command(const char *src, uint8_t op, uint8_t idx, uint8_t val, int live) {
   gameopt_file_t f;
   char path[256];
   uint8_t result = GAMEOPT_RES_OK;
   printf("gameopt %s: op=%d idx=%d val=%d live=%d\n", src, op, idx, val, live);
+  if(op == GAMEOPT_OP_SET) go_keep_take();
   go_read(src, &f, path);
   if(op == GAMEOPT_OP_SET) {
     if(idx >= GO_N || go_na(idx)
@@ -436,6 +459,7 @@ void gameopt_command(const char *src, uint8_t op, uint8_t idx, uint8_t val, int 
       }
     }
   }
+  go_keep_drop();
   go_stage(live ? go_val : f.val, result);
 }
 
@@ -450,8 +474,12 @@ void gameopt_slots(const char *src, uint8_t *srm, uint8_t *ss) {
 int gameopt_slots_set(const char *src, uint8_t srm, uint8_t ss) {
   gameopt_file_t f;
   char path[256];
+  int ok;
+  go_keep_take();
   go_read(src, &f, path);
   f.srm = srm < GAMEOPT_SLOTS ? srm : 0;
   f.ss = ss < GAMEOPT_SLOTS ? ss : 0;
-  return go_write(src, &f, path);
+  ok = go_write(src, &f, path);
+  go_keep_drop();
+  return ok;
 }

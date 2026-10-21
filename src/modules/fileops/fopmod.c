@@ -75,6 +75,9 @@
 #define FOP_NBUF        5         /* P, Q, L (the LFN buffer), A, B */
 #define FOP_BUF_MIN     512
 #define FOP_BUF_MAX     4096
+#ifdef FOP_SPARE_MIN   /* the build's module-block check (src/Makefile modcheck) */
+_Static_assert(FOP_NBUF * FOP_PATH + FOP_BUF_MIN == FOP_SPARE_MIN, "FOP_SPARE_MIN in src/Makefile");
+#endif
 #define FOP_RD          512       /* a sector: the copy buffer is a whole number of them */
 #define FOP_SLICE       1         /* ticks (10 ms) of work per idle() */
 /* SRAM_FM_WORK_ADDR..END (128 KB) is ours, split by what runs at the same time:

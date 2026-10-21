@@ -16,6 +16,8 @@ CFLAGS := -mcpu=cortex-m3 -mthumb -mfloat-abi=soft -Os -fpic -fvisibility=hidden
           -ffunction-sections -fdata-sections -Wall -Wextra -Werror -I..
 
 MODULES := nsfplay memtest pcmplay rtc7110 fileops rmdir
+# the spare fopmod.c needs; the firmware's Makefile passes its own (its modcheck)
+FOP_SPARE_MIN ?= 1792
 nsfplay_SRC := nsfplay/nsfmod.c ../nsf.c ../nsfapu.c
 nsfplay_INC := -Insfplay
 memtest_SRC := memtest/mtmod.c
@@ -25,10 +27,10 @@ pcmplay_INC :=
 rtc7110_SRC := rtc7110/rtcmod.c ../spc7110rtc.c
 rtc7110_INC :=
 fileops_SRC := fileops/fopmod.c
-fileops_INC :=
+fileops_INC := -DFOP_SPARE_MIN=$(FOP_SPARE_MIN)
 # the file manager's delete: fopmod.c again, with only FM_OP_RMDIR (rmdir/rmmod.c)
 rmdir_SRC := rmdir/rmmod.c
-rmdir_INC :=
+rmdir_INC := -DFOP_SPARE_MIN=$(FOP_SPARE_MIN)
 
 all: $(MODULES:%=$(OUT)/%.bin)
 

@@ -21,6 +21,7 @@ cp ../../src/yaml.c    build/yaml_under_test.c    || exit 1
 cp ../../src/gameopt.c build/gameopt_under_test.c || exit 1
 cp ../../src/yaml.h    build/yaml.h               || exit 1
 cp ../../src/gameopt.h build/gameopt.h            || exit 1
+cp ../../src/scratch.c build/scratch_under_test.c || exit 1   # the LEAF the rewrite keeps its lines in
 {
   printf '#include <stdint.h>\n'
   awk '/^void bcdtime2srtctime/,/^}/'  ../../src/lpc175x/rtc.c
@@ -49,7 +50,7 @@ build_one() { # <suffix> [extra cflags]
       -Dmain=cfg_cli_main -c cfg_cli.c -o "build/gameopt_cfgcli_$1.o" || return 1
   $CC -O1 -g -Wall -Wno-format -fsanitize=address,undefined ${2:-} $MAPDEFS $inc \
       gameopt_cli.c build/gameopt_under_test.c build/cfg_under_test.c build/yaml_under_test.c \
-      build/rtc_under_test.c ../../src/strutil.c "build/gameopt_cfgcli_$1.o" \
+      build/rtc_under_test.c ../../src/strutil.c build/scratch_under_test.c "build/gameopt_cfgcli_$1.o" \
       -o "build/gameopt_cli_$1"
 }
 build_one mk2 -DCONFIG_MK2 || exit 1

@@ -20,6 +20,7 @@
 #include "config.h"
 #include "ff.h"
 #include "fileops.h"
+#include "scratch.h"
 #include "memory.h"
 #include "cfg.h"
 #include "smc.h"
@@ -193,6 +194,24 @@ int main(void) {
   if(fails) printf("Game.yml now:\n%s---\n", slurp("Game.yml"));
   CHECK(!strstr(slurp("Game.yml"), "SaveStateSlot"));                  /* it said nothing */
   CHECK(!strstr(slurp("Game.yml"), "EnableAutoSave"));                 /* -1 is not written */
+  /* the kept lines live in the scratch LEAF: held by someone else, the rewrite is refused
+     and the file stays as it was; after a write the LEAF is free again */
+  {
+    char before[4096];
+    snprintf(before, sizeof(before), "%s", slurp("Game.yml"));
+    CHECK(scratch_leaf_take(SCR_COVER));
+    gameopt_command(g, GAMEOPT_OP_SET, (uint8_t)ibright, 5, 1);
+    sram_readblock(b, SRAM_GAMEOPT_ADDR, sizeof(b));
+    CHECK(b[GAMEOPT_H_RESULT] == GAMEOPT_RES_FAIL);
+    CHECK(!strcmp(before, slurp("Game.yml")));
+    CHECK(!gameopt_slots_set(g, 1, 1));
+    CHECK(!strcmp(before, slurp("Game.yml")));
+    scratch_leaf_drop();
+    CHECK(gameopt_slots_set(g, 2, 0));
+    CHECK(scratch_leaf_take(SCR_COVER));
+    scratch_leaf_drop();
+    CHECK(has("Game.yml", "FutureKey: hello") && has("Game.yml", "SaveGameSlot: 3"));
+  }
   gameopt_command(g, GAMEOPT_OP_SET, (uint8_t)ibright, 3, 1);
   CHECK(CFG.brightness_limit == 3);
   CHECK((last_features & FEAT_2100_LIMIT(15)) == FEAT_2100_LIMIT(3));

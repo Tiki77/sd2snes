@@ -15,7 +15,9 @@
  *
  *   LEAF   a self-contained helper that does not call another LEAF user: load_cover,
  *          gi_cov_to_gcv, gi_value_scan, the manual stagers, igmenu_stage, a26_id,
- *          scan_dir (the path of the MSU-1 folder probe), dirindex_prepare.
+ *          scan_dir (the path of the MSU-1 folder probe), dirindex_prepare, and the
+ *          rewrite of a game's options file (gameopt.c: the lines it keeps, between
+ *          reading the file and writing it back).
  *          A LEAF user may run inside a FRAME owner (gameinfo_load calls three of them).
  *          Every LEAF user takes the region with scratch_leaf_take() and drops it on the
  *          way out.  A second taker is REFUSED and fails the way its own error path
@@ -53,7 +55,8 @@ enum {
   SCR_IGMENU,
   SCR_A26,
   SCR_GI_CJK,
-  SCR_DIRINDEX
+  SCR_DIRINDEX,
+  SCR_GAMEOPT
 };
 
 /* 1 = taken; 0 = someone else holds it (logged), caller takes its failure path */

@@ -263,7 +263,7 @@ ALL_ASFLAGS = -I. -x assembler-with-cpp $(ASFLAGS) $(CDEFS)
 # Default target.
 all: build
 
-build: elf bin hex xc_soc modules
+build: elf bin hex xc_soc modules modcheck
 	$(E) "  SIZE   $(TARGET).elf"
 	$(Q)$(ELFSIZE)|grep -v debug
 	cp $(TARGET).bin $(OBJDIR)/$(CONFIG_FW_FILE)
@@ -277,8 +277,31 @@ xc_soc:
 
 # Card module images (modules/Makefile): one image per module, for every board.
 modules:
-	$(Q)$(MAKE) -s -C modules OUT=../$(OBJDIR)
+	$(Q)$(MAKE) -s -C modules OUT=../$(OBJDIR) FOP_SPARE_MIN=$(FOP_SPARE_MIN)
 .PHONY: modules
+
+# The module block (module.c) is ptrcache up to MOD_END, so every byte the firmware adds to
+# .ahbram comes out of it, and a module that loads but has too little spare left fails at
+# its start: fileops.bin / rmdir.bin then answer every op with "the card refused a read or a
+# write" (FM_ERR_IO), and nothing in a build said so.  This fails the build instead.
+# FOP_SPARE_MIN = the spare fopmod.c needs (FOP_NBUF * FOP_PATH + FOP_BUF_MIN, asserted there).
+FOP_SPARE_MIN = 1792
+ifeq ($(CONFIG_MK3_STM32),y)
+MODCHECK_END = 0x$$($(NM) $(TARGET).elf | awk '$$3 == "__ahbram_end__" { print $$1 }')
+else
+MODCHECK_END = 0x20080000
+endif
+modcheck: elf modules
+	$(Q)start=$$($(NM) $(TARGET).elf | awk '$$3 == "ptrcache" { print $$1 }'); \
+	  [ -n "$$start" ] || { echo "modcheck: no ptrcache in $(TARGET).elf"; exit 1; }; \
+	  block=$$(( $(MODCHECK_END) - 0x$$start )); \
+	  for m in fileops rmdir; do \
+	    img=$$(( ($$(wc -c < $(OBJDIR)/$$m.bin) + 3) & ~3 )); \
+	    left=$$(( block - img - $(FOP_SPARE_MIN) )); \
+	    echo "  MODCHECK $$m.bin: $$img of a $$block B block, $$left B over the spare it needs"; \
+	    [ $$left -ge 0 ] || { echo "modcheck: $$m.bin does not fit the module block"; exit 1; }; \
+	  done
+.PHONY: modcheck
 
 elf: $(TARGET).elf
 bin: $(TARGET).bin
