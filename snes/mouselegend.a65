@@ -19,12 +19,13 @@ mouse_keys:
 mouse_keypair:
   .word 250*2, 252*2, 254*2, 252*2, 250*2
   .word 251*2, 253*2, 255*2, 176*2, 31*2
-; per key number 1-5: the browser's pad flag (offset from pad_b, data.a65 order) ...
+; per key number 1-7 (mouse_word_key): the browser's pad flag (offset from pad_b, data.a65
+; order) ...
 mouse_keyflag:
-  .byt 8, 0, 9, 1, 2             ; pad_a pad_b pad_x pad_y pad_select
+  .byt 8, 0, 9, 1, 2, 10, 11     ; pad_a pad_b pad_x pad_y pad_select pad_l pad_r
 ; ... and the bit in a pad word (low byte, high byte)
 mouse_keyword:
-  .word $0080, $8000, $0040, $4000, $2000
+  .word $0080, $8000, $0040, $4000, $2000, $0020, $0010
 
 ; mouse_legend_scan: hint_keys, before it walks a line ([X, the end on the stack)): where do
 ; both buttons go on it? On Sel when the line has a Sel key and either no X key or it is game

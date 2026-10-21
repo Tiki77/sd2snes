@@ -49,6 +49,7 @@
 #define MOUSE_FHIDE     120      ; game info: idle frames before the pointer hides
 #define MOUSE_FTILE     $5FF0    ; game info: the pointer's tile, VRAM nobody shows there
 #define MOUSE_FOBSEL    $02      ; game info: OBJ base $4000, name $1FF = $5FF0
+#define MOUSE_FBAND     16       ; game info: the image band's rows (0..15, GI_BAND_ROWS)
 #define MOUSE_FDESC0    23       ; game info: the short description's rows
 #define MOUSE_FDESC1    24
 #define MOUSE_FFOOT     26       ; game info: the key legend's row
@@ -1498,8 +1499,9 @@ mvm_set:
   plp
   rtl
 
-; mouse_ficha_word: game info. The drag / click word of mode 3, a click on the short
-; description = Y and on the footer = the key it names. The pointer itself is drawn by the
+; mouse_ficha_word: game info. The drag / click word of mode 3: a click on the image band
+; (screenshot or clip, cover) = A, on the short description = Y, on the footer = the key it
+; names (L and R too), anywhere else nothing. The pointer itself is drawn by the
 ; NMI (mouse_nmi_off -> mouse_ficha_draw): from the main loop, on the console, some of the
 ; OAM writes landed outside VBlank and scattered the pointer's bytes over other slots.
 mouse_ficha_word:
@@ -1560,10 +1562,12 @@ mfw_notkey:
   lda @gi_desc_full
   bne mfw_swallow                ; the full description: a click does nothing
   lda @mouse_trow
+  cmp #MOUSE_FBAND               ; the image band (the screenshot or clip, the cover): the
+  bcc mfw_drag                   ; click stays, and plays the game (A)
   cmp #MOUSE_FDESC0
-  bcc mfw_drag
+  bcc mfw_swallow                ; anywhere else it does nothing
   cmp #MOUSE_FDESC1+1
-  bcs mfw_drag
+  bcs mfw_swallow
   rep #$20 : .al
   lda #$4000                     ; Y: the full description
 mfw_take:
@@ -2532,7 +2536,8 @@ ml_out:
 ; mouse_legend_key: A = the key-legend row. When the pointer is on it, the key of the item
 ; under it, read back from the tilemap buffer like hint_keys (manhost.a65) reads it to paint
 ; it -- language-independent, no layout constants. An item is "Key:Label" or "Key: Label";
-; a click on the label counts. Out: A (8-bit) = 1 A, 2 B, 3 X, 4 Y, 5 Select, 0 none (Z).
+; a click on the label counts. Out: A (8-bit) = 1 A, 2 B, 3 X, 4 Y, 5 Select, 6 L, 7 R,
+; 0 none (Z).
 mouse_legend_key:
   .as : .xl
   cmp @mouse_trow
@@ -2591,7 +2596,7 @@ mws_out:
   rts
 
 ; mouse_word_key: X = half-column in a word. When the word is "<key>:", A = the key
-; (1-5, Z clear), else 0 (Z set). 16-bit A; X preserved.
+; (1-7, Z clear), else 0 (Z set). 16-bit A; X preserved.
 mouse_word_key:
   .al : .xl
   phx
@@ -2677,7 +2682,16 @@ mwk_find:
   inx
   cpx #$0008
   bcc mwk_find
-  bra mwk_no
+  cmp #$004c                     ; L and R: keys no mouse button stands for (game info's
+  beq mwk_kl                     ; footer names them), 6 and 7
+  cmp #$0052
+  bne mwk_no
+  lda #$0007
+  bra mwk_ret
+mwk_kl:
+  .al : .xl
+  lda #$0006
+  bra mwk_ret
 mwk_hit:
   .al : .xl
   txa
