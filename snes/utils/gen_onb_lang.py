@@ -193,7 +193,7 @@ NAMES = [
   # 30 the memory test of the main menu
   ('Memory test', 'Teste de memória', 'Prueba de memoria', 'Speichertest', 'Test mémoire', 'Test di memoria', 'Тест памяти', 'Geheugentest'),
   # 31 the Mk.II LED codes for a boot without a picture
-  ('Mk.II boot errors on the LED', 'Erros de boot no LED do Mk.II', 'Errores de arranque en el LED', 'Startfehler an der Mk.II-LED', 'LED du Mk.II au démarrage', 'Errori di avvio sul LED Mk.II', 'Ошибки запуска на LED Mk.II', 'Opstartfouten op de Mk.II-LED'),
+  ('Mk.II boot errors on the LED', 'Erros de boot no LED do Mk.II', 'Errores de arranque en el LED', 'Startfehler an der Mk.II-LED', 'LED du Mk.II au démarrage', 'Errori di avvio sul LED Mk.II', 'Индикация ошибок запуска Mk.II', 'Opstartfouten op de Mk.II-LED'),
   # 32 "and more" (the base tour's last card)
   ('And more', 'E mais', 'Y más', 'Und mehr', 'Et plus', 'E altro', 'И многое другое', 'En meer'),
   # 33 the 2.17 section: what is new in this release
@@ -259,7 +259,7 @@ NAMES = [
   # 50 bus timing compat
   ('Bus timing compat', 'Compat. de barramento', 'Compat. de bus', 'Bus-Timing-Kompat.', 'Compat. timing bus', 'Compat. timing bus', 'Совместимость шины', 'Compat. bustiming'),
   # 51 the hardware model in System Information
-  ('Hardware model', 'Modelo do hardware', 'Modelo de hardware', 'Hardware-Modell', 'Modèle du matériel', "Modello dell'hardware", 'Модель оборудования', 'Hardwaremodel'),
+  ('Hardware model', 'Modelo do hardware', 'Modelo de hardware', 'Hardware-Modell', 'Modèle du matériel', "Modello dell'hardware", 'Модель картриджа', 'Hardwaremodel'),
   # 52 BS-X and the Memory Pack
   ('BS-X and Memory Pack', 'BS-X e Memory Pack', 'BS-X y Memory Pack', 'BS-X und Memory Pack', 'BS-X et Memory Pack', 'BS-X e Memory Pack', 'BS-X и Memory Pack', 'BS-X en Memory Pack'),
   # 53 delete files and saves
@@ -288,7 +288,7 @@ TEXTS = [
    'Das Menü und diese Tour in 10 Sprachen, das Ingame-Menü in 8. Bewege den Balken zum Testen: die Tour wechselt sofort. Später in den |Einstellungen| änderbar.',
    'Le menu et cette visite en 10 langues, le menu en jeu en 8. Déplace la barre pour essayer : la visite change aussitôt. Modifiable ensuite dans |Configuration|.',
    'Il menu e questo tour in 10 lingue, il menu in gioco in 8. Sposta la barra per provare: il tour cambia subito. Puoi cambiarla dopo in |Configurazione|.',
-   'Меню и этот тур на 10-ти языках, Меню в игре на 8-ми. Переместите ползунок, чтобы попробовать: тур переключится мгновенно. Позже это можно изменить в разделе |Настройки|.',
+   'Меню и этот тур на 10-ти языках, Меню в игре на 8-ми. Переместите курсор, чтобы попробовать: тур переключится мгновенно. Позже это можно изменить в разделе |Настройки|.',
    'Het menu en deze rondleiding in 10 talen, het in-game menu in 8. Beweeg de balk om te proberen: de rondleiding wisselt meteen. Later te wijzigen in |Configuratie|.'),
   # 2 themes: the |sd2snes+| theme, a |.thm| from the list, restoring it or the classic one
   ("Change the menu's logo, colours and gradient: pick a |.thm| in the list to apply it. Make your own in the |Theme Creator| or take one from the site's gallery. In {browser}, {restoretheme} brings back |sd2snes+|, the factory theme, and {restoreclassic} the old teal look (|classic.thm|).",
@@ -306,7 +306,7 @@ TEXTS = [
    'Der dunkle Rand um jeden Buchstaben des Menüs. {theme} folgt dem Theme, {on} zeichnet ihn immer, {off} lässt ihn weg und den Hintergrund durchscheinen. Bewege den Balken zum Testen: dieser Text ändert sich sofort, [A] übernimmt es fürs Menü.',
    "Le bord sombre autour de chaque lettre du menu. {theme} suit ce que veut le thème, {on} le dessine toujours, {off} l'enlève et laisse voir le fond. Déplace la barre pour essayer : ce texte change aussitôt, [A] le garde pour le menu.",
    'Il bordo scuro attorno a ogni lettera del menu. {theme} segue il tema, {on} lo disegna sempre, {off} lo toglie e lascia vedere lo sfondo. Sposta la barra per provare: questo testo cambia subito, [A] lo salva per il menu.',
-   'Тёмная обводка вокруг каждой буквы меню. {theme}: как задано в теме, {on}: всегда включено, {off}: без обводки, сквозь буквы виден фон. Переместите ползунок, чтобы попробовать: этот текст сразу изменится, а кнопка [A] сохранит выбор для меню.',
+   'Тёмная обводка вокруг каждой буквы меню. {theme}: как задано в теме, {on}: всегда включено, {off}: без обводки, сквозь буквы виден фон. Переместите курсор, чтобы попробовать: этот текст сразу изменится, а кнопка [A] сохранит выбор для меню.',
    'De donkere rand rond elke letter van het menu. {theme} volgt het thema, {on} tekent hem altijd, {off} laat hem weg zodat de achtergrond doorschijnt. Beweeg de balk om te proberen: deze tekst verandert meteen, [A] bewaart het voor het menu.'),
   # 4 text anti-aliasing: theme / on / off
   ('The half-tone step that smooths the curves of each letter. {theme} follows what the theme asks for, {on} always smooths, {off} draws the letters with hard pixels. Move the bar to try one: this text changes at once, and [A] keeps it for the menu.',
@@ -315,7 +315,7 @@ TEXTS = [
    'Die Halbtonstufe, die die Rundungen jedes Buchstabens glättet. {theme} folgt dem Theme, {on} glättet immer, {off} zeigt harte Pixel. Bewege den Balken zum Testen: dieser Text ändert sich sofort, [A] übernimmt es fürs Menü.',
    'Le demi-ton qui adoucit les courbes de chaque lettre. {theme} suit ce que veut le thème, {on} lisse toujours, {off} dessine les lettres en pixels nets. Déplace la barre pour essayer : ce texte change aussitôt, [A] le garde pour le menu.',
    'Il mezzo tono che ammorbidisce le curve di ogni lettera. {theme} segue il tema, {on} ammorbidisce sempre, {off} disegna le lettere a pixel netti. Sposta la barra per provare: questo testo cambia subito, [A] lo salva per il menu.',
-   'Полутон, который сглаживает изгибы каждой буквы. {theme}: как задано в теме, {on}: всегда включено, {off}: буквы из резких пикселей. Переместите ползунок, чтобы попробовать: этот текст сразу изменится, а кнопка [A] сохранит выбор для меню.',
+   'Полутон, который сглаживает изгибы каждой буквы. {theme}: как задано в теме, {on}: всегда включено, {off}: буквы из резких пикселей. Переместите курсор, чтобы попробовать: этот текст сразу изменится, а кнопка [A] сохранит выбор для меню.',
    'De halftoon die de rondingen van elke letter gladstrijkt. {theme} volgt het thema, {on} strijkt altijd glad, {off} tekent de letters met harde pixels. Beweeg de balk om te proberen: deze tekst verandert meteen, [A] bewaart het voor het menu.'),
   # 5 box art
   ("Shows the game's box art next to the list as you browse. {large} fills the top corner, {small} takes less room. Covers are |.cov| files: the |Web Manager| downloads them for your whole collection.",
@@ -324,7 +324,7 @@ TEXTS = [
    'Zeigt das Spielcover neben der Liste beim Blättern. {large} füllt die obere Ecke, {small} braucht weniger Platz. Cover sind |.cov|-Dateien: der |Web Manager| lädt sie für die ganze Sammlung.',
    'Affiche la jaquette du jeu à côté de la liste pendant la navigation. {large} occupe le coin du haut, {small} prend moins de place. Ce sont des fichiers |.cov| : le |Web Manager| les télécharge pour toute ta collection.',
    "Mostra la copertina del gioco accanto alla lista mentre navighi. {large} occupa l'angolo in alto, {small} occupa meno spazio. Sono file |.cov|: il |Web Manager| li scarica per tutta la collezione.",
-   'Показывает обложку игры рядом со списком. {large} - занимает верхний правый угол, {small} - меньше места на экране. Обложки это файлы |.cov|. Используй |Web Manager| на сайте, он скачает их для всей коллекции.',
+   'Показывает обложку игры рядом со списком. {large} - занимает верхний правый угол, {small} - меньше места на экране. Обложки это файлы |.cov|. Используй |Web Manager| на сайте, он скачает их для всей вашей коллекции.',
    'Toont de hoes van het spel naast de lijst tijdens het bladeren. {large} vult de bovenhoek, {small} neemt minder ruimte. Hoezen zijn |.cov|-bestanden: de |Web Manager| haalt ze op voor je hele collectie.'),
   # 6 covers in the Recent / Favorites lists (needs covers on)
   ('The box art of the game under the bar also shows in the Recent and Favorites lists, at the size chosen on the previous card. Only asked when covers are on.',
@@ -333,7 +333,7 @@ TEXTS = [
    'Das Cover des markierten Spiels erscheint auch in den Listen Letzte und Favoriten, in der zuvor gewählten Größe. Nur mit eingeschalteten Covern.',
    "La jaquette du jeu sous la barre s'affiche aussi dans les listes Récents et Favoris, à la taille choisie avant. Seulement si les jaquettes sont activées.",
    'La copertina del gioco sotto la barra appare anche negli elenchi Recenti e Preferiti, con la misura scelta prima. Solo con le copertine attive.',
-   'Если в настройках включено отображение обложек, то при наведении курсора на игру её обложка появится в списках |Недавние| и |Избранные|. Размер обложки соответствует вашим сохраненным настройкам.',
+   'Если в настройках включено отображение обложек, то при наведении курсора на игру её обложка появится в списках |Недавние| и |Избранные|. Размер обложки соответствует вашим сохранённым настройкам.',
    'De hoes van het spel onder de balk verschijnt ook in de lijsten Recent en Favorieten, op de eerder gekozen grootte. Alleen als hoezen aan staan.'),
   # 7 game info card
   ('A card with the cover, screenshot, publisher, year, genre and description before the game starts. {on}: [A] opens it. {ctx}: [A] starts the game and the card is in the [Y] menu. {off}: [A] starts the game. On the card, [Up] and [Down] jump to the previous or next game of the list.',
@@ -342,7 +342,7 @@ TEXTS = [
    'Eine Karte mit Cover, Screenshot, Publisher, Jahr, Genre und Beschreibung vor dem Start. {on}: [A] öffnet sie. {ctx}: [A] startet das Spiel, die Karte ist im [Y]-Menü. {off}: [A] startet das Spiel. Auf der Karte springen [Oben] und [Unten] zum vorigen oder nächsten Spiel.',
    "Une fiche avec jaquette, capture, éditeur, année, genre et description avant de jouer. {on} : [A] l'ouvre. {ctx} : [A] lance le jeu et la fiche est dans le menu [Y]. {off} : [A] lance le jeu. Sur la fiche, [Haut] et [Bas] passent au jeu précédent ou suivant.",
    'Una scheda con copertina, schermata, editore, anno, genere e descrizione prima di giocare. {on}: [A] la apre. {ctx}: [A] avvia il gioco e la scheda è nel menu [Y]. {off}: [A] avvia il gioco. Sulla scheda, [Su] e [Giù] passano al gioco precedente o successivo.',
-   'Карточка с обложкой, скриншотом, издателем, годом, жанром и описанием перед запуском игры. {on}: [A] открывает её. {ctx}: [A] запускает игру, [Y] карточка в меню. {off}: [A] сразу запускает игру. В карточке [Вверх] и [Вниз] - переход к предыдущей или следующей игре.',
+   'Карточка с обложкой, скриншотом, издателем, годом, жанром и описанием перед запуском игры. {on} - кнопка [A] открывает её. {ctx} - кнопка [A] запускает игру, а кнопка [Y] открывает карточку в меню. {off} - кнопка [A] сразу запускает игру. В карточке кнопки [Вверх] и [Вниз] - переход к предыдущей или следующей игре.',
    'Een kaart met hoes, screenshot, uitgever, jaar, genre en beschrijving voor het spelen. {on}: [A] opent hem. {ctx}: [A] start het spel, de kaart zit in het [Y]-menu. {off}: [A] start het spel. Op de kaart springen [Omhoog] en [Omlaag] naar het vorige of volgende spel.'),
   # 8 the video clip on the game info card (needs the card)
   ('When the game has a video clip (|.fmv| in |/sd2snes/info|), the game info card plays it in place of the still screenshot. With {no}, the card keeps the screenshot. Only asked when the game info card is on.',
@@ -351,7 +351,7 @@ TEXTS = [
    'Hat das Spiel einen Videoclip (|.fmv| in |/sd2snes/info|), spielt die Infokarte ihn statt des Standbilds ab. Mit {no} bleibt das Standbild. Nur mit eingeschalteter Infokarte.',
    'Si le jeu a un clip vidéo (|.fmv| dans |/sd2snes/info|), la fiche le joue à la place de la capture fixe. Avec {no}, la fiche garde la capture. Seulement si la fiche est activée.',
    'Se il gioco ha un video (|.fmv| in |/sd2snes/info|), la scheda lo riproduce al posto della schermata fissa. Con {no}, la scheda mostra la schermata. Solo con la scheda attiva.',
-   'Если у игры есть видеоролик (|.fmv| в |/sd2snes/info|), он воспроизводится в карточке вместо скриншота. Если выбрано - {no}, остаётся скриншот. Только если карточка в |Информация об игре| включена.',
+   'Если у игры есть видеоролик (|.fmv| в |/sd2snes/info|), он воспроизводится в карточке вместо скриншота. Если выбрано {no}, остаётся скриншот. Но только если карточка в |Информация об игре| включена.',
    'Heeft het spel een videoclip (|.fmv| in |/sd2snes/info|), dan speelt de spelinfo die af in plaats van de stilstaande screenshot. Met {no} blijft de screenshot. Alleen als de spelinfo aan staat.'),
   # 9 the clip's soundtrack (needs the video and the card)
   ("The clip's soundtrack (|.pcm| next to the |.fmv|) plays with it through the cartridge's |MSU-1| audio. With {no}, the clip plays silent. Only asked when the video is on.",
@@ -360,7 +360,7 @@ TEXTS = [
    'Der Ton des Clips (|.pcm| neben der |.fmv|) läuft über das |MSU-1|-Audio des Moduls mit. Mit {no} bleibt der Clip stumm. Nur mit eingeschaltetem Video.',
    "La bande-son du clip (|.pcm| à côté du |.fmv|) joue avec lui par l'audio |MSU-1| de la cartouche. Avec {no}, le clip est muet. Seulement si la vidéo est activée.",
    "La colonna sonora del video (|.pcm| accanto al |.fmv|) suona insieme tramite l'audio |MSU-1| della cartuccia. Con {no}, il video è muto. Solo con il video attivo.",
-   'Звук ролика (|.pcm| рядом с |.fmv|) воспроизводится вместе с ним как аудио |MSU-1| картриджа. Если выбрано - {no}, ролик идёт без звука. Только если включено |Показывать видео|.',
+   'Звук ролика (|.pcm| рядом с |.fmv|) воспроизводится вместе с ним как |MSU-1| аудио картриджа. Если выбрано {no}, ролик идёт без звука. Но только если включён параметр |Показывать видео|.',
    'De soundtrack van de clip (|.pcm| naast de |.fmv|) speelt mee via de |MSU-1|-audio van de cartridge. Met {no} speelt de clip zonder geluid. Alleen als de video aan staat.'),
   # 10 menu music
   ('An |.spc| soundtrack plays in the background while you browse and stops when a game starts. To use your own, put it at |/sd2snes/menu.spc|. Or press [Y] on any |.spc| in the list: {setbgm}. {restoremusic} in {browser} goes back to |menu.spc|.',
@@ -369,7 +369,7 @@ TEXTS = [
    'Ein |.spc|-Soundtrack läuft beim Blättern im Hintergrund und stoppt beim Spielstart. Eigenen Titel als |/sd2snes/menu.spc| ablegen. Oder [Y] auf einer |.spc| in der Liste: {setbgm}. {restoremusic} in {browser} kehrt zu |menu.spc| zurück.',
    "Une musique |.spc| joue en fond pendant la navigation et s'arrête au lancement d'un jeu. Pour la changer, mets ta piste dans |/sd2snes/menu.spc|. Ou appuie sur [Y] sur un |.spc| de la liste : {setbgm}. {restoremusic} dans {browser} revient à |menu.spc|.",
    "Una traccia |.spc| suona in sottofondo mentre navighi e si ferma all'avvio del gioco. Per cambiarla, metti la tua traccia in |/sd2snes/menu.spc|. Oppure premi [Y] su un |.spc| della lista: {setbgm}. {restoremusic} in {browser} torna a |menu.spc|.",
-   'Музыка |.spc| играет фоном, пока ты листаешь меню, и стихает при запуске игры. Назови свой трек |menu.spc| и положи в папку |/sd2snes|. Или нажми [Y] на любом |.spc| в списке: {setbgm}. {restoremusic} в {browser} возвращает музыку |menu.spc|.',
+   'Музыка |.spc| играет фоном, пока ты листаешь меню, и стихает при запуске игры. Назови свой трек |menu.spc| и запиши в папку |/sd2snes|. Или нажми кнопку [Y] на любом |.spc| в списке: {setbgm}. {restoremusic} в {browser} возвращает музыку |menu.spc|.',
    'Een |.spc|-soundtrack speelt op de achtergrond tijdens het bladeren en stopt als een spel start. Eigen nummer: zet het in |/sd2snes/menu.spc|. Of druk [Y] op een |.spc| in de lijst: {setbgm}. {restoremusic} in {browser} gaat terug naar |menu.spc|.'),
   # 11 random music
   ('Each time the menu starts, a different track is drawn from the |/sd2snes/music| folder. Put as many |.spc| files there as you like to build your playlist.',
@@ -387,7 +387,7 @@ TEXTS = [
    'Kurze Effekte beim Bewegen des Cursors, Bestätigen, Zurückgehen und bei Fehlern, über das |MSU-1|-Audio des Moduls. Eigene im |Sound Creator| auf der Website.',
    "Des effets courts quand tu bouges le curseur, valides, reviens ou en cas d'erreur, joués par l'audio |MSU-1| de la cartouche. Crée les tiens dans le |Sound Creator| du site.",
    "Brevi effetti quando muovi il cursore, confermi, torni indietro o c'è un errore, dall'audio |MSU-1| della cartuccia. Crea i tuoi con il |Sound Creator| sul sito.",
-   'Короткие звуки при движении курсора, выборе, возврате и ошибке - через |MSU-1| звук картриджа. Создай свои в |Sound Creator| на сайте.',
+   'Короткие звуки при движении курсора, выборе, возврате и ошибке - через |MSU-1| аудио картриджа. Создай свои в |Sound Creator| на сайте.',
    'Korte geluiden bij cursor bewegen, bevestigen, terug en fouten, via de |MSU-1|-audio van de cartridge. Maak je eigen set in de |Sound Creator| op de website.'),
   # 13 |MSU-1| folders
   ('A folder with one game and its |MSU-1| audio (|.msu| and |.pcm| tracks) acts as the game itself: [A] on the folder starts it and its cover shows in the list. The tracks are listed after the ROM.',
@@ -396,7 +396,7 @@ TEXTS = [
    'Ein Ordner mit einem Spiel und seinem |MSU-1|-Audio (|.msu| und |.pcm|-Tracks) verhält sich wie das Spiel: [A] startet es, das Cover steht in der Liste. Tracks kommen nach der ROM.',
    "Un dossier avec un jeu et son audio |MSU-1| (|.msu| et pistes |.pcm|) devient le jeu : [A] sur le dossier le lance et sa jaquette s'affiche. Les pistes sont listées après la ROM.",
    'Una cartella con un gioco e il suo audio |MSU-1| (|.msu| e tracce |.pcm|) diventa il gioco: [A] sulla cartella lo avvia e la copertina appare nella lista. Le tracce vanno dopo la ROM.',
-   '|MSU-1| папка с игрой и её аудио (|.msu| и треки |.pcm|) запускается как игра: кнопка [A] на папке запускает её, обложка видна в списке. Если выбрано - {no}, открывается папка с игрой. Треки |.pcm| идут после ROMа игры.',
+   '|MSU-1| папка с игрой и её аудио (|.msu| и треки |.pcm|) запускается как игра: кнопка [A] на папке запускает её, обложка видна в списке. Если выбрано {no}, открывается папка с игрой. Треки |.pcm| идут после ROM-файла игры.',
    'Een map met een spel en zijn |MSU-1|-audio (|.msu| en |.pcm|-nummers) gedraagt zich als het spel: [A] op de map start het en de hoes staat in de lijst. Nummers staan na de ROM.'),
   # 14 the |.pcm| track player of the file list
   ("The |.pcm| tracks of |MSU-1| games show up in the file list. [A] on one opens a player with a progress bar and the elapsed and total time, [A] pauses, [B] closes. Handy to check a game's soundtrack before playing.",
@@ -423,7 +423,7 @@ TEXTS = [
    'Was die [RESET]-Taste im Spiel macht. {off}: startet das Spiel neu. {menu}: zurück ins Menü. {folder}: in den Ordner des Spiels. {rom}: der Ordner, Spiel markiert. {hold}: Tippen startet neu, Halten geht zurück. Das Kürzel/Hook [L]+[R]+[Select]+[X] zurück ins Menü folgt auch {folder}, {rom} und {hold}.',
    'Ce que fait le bouton [RESET] de la console en jeu. {off} : relance le jeu. {menu} : retour au menu. {folder} : au dossier du jeu. {rom} : le dossier, jeu sélectionné. {hold} : appui court relance, long revient. Le raccourci/hook [L]+[R]+[Select]+[X] de retour au menu suit aussi {folder}, {rom} et {hold}.',
    'Cosa fa il tasto [RESET] della console in gioco. {off}: riavvia il gioco. {menu}: torna al menu. {folder}: alla cartella del gioco. {rom}: la cartella col gioco scelto. {hold}: tocco riavvia, tenuto torna. La scorciatoia/hook [L]+[R]+[Select]+[X] per tornare al menu segue anche {folder}, {rom} e {hold}.',
-   'Что делает кнопка [RESET] во время игры. {off}: перезапуск игры. {menu}: выход в меню. {folder}: в папку игры. {rom}: в папку с выбранной игрой. {hold}: короткое нажатие - перезапуск, долгое - выход. Комбинация/перехват [L]+[R]+[Select]+[X] для выхода в меню работает так же в режимах {folder}, {rom} и {hold}.',
+   'Что делает кнопка [RESET] во время игры. {off} - перезапуск игры. {menu} - выход в меню. {folder} - в папку игры. {rom} - в папку с выбранной игрой. {hold}: короткое нажатие - перезапуск игры, долгое - выход в меню. Комбинация/перехват кнопками [L]+[R]+[Select]+[X] для выхода в меню работает так же в режимах {folder}, {rom} и {hold}.',
    'Wat de [RESET]-knop tijdens een spel doet. {off}: herstart het spel. {menu}: terug naar het menu. {folder}: naar de map van het spel. {rom}: de map met het spel gekozen. {hold}: tik herstart, vasthouden gaat terug. De sneltoets/hook [L]+[R]+[Select]+[X] terug naar het menu volgt ook {folder}, {rom} en {hold}.'),
   # 17 the cheat list: where it opens, the code formats, the pages, the keys
   ("Open it with [Y] on a game in the file list ({cheats}) or in the {cheatstab} tab of the in-game menu. It holds the game's Game Genie and Pro Action Replay codes, page by page: [Left] and [Right] turn the page, a long name scrolls on its row. [A] turns a code on or off, [Y] edits it and [SELECT] adds one.",
@@ -432,7 +432,7 @@ TEXTS = [
    'Öffne sie mit [Y] auf einem Spiel in der Dateiliste ({cheats}) oder im Tab {cheatstab} des Ingame-Menüs. Sie zeigt die Game-Genie- und Pro-Action-Replay-Codes seitenweise: [Links] und [Rechts] blättern, ein langer Name läuft durch. [A] schaltet einen Code an oder aus, [Y] bearbeitet ihn, [SELECT] fügt einen hinzu.',
    "Ouvre-la avec [Y] sur un jeu de la liste ({cheats}) ou dans l'onglet {cheatstab} du menu en jeu. Elle montre les codes Game Genie et Pro Action Replay du jeu, page par page : [Gauche] et [Droite] tournent la page, un nom long défile. [A] active ou coupe un code, [Y] le modifie et [SELECT] en ajoute un.",
    'Si apre con [Y] su un gioco della lista dei file ({cheats}) o nella scheda {cheatstab} del menu in gioco. Mostra i codici Game Genie e Pro Action Replay del gioco, pagina per pagina: [Sinistra] e [Destra] cambiano pagina, un nome lungo scorre. [A] attiva o disattiva un codice, [Y] lo modifica e [SELECT] ne aggiunge uno.',
-   'Открывается кнопкой [Y] на игре в списке файлов ({cheats}) или на вкладке {cheatstab} в |Меню в игре|. Там коды Game Genie и Pro Action Replay по страницам: [Влево] и [Вправо] листают, длинное имя прокручивается. [A] включает или выключает код, [Y] редактирует, [SELECT] добавляет новый.',
+   'Открывается кнопкой [Y] на игре в списке файлов ({cheats}) или на вкладке {cheatstab} в |Меню в игре|. Там коды Game Genie и Pro Action Replay по страницам: кнопки [Влево] и [Вправо] - листают, длинное имя прокручивается, кнопка [A] - включает или выключает код, кнопка [Y] - редактирует, а кнопка [SELECT] - добавляет новый.',
    'Open hem met [Y] op een spel in de bestandslijst ({cheats}) of in de tab {cheatstab} van het in-game menu. Hij toont de Game Genie- en Pro Action Replay-codes van het spel per pagina: [Links] en [Rechts] bladeren, een lange naam schuift door. [A] zet een code aan of uit, [Y] bewerkt hem en [SELECT] voegt er een toe.'),
   # 18 in-game menu (a yes turns the in-game hook on too: onboarding_const.a65 ONB_FF_HOOK)
   ('Press [L]+[R]+[Y]+[Left] in a game to pause it and open a menu over it: cheats, savestates, save slots, guides and a RAM trainer. Works with special chips too. {yes} also turns on {hook}: if a game shows graphics glitches, turn it off in {cfg} > {ingame}.',
@@ -441,7 +441,7 @@ TEXTS = [
    'Drücke [L]+[R]+[Y]+[Links] im Spiel für ein Menü darüber: Cheats, Savestates, Speicherplätze, Anleitungen und RAM-Trainer. Geht auch mit Spezialchips. {yes} schaltet auch {hook} ein: bei Grafikfehlern in einem Spiel in {cfg} > {ingame} ausschalten.',
    'Appuie sur [L]+[R]+[Y]+[Gauche] en jeu pour le mettre en pause sous un menu : cheats, savestates, emplacements, guides et trainer RAM. Marche aussi avec les puces spéciales. {yes} active aussi {hook} : si un jeu a des bugs graphiques, coupe-le dans {cfg} > {ingame}.',
    'Premi [L]+[R]+[Y]+[Sinistra] in gioco per metterlo in pausa con un menu sopra: cheats, savestate, slot, guide e trainer RAM. Anche nei giochi con chip speciali. Con {yes} si attiva anche {hook}: se un gioco ha difetti grafici, disattivalo in {cfg} > {ingame}.',
-   'В игре нажми [L]+[R]+[Y]+[Влево], чтобы приостановить игру и открыть |Меню в игре|: чит-коды, сейвстейты, слоты сохранений, руководства и трейнер памяти. Работает и в играх со специальными чипами. {yes} - включает и {hook}: при сбоях графики в игре выключи его в {cfg} > {ingame}.',
+   'В игре нажми комбинацию кнопок [L]+[R]+[Y]+[Влево], чтобы приостановить игру и открыть |Меню в игре|: чит-коды, сейвстейты, слоты сохранений, руководства и трейнер памяти. Работает и в играх со специальными чипами. {yes} - включает и {hook}: при сбоях графики в игре выключи его в {cfg} > {ingame}.',
    'Druk [L]+[R]+[Y]+[Links] in een spel om te pauzeren met een menu erover: cheats, savestates, opslagplekken, gidsen en RAM-trainer. Werkt ook met speciale chips. {yes} zet ook {hook} aan: bij grafische fouten in een spel zet je het uit in {cfg} > {ingame}.'),
   # 19 savestates
   ('Save the whole game at any moment and load it back later, in 4 slots per game, even in games with special chips. In a game, [Start]+[R] saves and [Start]+[L] loads. Pick the slot in the in-game menu. {yes} also turns on {hook}.',
@@ -450,7 +450,7 @@ TEXTS = [
    'Speichere das ganze Spiel jederzeit und lade es später, in 4 Plätzen pro Spiel, auch mit Spezialchips. Im Spiel sichert [Start]+[R], [Start]+[L] lädt. Den Platz wählst du im Ingame-Menü. {yes} schaltet auch {hook} ein.',
    "Sauvegarde tout le jeu à tout moment et reviens-y plus tard, 4 emplacements par jeu, même avec les puces spéciales. En jeu, [Start]+[R] sauve et [Start]+[L] charge. L'emplacement se choisit dans le menu en jeu. {yes} active aussi {hook}.",
    "Salva l'intero gioco in qualsiasi momento e riprendilo dopo, 4 slot per gioco, anche con i chip speciali. In gioco [Start]+[R] salva e [Start]+[L] carica. Lo slot si sceglie nel menu in gioco. Con {yes} si attiva anche {hook}.",
-   'Сохраняй игровой процесс в любой момент и продолжай позже, 4 слота на игру, даже со специальными чипами. В игре [Start]+[R] сохраняет, [Start]+[L] загружает. Слот выбирается в |Меню в игре|. {yes} - включает и {hook}.',
+   'Сохраняй игровой процесс в любой момент и продолжай позже, 4 слота на игру, даже со специальными чипами. В игре комбинация кнопок [Start]+[R] сохраняет, а [Start]+[L] загружает. Слот выбирается в |Меню в игре|. {yes} - включает и {hook}.',
    'Sla het hele spel op elk moment op en laad het later, in 4 plekken per spel, ook met speciale chips. In het spel slaat [Start]+[R] op en laadt [Start]+[L]. Kies de plek in het in-game menu. {yes} zet ook {hook} aan.'),
   # 20 4 battery saves per game, the in-game menu's SAVES tab (needs the in-game menu)
   ('Every game has 4 battery-save slots, so two people can each keep their own. Pick the slot in the {saves} tab of the in-game menu: it applies on the next boot of the game.',
@@ -477,7 +477,7 @@ TEXTS = [
    'IPS- und BPS-Patches neben einer ROM bringen Übersetzungen, Hacks und Fixes, ohne sie zu ändern: [A] auf dem Spiel fragt, welcher. Dort wählt [Y] auf einem Patch den {hdrmode} (512-Byte-Header): {hdrauto}, {hdron} oder {hdroff}, pro Patch gemerkt.',
    "Les patchs IPS et BPS à côté d'une ROM apportent traductions, hacks et correctifs sans toucher l'original : [A] sur le jeu demande lequel, ou aucun. Là, [Y] sur un patch règle son {hdrmode} (en-tête de 512 octets) : {hdrauto}, {hdron} ou {hdroff}, mémorisé par patch.",
    "Le patch IPS e BPS accanto a una ROM portano traduzioni, hack e correzioni senza toccare l'originale: [A] sul gioco chiede quale applicare, o nessuna. Lì, [Y] su una patch sceglie il {hdrmode} (header di 512 byte): {hdrauto}, {hdron} o {hdroff}, ricordato per patch.",
-   'IPS и BPS патчи рядом с игрой дают переводы, хаки и исправления без изменения исходного файла: кнопка [A] на игре спросит, какой патч применить или запустить её без патча. [Y] на патче задаёт режим {hdrmode} (заголовок 512 байт): {hdrauto}, {hdron} или {hdroff}.',
+   'IPS и BPS патчи рядом с игрой дают переводы, хаки и исправления без изменения исходного файла: кнопка [A] на игре спросит, какой патч применить или запустить её без патча. Кнопка [Y] на патче задаёт режим {hdrmode} (заголовок 512 байт): {hdrauto}, {hdron} или {hdroff}.',
    'IPS- en BPS-patches naast een ROM brengen vertalingen, hacks en fixes zonder het origineel te wijzigen: [A] op het spel vraagt welke, of geen. Daar kiest [Y] op een patch de {hdrmode} (512-byte header): {hdrauto}, {hdron} of {hdroff}, per patch onthouden.'),
   # 23 creating the patched ROM from the [Y] menu of a patch
   ('In the patch list, [Y] on a patch and {createrom} save a copy of the ROM with the patch already applied, next to the original. Its cover, info card, guides, cheats, saves and states go along with it.',
@@ -486,7 +486,7 @@ TEXTS = [
    'In der Patch-Liste legen [Y] auf einem Patch und {createrom} neben dem Original eine Kopie der ROM mit dem Patch an. Cover, Infokarte, Anleitungen, Cheats, Saves und States kommen mit.',
    "Dans la liste des patchs, [Y] sur un patch puis {createrom} enregistre à côté de l'original une copie de la ROM déjà patchée. Jaquette, fiche, guides, cheats, saves et states suivent.",
    "Nell'elenco delle patch, [Y] su una patch e poi {createrom} salva accanto all'originale una copia della ROM già patchata. Copertina, scheda, guide, cheat, save e state la seguono.",
-   'В списке патчей кнопка [Y] на патче и пункт {createrom} создают в той же папке новый ROM с патчем. Обложка, карточка, руководства, чит-коды и сохранения копируются с оригинала.',
+   'В списке патчей нажатие кнопки [Y] на патче и выбор пункта {createrom} создают в той же папке новый пропатченный ROM-файл. Обложка, карточка, руководства, чит-коды и сохранения копируются с оригинала.',
    'In de patchlijst zetten [Y] op een patch en {createrom} naast het origineel een kopie van de ROM met de patch erin. Hoes, spelinfo, gidsen, cheats, saves en states gaan mee.'),
   # 24 more special chips (its own card)
   ('Besides DSP, Super FX, SA-1, S-DD1 and CX4, more special chips run: the SPC7110 with its clock, saved on the card, Super FX 3, the Sufami Turbo adapter and the competition carts Campus Challenge 92 and PowerFest 94. Some need a BIOS file in |/sd2snes|.',
@@ -522,7 +522,7 @@ TEXTS = [
    'NES-, Master-System-, Game-Boy-Color- und Atari-2600-Spiele laufen auf eigenen FPGA-Cores, nur auf |FXPAK PRO (Mk.III)|. Die Cores sind experimentell: manche Spiele haben Fehler oder laufen nicht. Beim NES malt [L]+[R]+[Start]+[Oben] die Palette neu, wenn Farben falsch sind.',
    "Les jeux NES, Master System, Game Boy Color et Atari 2600 tournent sur leurs propres cores FPGA, sur |FXPAK PRO (Mk.III)| seulement. Ces cores sont expérimentaux : certains jeux peuvent bugger ou ne pas démarrer. Sur NES, [L]+[R]+[Start]+[Haut] redessine la palette si les couleurs sont fausses.",
    'I giochi NES, Master System, Game Boy Color e Atari 2600 girano su core FPGA dedicati, solo su |FXPAK PRO (Mk.III)|, e si aprono come una ROM. Questi core sono sperimentali: alcuni giochi possono avere difetti o non partire. Sul NES, [L]+[R]+[Start]+[Su] ridisegna la tavolozza se i colori sono sbagliati.',
-   'Игры NES, Master System, Game Boy Color и Atari 2600 идут на своих ядрах FPGA, только на |FXPAK PRO (Mk.III)|, и открываются как любой ROM. Эти ядра экспериментальные: некоторые игры могут сбоить или не запускаться. На NES [L]+[R]+[Start]+[Вверх] перерисовывает палитру, если цвета неверные.',
+   'Игры NES, Master System, Game Boy Color и Atari 2600 идут на своих ядрах FPGA, только на |FXPAK PRO (Mk.III)|, и открываются как любой ROM-файл. Эти ядра экспериментальные: некоторые игры могут сбоить или не запускаться. У NES комбинация кнопок [L]+[R]+[Start]+[Вверх] перерисовывает палитру, если цвета неверны.',
    'NES-, Master System-, Game Boy Color- en Atari 2600-spellen draaien op eigen FPGA-cores, alleen op |FXPAK PRO (Mk.III)|, en openen als elke ROM. Deze cores zijn experimenteel: sommige spellen haperen of starten niet. Op de NES tekent [L]+[R]+[Start]+[Omhoog] het palet opnieuw als de kleuren fout zijn.'),
   # 28 the Atari 2600's console switches on the pad, and its picture width
   ("The console's switches are on controller 1: [Start] is RESET and [Select] is SELECT while held, [X] flips Color and B/W, [L] and [R] flip the two difficulty switches. {a26w} in {chipopts} picks 160 px (1:1) or 256 px (wide), |FXPAK PRO (Mk.III)| only.",
@@ -531,7 +531,7 @@ TEXTS = [
    'Die Schalter der Konsole liegen auf Controller 1: [Start] ist RESET und [Select] SELECT, solange gehalten, [X] wechselt Farbe und S/W, [L] und [R] die zwei Schwierigkeitsschalter. {a26w} in {chipopts}: 160 px (1:1) oder 256 px (breit), nur |FXPAK PRO (Mk.III)|.',
    "Sur la manette 1, [Start] est RESET et [Select] SELECT tant qu'ils sont tenus, [X] bascule Couleur et N/B, [L] et [R] les deux interrupteurs de difficulté. {a26w} ({chipopts}) choisit 160 px (1:1) ou 256 px (large), |FXPAK PRO (Mk.III)| seulement.",
    'Gli interruttori della console sono sul controller 1: [Start] è RESET e [Select] è SELECT finché tenuti, [X] alterna Colore e B/N, [L] e [R] i due interruttori di difficoltà. {a26w} in {chipopts}: 160 px (1:1) o 256 px (largo), solo |FXPAK PRO (Mk.III)|.',
-   'Переключатели консоли на контроллере 1: [Start] - это [RESET], [Select] - это [SELECT] при удержании, [X] - цвет и Ч/Б, [L] и [R] - два переключателя сложности. {a26w} в {chipopts}: 160 пикселей (1:1) или 256 пикселей (широко), только для |FXPAK PRO (Mk.III)|.',
+   'Переключатели консоли на контроллере 1: кнопка [Start] выполняет функцию [RESET], а кнопка [Select] - функцию [SELECT] (пока кнопка удерживается). Кнопка [X] переключает режим отображения (цветной или чёрно-белый), а кнопки [L] и [R] управляют двумя переключателями сложности. {a26w} в {chipopts}: 160 пикселей (1:1) или 256 пикселей (широко), только для |FXPAK PRO (Mk.III)|.',
    'De schakelaars van de console zitten op controller 1: [Start] is RESET en [Select] SELECT zolang ingedrukt, [X] wisselt Kleur en Z/W, [L] en [R] de twee moeilijkheidsschakelaars. {a26w} in {chipopts}: 160 px (1:1) of 256 px (breed), alleen |FXPAK PRO (Mk.III)|.'),
   # 29 the card's folders: 2-letter buckets, console folders, |Organize|
   ('Saves, states, cheats, info cards and patch settings of each game live in |/sd2snes/<area>/<2 letters>/|, plus a console folder (|sgb, sft, nes, sms, a26|). Updating only the firmware? Run |Organize| in the |Web Manager|, or old saves seem to vanish.',
@@ -549,7 +549,7 @@ TEXTS = [
    '{memtest} im Hauptmenü prüft den Speicher des Moduls direkt an der Konsole: [A] startet den vollen Test, Leitungstest inklusive, etwa 60 Sekunden. Danach startet die Konsole neu.',
    '{memtest}, dans le menu principal, teste la mémoire de la cartouche sur la console : [A] lance le test complet, câblage compris, en 60 secondes environ. La console redémarre à la fin.',
    '{memtest}, nel menu principale, verifica la memoria della cartuccia sulla console: [A] avvia il test completo, cablaggio incluso, in circa 60 secondi. Alla fine la console si riavvia.',
-   '{memtest} в главном меню проверяет память картриджа прямо на консоли: [A] запускает полный тест, вместе с тестом линий, занимает около 60 секунд. По завершении консоль перезапустится.',
+   '{memtest} в главном меню позволяет проверить память картриджа непосредственно на консоли. При нажатии кнопки [A] запускается полный тест (включая проверку соединений), который длится около 60 секунд. По завершении теста консоль перезагружается.',
    '{memtest} in het hoofdmenu test het geheugen van de cartridge op de console: [A] start de volledige test, bedrading inbegrepen, in ongeveer 60 seconden. Daarna herstart de console.'),
   # 31 the Mk.II LED codes for a boot without a picture (Mk.II only)
   ('To make room for more features on the |Mk.II (SD2SNES)|, its boot error screen was replaced by blinking LED patterns. What is missing:\nSD card: green/red\n|fpga_mini.bit|: green/yellow\nThat file goes in |/sd2snes|.',
@@ -578,7 +578,7 @@ TEXTS = [
    'Die Ingame-Kürzel/Hooks (Menü, Savestates, zurück zum Menü) gehen auch an Controller 2, so kann sie auch Spieler 2 nutzen. Controller 1 hat Vorrang. {yes} schaltet auch {hook} und {igbuttons} ein.',
    'Les raccourcis/hooks en jeu (menu, savestates, retour au menu) marchent aussi sur la deuxième manette, pour le joueur 2. La manette 1 reste prioritaire. {yes} active aussi {hook} et {igbuttons}.',
    'Le scorciatoie/hook in gioco (menu, savestate, ritorno al menu) funzionano anche col controller 2, così le usa anche il secondo giocatore. Il controller 1 ha la precedenza. Con {yes} si attivano anche {hook} e {igbuttons}.',
-   'Игровые комбинации/перехваты (меню, сейвстейты, выход в меню) работают и на контроллере 2, их может использовать второй игрок. У контроллера 1 приоритет. {yes} включает и {hook}, и {igbuttons}.',
+   'Игровые комбинации/перехваты (меню, сейвстейты, выход в меню) работают и на контроллере 2, их может использовать второй игрок. У контроллера 1 приоритет. {yes} - включает и {hook}, и {igbuttons}.',
    'De in-game sneltoetsen/hooks (menu, savestates, terug naar menu) werken ook op controller 2, dus ook de tweede speler kan ze gebruiken. Controller 1 heeft voorrang. {yes} zet ook {hook} en {igbuttons} aan.'),
   # 35 Game Boy Color (2.17)
   ('Put a |.gbc| on the card and it runs on a Game Boy Color core instead of the Super Game Boy, in color and at full speed. {sgbmenu} picks {auto}, {prefsgb} or {prefgbc}. Experimental, |FXPAK PRO (Mk.III)| only.',
@@ -632,7 +632,7 @@ TEXTS = [
    '[SELECT] auf der Infokarte öffnet die Cheat-Liste des Spiels: Codes an- und ausschalten, hinzufügen oder ändern, dann mit ihnen starten.',
    '[SELECT] sur la fiche du jeu ouvre sa liste de cheats : active ou désactive les codes, ajoute ou modifie, puis lance le jeu avec eux.',
    '[SELECT] sulla scheda del gioco apre la sua lista di cheat: attiva e disattiva i codici, aggiungi o modifica, poi avvia il gioco con quelli pronti.',
-   '[SELECT] в окне карточки |Информация об игре| открывает список чит-кодов этой игры: включай и выключай коды, добавляй или меняй их и запускай игру уже с ними.',
+   'Кнопка [SELECT] в окне карточки |Информация об игре| открывает список чит-кодов этой игры: включай и выключай коды, добавляй или меняй их и запускай игру уже с ними.',
    '[SELECT] op de spelinfo opent de cheatlijst van het spel: zet codes aan en uit, voeg toe of wijzig, en start het spel er direct mee.'),
   # 41 the 2.18 section: what is new in this release
   ('Version 2.18 is out. The next card shows what is new.',
@@ -650,7 +650,7 @@ TEXTS = [
    'Xeno Crisis, das Modul von 2019 mit RP2040-Chip, läuft jetzt. Es braucht den Dump des RP2040-Flashs deines Moduls, gespeichert als |/sd2snes/xenocrisis_rp2040.bin| auf der Karte. Die Musik kommt aus einem |MSU-1|-Pack neben der ROM. Ohne Pack hat das Spiel nur Soundeffekte.',
    "Xeno Crisis, la cartouche de 2019 avec une puce RP2040, tourne désormais. Elle demande le dump de la flash RP2040 de ta cartouche, enregistré sous |/sd2snes/xenocrisis_rp2040.bin| sur la carte. La musique vient d'un pack |MSU-1| à côté de la ROM. Sans pack, le jeu n'a que les effets sonores.",
    'Xeno Crisis, la cartuccia del 2019 con un chip RP2040, ora funziona. Serve il dump della flash RP2040 della tua cartuccia, salvato come |/sd2snes/xenocrisis_rp2040.bin| sulla scheda. La musica arriva da un pack |MSU-1| accanto alla ROM. Senza pack, il gioco ha solo gli effetti sonori.',
-   'Теперь запускается Xeno Crisis - картридж 2019 года с чипом RP2040. Нужен дамп флеш-памяти RP2040 твоего картриджа, сохранённый как |xenocrisis_rp2040.bin| в папке |/sd2snes| на карте. Музыка берётся из |MSU-1| пака в папке рядом с ROM. Без него в игре будут только звуковые эффекты.',
+   'Теперь запускается Xeno Crisis - картридж 2019 года с чипом RP2040. Нужен дамп флеш-памяти RP2040 твоего картриджа, сохранённый как |xenocrisis_rp2040.bin| в папке |/sd2snes| на карте. Музыка берётся из |MSU-1| пака в папке рядом с ROM-файлом. Без него в игре будут только звуковые эффекты.',
    'Xeno Crisis, de cartridge uit 2019 met een RP2040-chip, draait nu. Hij heeft de RP2040-flashdump van je cartridge nodig, bewaard als |/sd2snes/xenocrisis_rp2040.bin| op de kaart. De muziek komt uit een |MSU-1|-pack naast de ROM. Zonder pack heeft het spel alleen geluidseffecten.'),
   # 43 the SNES Mouse in the menu (2.18)
   ('Plug a SNES Mouse into either port and the menu shows a pointer. Left click is [A], right click is [B], both together are [X] and holding the right one is [Y]. Push the pointer against the top or bottom edge to scroll the list.',
@@ -668,7 +668,7 @@ TEXTS = [
    'Eine |.pcm| oder |.spc| in der Liste öffnet ihren Player, der Ordner wird zur Playlist: nach einem Titel kommt der nächste, [L]/[R] wechseln. Bei |.pcm| springen [Links]/[Rechts] 5 s (halten für mehr), ein Klick auf den Balken springt dorthin. Eine |.spc| zeigt ihre Länge und geht dann weiter.',
    "Un |.pcm| ou |.spc| de la liste ouvre son lecteur, le dossier devient une playlist : la piste suivante démarre à la fin, [L]/[R] changent de piste. Sur un |.pcm|, [Gauche]/[Droite] sautent de 5 s (maintenir pour plus) et un clic sur la barre y va. Un |.spc| affiche sa durée puis enchaîne.",
    'Un |.pcm| o |.spc| nella lista apre il suo lettore e la cartella diventa una playlist: finita una traccia parte la successiva, [L]/[R] cambiano traccia. In un |.pcm|, [Sinistra]/[Destra] saltano 5 s (tieni premuto per di più) e un clic sulla barra va lì. Un |.spc| mostra la durata e poi prosegue.',
-   'При выборе файла |.pcm| или |.spc| в списке открывается соответствующий проигрыватель, а папка превращается в плейлист: по завершении одного трека автоматически начинается следующий, переключаться между ними можно клавишами [L]/[R]. В случае с |.pcm| клавиши [Влево]/[Вправо] позволяют переместиться на 5 секунд (при удержании клавиши - на большее время), а щелчок по полосе прогресса - перейти в указанное место. Для файла |.spc| отображается его длительность, после чего воспроизведение продолжается дальше.',
+   'При выборе файла |.pcm| или |.spc| в списке открывается соответствующий проигрыватель, а папка превращается в плейлист: по завершении одного трека автоматически начинается следующий, переключаться между ними можно кнопками [L]/[R]. В случае с |.pcm| кнопки [Влево]/[Вправо] позволяют переместиться на 5 секунд (при удержании кнопки - на большее время), а щелчок по полосе прогресса - перейти в указанное место. Для файла |.spc| отображается его длительность, после чего воспроизведение продолжается дальше.',
    'Een |.pcm| of |.spc| in de lijst opent de speler, de map wordt een afspeellijst: na een nummer start het volgende, [L]/[R] wisselen. Bij een |.pcm| springen [Links]/[Rechts] 5 s (vasthouden voor meer) en een klik op de balk springt daarheen. Een |.spc| toont zijn lengte en gaat dan door.'),
   # 45 the NES music (.nsf) player (2.18)
   ("An |.nsf| in the list plays NES music on the console itself, all five channels of its sound chip. [Left]/[Right] change the song, [A] pauses, [L]/[R] change the file.",
@@ -677,7 +677,7 @@ TEXTS = [
    'Eine |.nsf| in der Liste spielt NES-Musik auf der Konsole selbst, alle fünf Kanäle des Soundchips. [Links]/[Rechts] wechseln das Lied, [A] pausiert, [L]/[R] die Datei.',
    "Un |.nsf| de la liste joue la musique NES sur la console elle-même, les cinq canaux de sa puce son. [Gauche]/[Droite] changent le morceau, [A] met en pause, [L]/[R] le fichier.",
    'Un |.nsf| nella lista suona la musica del NES sulla console stessa, tutti e cinque i canali del chip audio. [Sinistra]/[Destra] cambiano brano, [A] mette in pausa, [L]/[R] il file.',
-   'Файл |.nsf| из списка позволяет воспроизводить музыку NES на реальной игровой консоли, задействуя пять каналов её звукового чипа. Клавиши [Влево]/[Вправо] переключают композиции, [A] ставит воспроизведение на паузу, а [L]/[R] позволяют переходить между файлами.',
+   'Файл |.nsf| из списка позволяет воспроизводить музыку NES на реальной игровой консоли, задействуя пять каналов её звукового чипа. Кнопки [Влево]/[Вправо] - переключают композиции, кнопка [A] - ставит воспроизведение на паузу, а кнопки [L]/[R] - позволяют переходить между файлами.',
    'Een |.nsf| in de lijst speelt NES-muziek op de console zelf, alle vijf kanalen van de geluidschip. [Links]/[Rechts] wisselen het nummer, [A] pauzeert, [L]/[R] het bestand.'),
   # 46 the saves screen (2.18)
   ('On a game, [Y] opens the context menu: {savesrow} there (or [R] on the info card) lists each save and savestate slot with its date. Pick the slot the game starts with, duplicate it or delete it.',
@@ -686,7 +686,7 @@ TEXTS = [
    'Auf einem Spiel öffnet [Y] das Kontextmenü: {savesrow} dort (oder [R] auf der Infokarte) zeigt jeden Spielstand- und Savestate-Slot mit Datum. Wähle den Startslot, dupliziere oder lösche ihn.',
    'Sur un jeu, [Y] ouvre le menu contextuel : {savesrow} (ou [R] sur la fiche) liste chaque emplacement de sauvegarde et de savestate avec sa date. Choisissez celui de démarrage, dupliquez-le ou supprimez-le.',
    'Su un gioco, [Y] apre il menu contestuale: {savesrow} (o [R] sulla scheda) elenca ogni slot di salvataggio e savestate con la data. Scegli lo slot di avvio, duplicalo o eliminalo.',
-   'На игре [Y] открывает контекстное меню: пункт {savesrow} (или [R] в карточке) показывает каждый слот сохранений и сейвстейтов с датой. Выберите слот для запуска, скопируйте или удалите его.',
+   'Кнопка [Y] на игре открывает контекстное меню: пункт {savesrow} (или кнопка [R] в карточке) показывает каждый слот сохранений и сейвстейтов с датой. Выберите слот для запуска, скопируйте или удалите его.',
    'Op een spel opent [Y] het contextmenu: {savesrow} daarin (of [R] op de spelinfo) toont elk save- en savestate-slot met de datum. Kies het startslot, dupliceer of verwijder het.'),
   # 47 the file manager (2.18)
   ('In the file list, [Y] on any entry opens the context menu with |Copy|, |Cut|, |Paste here|, |Rename| and |New folder|. |Select several| marks entries with [A]. A renamed game keeps its saves, cheats and covers, and [A] on a |.txt| opens it.',
@@ -695,7 +695,7 @@ TEXTS = [
    'In der Dateiliste öffnet [Y] auf einem Eintrag das Kontextmenü mit |Kopieren|, |Ausschneiden|, |Hier einfügen|, |Umbenennen| und |Neuer Ordner|. |Mehrere auswählen| markiert Einträge mit [A]. Ein umbenanntes Spiel behält Spielstände, Cheats und Cover, und [A] auf einer |.txt| öffnet sie.',
    "Dans la liste, [Y] sur une entrée ouvre le menu contextuel avec |Copier|, |Couper|, |Coller ici|, |Renommer| et |Nouveau dossier|. |Sélection multiple| marque des entrées avec [A]. Un jeu renommé garde ses sauvegardes, cheats et jaquettes, et [A] sur un |.txt| l'ouvre.",
    'Nella lista, [Y] su una voce apre il menu contestuale con |Copia|, |Taglia|, |Incolla qui|, |Rinomina| e |Nuova cartella|. |Selezione multipla| segna le voci con [A]. Un gioco rinominato tiene salvataggi, cheat e copertine, e [A] su un |.txt| lo apre.',
-   'В списке файлов кнопка [Y] на любом элементе открывает контекстное меню: |Удалить|, |Копировать|, |Вырезать|, |Вставить сюда|, |Переименовать| и |Новая папка|. Функция |Выбрать несколько| позволяет пометить элементы с помощью клавиши [A]. При переименовании игры также автоматически переименовываются связанные с ней файлы сохранений, чит-коды и обложки, а нажатие клавиши [A] на файле с расширением |.txt| открывает его содержимое.',
+   'Нажатие кнопки [Y] на любом элементе списка файлов открывает контекстное меню: |Удалить|, |Копировать|, |Вырезать|, |Вставить сюда|, |Переименовать| и |Новая папка|. Функция |Выбрать несколько| позволяет пометить элементы с помощью кнопки [A]. При переименовании игры также автоматически переименовываются связанные с ней файлы сохранений, чит-коды и обложки, а нажатие кнопки [A] на файле с расширением |.txt| открывает его содержимое.',
    'In de lijst opent [Y] op een item het contextmenu met |Kopiëren|, |Knippen|, |Hier plakken|, |Hernoemen| en |Nieuwe map|. |Meerdere selecteren| markeert items met [A]. Een hernoemd spel houdt zijn saves, cheats en hoesjes, en [A] op een |.txt| opent het.'),
   # 48 game options (2.18): Settings' own options, per game, only those the game uses
   ("{goptrow} keeps settings for one game only, laid out like {cfg} with just what that game uses. {gdefault} follows the global option. Open it with [Y] on a game, [L] on the info card or [Y] on the in-game tab bar, where what cannot change mid-game is dimmed.",
@@ -704,7 +704,7 @@ TEXTS = [
    '{goptrow} speichert Einstellungen für ein Spiel, aufgebaut wie {cfg}, nur mit dem, was das Spiel nutzt. {gdefault} folgt der globalen Option. Öffnen mit [Y] auf einem Spiel, [L] auf der Infokarte oder [Y] auf der Ingame-Tab-Leiste, dort ist im Spiel Gesperrtes grau.',
    "{goptrow} garde des réglages pour un seul jeu, rangés comme {cfg}, avec seulement ce que le jeu utilise. {gdefault} suit l'option globale. Ouvrez avec [Y] sur un jeu, [L] sur la fiche ou [Y] sur les onglets du menu en jeu, où ce qui est bloqué en jeu est grisé.",
    "{goptrow} salva impostazioni per un solo gioco, come in {cfg}, solo con ciò che il gioco usa. {gdefault} segue l'opzione globale. Apri con [Y] su un gioco, [L] sulla scheda o [Y] sulle schede del menu in gioco, dove ciò che è bloccato in gioco è grigio.",
-   '{goptrow} содержит настройки, относящиеся к конкретной игре, они организованы так же, как в {cfg}, и включают только те параметры, которые применимы к ней. {gdefault} соответствует общим настройкам. Открыть этот раздел можно нажатием клавиши [Y] на выбранной игре, [L] в карточке игры или [Y] на панели вкладок |Меню в игре|, при этом заблокированные для игры параметры отображаются серым.',
+   '{goptrow} содержит настройки, относящиеся к конкретной игре. Они организованы так же, как в {cfg}, и включают только те параметры, которые применимы к ней. {gdefault} соответствует общим настройкам. Открыть этот раздел можно нажатием кнопки [Y] на выбранной игре, кнопка [L] - в карточке игры или кнопка [Y] - на панели вкладок |Меню в игре|, при этом заблокированные для игры параметры отображаются серым цветом.',
    '{goptrow} bewaart instellingen voor één spel, ingedeeld zoals {cfg}, met alleen wat dat spel gebruikt. {gdefault} volgt de algemene optie. Open met [Y] op een spel, [L] op de spelinfo of [Y] op de tabbalk van het in-game menu, waar wat vastligt grijs is.'),
   # 49 Repeat in the .spc / .pcm / .nsf players (2.18)
   ('In the |.spc|, |.pcm| and |.nsf| players, [X] turns {repeat} on: when the track ends it starts again instead of moving to the next one. An |.nsf| song ends after 3 s of silence. {repeat} starts off and the player remembers it.',
@@ -723,7 +723,7 @@ TEXTS = [
    '{yes}: Die Menümusik stoppt, solange eine Infokarte offen ist, und beginnt beim Verlassen von vorn. Dafür braucht es einen internen Konsolen-Reset: Das Öffnen dauert etwa 1 s länger, und hin wie zurück blendet das Bild aus und wieder ein. Video und Menü-Sounds bleiben.',
    "{yes} : la musique du menu s'arrête tant que la fiche d'un jeu est ouverte et reprend du début en sortant. Il faut un reset interne de la console : ouvrir la fiche prend environ 1 s de plus, et à l'aller comme au retour l'écran s'éteint puis revient. La vidéo et les sons restent.",
    "{yes}: la musica del menu si ferma mentre la scheda di un gioco è aperta e riparte quando esci. Serve un reset interno della console: aprire la scheda richiede circa 1 s in più, e all'andata e al ritorno lo schermo si oscura e torna. Il video e i suoni restano.",
-   '{yes}: музыка меню останавливается, пока открыта карточка игры, и начинается заново при выходе. Для этого консоль перезапускается изнутри: карточка открывается примерно на 1 секунду дольше, и при входе, и при выходе экран гаснет и возвращается. Видео и звуки остаются.',
+   '{yes} - музыка в меню прекращается, когда открыта карточка с информацией об игре, и начинает звучать заново, когда вы её закрываете. Это требует внутреннего перезапуска консоли: открытие карточки происходит примерно на 1 секунду медленнее, а при её открытии и закрытии экран плавно гаснет и снова загорается. Видеоролик и звуки меню продолжают воспроизводиться.',
    "{yes}: de menumuziek stopt zolang de spelinfo open is en begint opnieuw als je teruggaat. Daarvoor is een interne reset van de console nodig: de spelinfo openen duurt zo'n 1 s langer, en heen en terug dooft het beeld uit en weer in. Video en menugeluiden blijven."),
   # 51 the ROM's CRC32 on the game info card (2.18)
   ("The game info card shows the ROM's CRC32 right of the title, the number the catalogs use: no 512-byte copier header and, for NES, no iNES header. A patched entry shows its base ROM. It is computed in the background and shows up in seconds. A long title scrolls.",
@@ -741,7 +741,7 @@ TEXTS = [
    '[Y] auf einem Ordner bietet {rmdir}: zählt Dateien, Ordner und Größe, fragt ({no} vorgewählt) und löscht alles mit Fortschrittsbalken ([B] bricht ab). In {fmsel} macht {del} das mit den markierten Einträgen. Spielstände und Cheats im Ordner |sd2snes| bleiben, Systemordner sind gesperrt.',
    "[Y] sur un dossier propose {rmdir} : il compte fichiers, dossiers et taille, demande ({no} présélectionné) et efface tout avec une barre ([B] annule). En {fmsel}, {del} fait de même avec les entrées marquées. Sauvegardes et cheats de |sd2snes| restent, dossiers système refusés.",
    '[Y] su una cartella offre {rmdir}: conta file, cartelle e dimensione, chiede ({no} già scelto) e cancella tutto con una barra ([B] annulla). In {fmsel}, {del} fa lo stesso con le voci segnate. Salvataggi e cheat di |sd2snes| restano, cartelle di sistema rifiutate.',
-   'При нажатии [Y] на папке доступна функция {rmdir}: она подсчитывает количество файлов и папок, а также их общий размер, запрашивает подтверждение (по умолчанию {no}) и удаляет всё содержимое, отображая индикатор прогресса ([B] - отмена). В режиме {fmsel} команда {del} выполняет аналогичное действие для отмеченных элементов. Сохранения и файлы чит-кодов в папке |/sd2snes| остаются нетронутыми, а удаление системных папок заблокировано.',
+   'При нажатии кнопки [Y] на папке доступна функция {rmdir}: она подсчитывает количество файлов и папок, а также их общий размер, запрашивает подтверждение (по умолчанию {no}) и удаляет всё содержимое, отображая индикатор прогресса ([B] - отмена). В режиме {fmsel} команда {del} выполняет аналогичное действие для отмеченных элементов. Сохранения и файлы чит-кодов в папке |/sd2snes| остаются нетронутыми, а удаление системных папок заблокировано.',
    '[Y] op een map biedt {rmdir}: telt bestanden, mappen en grootte, vraagt het ({no} voorgeselecteerd) en wist alles met een balk ([B] annuleert). In {fmsel} doet {del} hetzelfde met de gemarkeerde items. Saves en cheats in |sd2snes| blijven, systeemmappen geweigerd.'),
   # 53 rotated Game Boy buttons, on the SGB and the GBC core (2.18)
   ("{yes}: SNES [B] plays the Game Boy's A and [Y] its B, the two side by side as on the Game Boy. [A] still plays A. Works on the Super Game Boy and on the Game Boy Color core. It lives in {cfg} > {sgbmenu} and can be set per game too.",
@@ -750,7 +750,7 @@ TEXTS = [
    '{yes}: SNES-[B] ist das A des Game Boy und [Y] sein B, nebeneinander wie am Game Boy. [A] bleibt A. Gilt für den Super Game Boy und den Game-Boy-Color-Kern. Zu finden unter {cfg} > {sgbmenu}, auch pro Spiel einstellbar.',
    '{yes} : le [B] du SNES fait le A du Game Boy et le [Y] son B, côte à côte comme sur le Game Boy. [A] reste A. Vaut pour le Super Game Boy et le noyau Game Boy Color. Dans {cfg} > {sgbmenu}, aussi réglable par jeu.',
    '{yes}: il [B] del SNES fa la A del Game Boy e la [Y] la B, affiancati come sul Game Boy. [A] resta A. Vale per il Super Game Boy e il core Game Boy Color. Si trova in {cfg} > {sgbmenu} e si può impostare anche per gioco.',
-   '{yes}: На SNES кнопка [B] соответствует кнопке [A] на Game Boy, а кнопка [Y] - кнопке [B], они расположены рядом, как и на самом Game Boy. Кнопка [A] по-прежнему соответствует кнопке [A]. Функция работает в Super Game Boy и в ядре Game Boy Color. Настройка находится в разделе {cfg} > {sgbmenu}, её также можно задать отдельно для каждой игры.',
+   '{yes} - На SNES кнопка [B] соответствует кнопке [A] на Game Boy, а кнопка [Y] - кнопке [B], они расположены рядом, как и на самом Game Boy. Кнопка [A] по-прежнему соответствует кнопке [A]. Функция работает в Super Game Boy и в ядре Game Boy Color. Настройка находится в разделе {cfg} > {sgbmenu}, её также можно задать отдельно для каждой игры.',
    '{yes}: SNES-[B] is de A van de Game Boy en [Y] de B, naast elkaar zoals op de Game Boy. [A] blijft A. Werkt op de Super Game Boy en op de Game Boy Color-kern. Te vinden in {cfg} > {sgbmenu}, ook per spel in te stellen.'),
   # 54 the NTT Data Keypad (NDK10) as a standard pad (2.18)
   ('The |NTT Data Keypad| (NDK10) works as a standard controller in the menu, the in-game menu, the guide viewer and the in-game shortcuts. Its number pad is left to the games that use it.',
@@ -786,7 +786,7 @@ TEXTS = [
    '{sysinfo} im Hauptmenü ([X]) zeigt jetzt auch, auf welcher Hardware es läuft: |sd2snes Mk.II|, |sd2snes Mk.III| oder |FXPAK PRO STM32|.',
    '{sysinfo} dans le menu principal ([X]) montre aussi sur quel matériel il tourne : |sd2snes Mk.II|, |sd2snes Mk.III| ou |FXPAK PRO STM32|.',
    '{sysinfo} nel menu principale ([X]) ora mostra anche su quale hardware gira: |sd2snes Mk.II|, |sd2snes Mk.III| o |FXPAK PRO STM32|.',
-   '{sysinfo} в главном меню ([X]) теперь показывает и модель устройства: |sd2snes Mk.II|, |sd2snes Mk.III| или |FXPAK PRO STM32|.',
+   '{sysinfo} в главном меню ([X]) теперь показывает и модель картриджа: |sd2snes Mk.II|, |sd2snes Mk.III| или |FXPAK PRO STM32|.',
    '{sysinfo} in het hoofdmenu ([X]) toont nu ook op welke hardware het draait: |sd2snes Mk.II|, |sd2snes Mk.III| of |FXPAK PRO STM32|.'),
   # 52 BS-X and the Memory Pack
   ('Satellaview games that use the 8M Memory Pack slot read it from |/sd2snes/saves| as |<rom>.mpk|: saved sound novels, downloaded races and the like. The game still boots without a pack.',
