@@ -913,9 +913,9 @@ ce_draw_ed_hint:
   adc window_h
   dec
   sta print_y
-  lda #^ce_ed_hint
+  lda #^text_ce_ed_keys
   sta print_bank
-  ldx #!ce_ed_hint
+  ldx #!text_ce_ed_keys
   stx print_src
   jsr ce_print_centered
   jsl @hint_keys              ; keys in green (manhost.a65)
@@ -1569,12 +1569,12 @@ ce_kbd_draw_hint:
   adc #CEK_H
   dec
   sta print_y
-  lda #^ce_kbd_hint_hex
+  lda #^text_ce_kbd_keys_hex
   sta print_bank
-  ldx #!ce_kbd_hint_hex
+  ldx #!text_ce_kbd_keys_hex
   lda ce_kmode
   beq +
-  ldx #!ce_kbd_hint_aln
+  ldx #!text_ce_kbd_keys_aln
 + stx print_src
   jsr ce_print_centered
   php
@@ -1650,12 +1650,6 @@ ce_kbd_aln_len:
   .byt 13, 13, 13, 13, 14, 13
 ce_cursor_str:
   .byt "_", 0
-ce_ed_hint:
-  .byt " A:Edit  Sel:Add code  Y:Remove  B:Back ", 0
-ce_kbd_hint_aln:
-  .byt " A:Type  Y:Del  Sel:Space  X:OK  B:Cancel ", 0
-ce_kbd_hint_hex:
-  .byt " A:Type  Y:Del  X:OK  B:Cancel ", 0
 ; code-format hint (code keyboard only). The dash after the 4th char = Game Genie.
 ce_fmt_gg:
   .byt "Game Genie:  XXXX-YYYY", 0

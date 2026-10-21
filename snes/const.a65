@@ -564,10 +564,14 @@ text_cheat_yes  .byt "Yes ", 0
 text_cheat_no   .byt "No  ", 0
 text_cheat_none_title .byt "Cheats", 0
 text_cheat_none_msg   .byt "No cheats found for this ROM", 0
-; cheat editor (snes/cheatedit.a65): the one translated label it needs; everything else it
+; cheat editor (snes/cheatedit.a65): the translated labels it needs; everything else it
 ; prints is either reused (text_save, text_add, text_filesel_context_delete_file,
 ; text_cheat_none_title, text_pcm_nosup) or language-neutral data in bank $C1.
 text_ce_name          .byt "Name", 0
+; the editor's and the keyboard's button hints (bottom border, keys in green by hint_keys)
+text_ce_ed_keys       .byt " A:Edit  Sel:Add code  Y:Remove  B:Back ", 0
+text_ce_kbd_keys_aln  .byt " A:Type  Y:Del  Sel:Space  X:OK  B:Cancel ", 0
+text_ce_kbd_keys_hex  .byt " A:Type  Y:Del  X:OK  B:Cancel ", 0
 
 ; delete-confirmation dialog (see confirm_delete in filesel.a65)
 text_confirm_delete_file .byt "Delete this file?", 0
