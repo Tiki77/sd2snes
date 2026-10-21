@@ -118,8 +118,13 @@ gopt_list_build:
   sep #$20 : .as
   rep #$10 : .xl
   cmp #SVW_GIMS             ; not a list: the browser settings (gimenu.a65)
-  bne glb_list
+  bne glb_lock
   jmp gims_menu_body
+glb_lock:
+  .as : .xl
+  cmp #SVW_LOCK             ; not a list either: Settings (lock.a65)
+  bne glb_list
+  jmp lock_menu_body
 glb_list:
   .as : .xl
   pha                       ; SVW_*
@@ -215,6 +220,11 @@ ggi_pbak:
   jsl @gi_call_dc_restore                    ; menu graphics back, screen_dma_disable = 0
   jsr fm_env
   jsr gopt_nmi                               ; the menu NMI's tile DMA draws the windows
+  jsl @lock_ask                              ; the parental lock (fmres.a65), over the browser
+  bcc ggi_open                               ;   now: on the info screen its keypad would not show
+  jmp ggi_prst                               ; refused: the info screen back
+ggi_open:
+  .as : .xl
   lda #$02
   sta @SFX_MAILBOX                           ; confirm blip, after the restore's cover burst
   lda @gi_query_cmd

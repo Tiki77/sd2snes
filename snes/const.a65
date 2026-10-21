@@ -817,6 +817,8 @@ text_igm_ft_ce_kbd    .byt "A:TYPE Y:DELETE SEL:SPACE X:OK B:CANCEL", 0
 text_igm_ft_help      .byt "B:BACK START:CLOSE", 0
 text_igm_ft_gopt      .byt "A:CHANGE B:BACK START:CLOSE", 0
 text_igm_ft_gopt_ed   .byt 241, 242, ":VALUE A:OK B:CANCEL", 0
+text_igm_lock_enter   .byt "Code (hold B for 3 s to cancel):", 0
+text_igm_lock_wrong   .byt "Wrong code (hold B 3 s to cancel):", 0
 ; ---- In-game GAME OPTIONS screen (Y at the tab bar, igopt.i65). Lockstep with GOPT_LABELS +
 ;      the IGM_GO_* indices. The options' names and values are the menu's own (read in game).
 text_igm_go_title     .byt "Game options", 0
@@ -1025,3 +1027,18 @@ text_gopt_default       .byt "Default", 0
 ; rules as text_fm_*) ----
 mtext_gims_stop         .byt " ", 129, "Stop music on game info", 0
 mdesc_gims_stop         .byt "Silence the menu music on the game info screen. It starts again on leaving. Opening the screen takes about 1 s longer", 0
+; the parental lock (lock.a65): strings in bank $C3's pool, like the file manager's
+mtext_lock_row          .byt "Parental lock", 0
+mdesc_lock_row          .byt "A code of 4 to 10 buttons asked before Settings, file changes, saves, game options and cheat edits. Forgot it? Delete LockCode in config.yml", 0
+text_lock_title         .byt "Parental lock", 0
+text_lock_enter         .byt "Enter the code", 0
+text_lock_new           .byt "Press 4 to 10 buttons", 0
+text_lock_again         .byt "Press the same buttons again", 0
+text_lock_wrong         .byt "Wrong code", 0
+text_lock_hint          .byt "Hold B for 3 s to cancel", 0
+text_lock_wait          .byt "Fewer than 10? Wait 3 s", 0
+text_lock_nomatch       .byt "The two codes do not match", 0
+text_lock_on            .byt "The lock is on", 0
+text_lock_off           .byt "The lock is off", 0
+mtext_lock_change       .byt "Change the code", 0
+mtext_lock_remove       .byt "Turn the lock off", 0

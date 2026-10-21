@@ -1065,6 +1065,8 @@ show_menu_loop:
     iny
     iny
     iny
+    jsl @lock_entry       ; fork: the parental lock asks first for some rows (fmres.a65)
+    bcs show_menu_cont
     cmp #MTYPE_SUBMENU
     beq show_menu_submenu
     cmp #MTYPE_FUNC

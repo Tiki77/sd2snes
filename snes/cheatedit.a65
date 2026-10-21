@@ -74,6 +74,11 @@
 ;  Entry points
 ; ======================================================================
 cheat_edit_new:
+  jsl @lock_ask               ; the parental lock (fmres.a65): refused = the list as it was
+  bcc cen_go
+  clc
+  rtl
+cen_go:
   php
   phb
   phd
@@ -97,6 +102,11 @@ cheat_edit_new:
   rtl
 
 cheat_edit_existing:
+  jsl @lock_ask
+  bcc cee_go
+  clc
+  rtl
+cee_go:
   php
   phb
   phd

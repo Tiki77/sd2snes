@@ -100,6 +100,7 @@ _Static_assert(SRAM_MENU_CFG_ADDR + offsetof(cfg_t, player_repeat) == SRAM_CFG_P
                "SRAM_CFG_PLAYER_REPEAT_ADDR (memmap.h) must name cfg_t.player_repeat");
 _Static_assert(offsetof(cfg_t, gb_rotate_buttons) == 0x1da, "cfg_t.gb_rotate_buttons must stay at CFG_ADDR+$1DA");
 _Static_assert(offsetof(cfg_t, stop_music_game_info) == 0x1db, "cfg_t.stop_music_game_info must stay at CFG_ADDR+$1DB");
+_Static_assert(offsetof(cfg_t, lock_code) == 0x1dc, "cfg_t.lock_code must stay at CFG_ADDR+$1DC");
 
 const cfg_t CFG_DEFAULT = {
   .vidmode_menu = VIDMODE_60,
@@ -177,7 +178,8 @@ const cfg_t CFG_DEFAULT = {
   .browser_icons = 1,        /* the file-type icons in the browser */
   .player_repeat = 0,        /* the music players move on to the next track */
   .gb_rotate_buttons = 0,    /* Game Boy buttons as wired: SNES B = GB B */
-  .stop_music_game_info = 0  /* the menu music keeps playing behind the game info screen */
+  .stop_music_game_info = 0, /* the menu music keeps playing behind the game info screen */
+  .lock_code = {0}           /* no parental lock */
 };
 
 cfg_t CFG;
@@ -240,7 +242,9 @@ typedef enum {
   CK_NIB,        /* uint8_t            <-> decimal, masked to 4 bits on load */
   CK_STR,        /* uint8_t[CFG_STR_LEN] <-> bare scalar */
   CK_BUTTONS,    /* uint16_t pad mask  <-> "BYsSudlrAXLR" letters */
-  CK_BSXTIME     /* uint8_t[12] S-RTC  <-> 14 BCD hex digits */
+  CK_BSXTIME,    /* uint8_t[12] S-RTC  <-> 14 BCD hex digits */
+  CK_SEQ         /* uint8_t[5], 10 nibbles 1..12 <-> "BYsSudlrAXLR" letters in order; a
+                    letter outside them or more than 10 = all zero */
 } cfg_kind_t;
 
 /* clamp = (max << 4) | replacement, 0 = take whatever the file says.  Every max
@@ -351,7 +355,8 @@ static const cfg_item_t cfg_items[] = {
   CFGI(CFG_BROWSER_ICONS,               browser_icons,              CK_BOOL,    0),
   CFGI(CFG_PLAYER_REPEAT,               player_repeat,              CK_BOOL,    0),
   CFGI(CFG_GB_ROTATE_BUTTONS,           gb_rotate_buttons,          CK_BOOL,    0),
-  CFGI(CFG_STOP_MUSIC_GAME_INFO,        stop_music_game_info,       CK_BOOL,    0)
+  CFGI(CFG_STOP_MUSIC_GAME_INFO,        stop_music_game_info,       CK_BOOL,    0),
+  CFGI(CFG_LOCK_CODE,                   lock_code,                  CK_SEQ,     0)
 };
 #undef CFGI
 
@@ -406,6 +411,17 @@ int cfg_save() {
         f_printf(&file_handle, "%s: %06lX%08lX\n", it->key,
                  (uint32_t)(bcdtime >> 32), (uint32_t)(bcdtime & 0xffffffffLL));
         continue;
+      }
+      case CK_SEQ: {
+        unsigned i;
+        for(i = 0; i < 10; i++) {
+          uint8_t n = (p[i >> 1] >> ((i & 1) ? 0 : 4)) & 0xf;
+          if(!n || n > 12) break;
+          buttons[i] = button_names[n - 1];
+        }
+        buttons[i] = 0;
+        str = buttons;
+        break;
       }
       case CK_BUTTONS: {
         /* uint16_t at an odd offset in a packed struct: copy it out first. */
@@ -464,6 +480,20 @@ int cfg_load() {
         case CK_BSXTIME:
           bcdtime2srtctime(strtoll(tok.stringvalue, NULL, 16), p);
           break;
+        case CK_SEQ: {
+          const char *s = tok.stringvalue;
+          unsigned i;
+          memset(p, 0, 5);
+          for(i = 0; s[i]; i++) {
+            const char *c = strchr(button_names, s[i]);
+            if(i >= 10 || !c) {           /* not a button, or an 11th: no code at all */
+              memset(p, 0, 5);
+              break;
+            }
+            p[i >> 1] |= (uint8_t)((c - button_names + 1) << ((i & 1) ? 0 : 4));
+          }
+          break;
+        }
         default:
           /* Numeric and boolean scalars.  The type check is MANDATORY: one token is
              reused for every key and yaml_detect_value fills only the field matching

@@ -3015,7 +3015,10 @@ tra_set:
 	plp
 	rts
 tra_add:
+	jsr ig_lock_ask                            // the parental lock first (lock.i65)
+	bcs tra_add_out
 	jsr tr_save
+tra_add_out:
 	plp
 	rts
 tra_unpin:

@@ -1,0 +1,1046 @@
+; ===========================================================================
+; The parental lock: a code of 4 to 10 pad buttons asked before what changes the card or the
+; settings (fmres.a65 has the resident half: lock_entry, the rows that ask, and lock_ask).
+; This bank has the keypad, the Settings row (added to menu_enttab_cfg by fm_menu_hook, the
+; way gimenu.a65 adds its row to the browser settings) and the screens that set, change and
+; remove the code.  The code is CFG_LOCK_CODE (cfg_t.lock_code, YAML LockCode): 5 bytes of
+; nibbles, the first button on top, 1..12 = B Y Select Start Up Down Left Right A X L R, a 0
+; nibble ends it.
+;
+; The keypad takes any of the twelve buttons as a digit, on its RELEASE: so a button held
+; from before it opened (the A that picked the row) is not one, and B can be both a digit
+; and, held for three seconds, the way out.  A new code ends at the 10th button or after
+; 3 s with nothing pressed (from the 4th on); a code being checked ends at its own length
+; (or 3 s, wrong then).  Both pads count (NTT Data keypad included); a mouse does not.
+; ===========================================================================
+.link page $c3
+#include "memmap.i65"
+; memmap.i65 re-asserts '.link page $c0' on include; re-declare $c3 AFTER it.
+.link page $c3
+
+; lockstep with fileman.a65 (the table builders' scratch)
+#define FMX_TLEN    $7E9800     ; word: bytes written into the table being built
+#define FMX_T2      $7E9804     ; word scratch
+#define FMX_TBL     $7E9820     ; the table the builders write into, word
+#define FMX_DESC    $7E9822     ; word: fm_row's description label
+#define FMX_L2      $7E980F     ; fm_popup: 1 = a second line (FMX_LINE)
+#define FMX_TAB2    $7E9A00     ; the small menus' table
+
+; ours ($7E9F00-$7E9F5F; fmres.a65 lock_entry uses $7E9F30-$7E9F33)
+#define LKX_IN      $7E9F00     ; 10 B: the buttons typed, 1..12 each
+#define LKX_N       $7E9F0A     ; how many
+#define LKX_MODE    $7E9F0B     ; 0 = take a code, 1 = check it against CFG_LOCK_CODE
+#define LKX_PREV    $7E9F0C     ; word: the buttons down last frame
+#define LKX_ARM     $7E9F0E     ; word: the buttons pressed since the keypad opened
+#define LKX_HOLD    $7E9F10     ; word: frames B has been held
+#define LKX_IDLE    $7E9F12     ; word: frames with nothing down since the last button
+#define LKX_T       $7E9F14     ; word scratch
+#define LKX_PROMPT  $7E9F16     ; word: the prompt's label
+#define LKX_WSAVE   $7E9F18     ; 4 B: the window the keypad opened over
+#define LKX_BAR     $7E9F1C     ; 3 B: the menu bar it hid
+#define LKX_CSAVE   $7E9F20     ; 4 B: the window lock_h_cfg's caller (show_menu) pops with
+#define LKX_LEN     $7E9F24     ; the length of the code being checked
+#define LKX_T2      $7E9F26     ; word scratch (lk_green_b)
+#define LKX_END     $7E9F28     ; word: lk_green_b's last column + 1
+#define LKX_BEG     $7E9F2A     ; word: and its first
+#define LKX_LINE    $7E9F34     ; 32 B: the slots row
+#define LKX_NEW     $7E9F54     ; 10 B: the first entry of a new code
+#define LKX_NEWN    $7E9F5E     ; its length
+#define LKX_D1      $7E9F60     ; word: the raw buttons 1, 2 and 3 frames ago (lk_debounce)
+#define LKX_D2      $7E9F62
+#define LKX_D3      $7E9F64
+
+#define LK_X        14
+#define LK_Y        11
+#define LK_W        36
+#define LK_H        9
+#define LK_HOLD     180         ; frames of B for "cancel": 3 s at 60 Hz
+#define LK_IDLE     180         ; frames with nothing pressed that end a code: 3 s
+#define LK_MAX      10
+
+; ---------------------------------------------------------------------------
+; lock_keypad_ask: fmres.a65 lock_ask, the lock on and closed.  Carry CLEAR = the right
+; code (LOCK_OPEN set), SET = cancelled.  Every register, width, DB and DP kept.
+; ---------------------------------------------------------------------------
+lock_keypad_ask:
+  php
+  rep #$30 : .al : .xl
+  pha
+  phx
+  phy
+  phb
+  phd
+  jsr fm_env
+  .as : .xl
+  jsr lk_valid              ; Y = the code's length
+  tya
+  sta !LKX_LEN
+  lda #$01
+  sta !LKX_MODE
+  ldx #!text_lock_enter
+  jsr lock_keypad
+  bcs lka3_no
+  lda #$01
+  sta @LOCK_OPEN
+  rep #$30 : .al : .xl
+  pld
+  plb
+  ply
+  plx
+  pla
+  plp
+  clc
+  rtl
+lka3_no:
+  .as : .xl
+  rep #$30 : .al : .xl
+  pld
+  plb
+  ply
+  plx
+  pla
+  plp
+  sec
+  rtl
+
+; ---------------------------------------------------------------------------
+; lock_keypad: X = the prompt's label, LKX_MODE as above (LKX_LEN for a check).  Carry
+; clear = done (a code taken into LKX_IN / LKX_N, or the right one given), set = cancelled.
+; The window the caller had (and the menu's bar) is left as it was.  fm_env in and out.
+; ---------------------------------------------------------------------------
+lock_keypad:
+  .as : .xl
+  stx !LKX_PROMPT
+  lda window_x
+  sta !LKX_WSAVE
+  lda window_y
+  sta !LKX_WSAVE+1
+  lda window_w
+  sta !LKX_WSAVE+2
+  lda window_h
+  sta !LKX_WSAVE+3
+  lda bar_xl
+  sta !LKX_BAR
+  lda bar_yl
+  sta !LKX_BAR+1
+  lda bar_wl
+  sta !LKX_BAR+2
+  lda #$ff                  ; the menu's bar off while the keypad is up
+  sta bar_xl
+  sta bar_yl
+  sta bar_wl
+  jsr lk_geom
+  ldx #!text_lock_title
+  jsr fm_str
+  lda print_bank
+  sta window_tbank
+  ldx print_src
+  stx window_taddr
+  jsl @ui_call_wopen
+  jsr fm_env
+  .as : .xl
+  lda #LK_Y+1
+  ldx !LKX_PROMPT
+  jsr lk_text
+  lda #LK_Y+7
+  ldx #!text_lock_hint
+  jsr lk_text
+  jsr lk_green_b            ; its B green, like a key
+  jsr lk_clear
+  jsr lk_rawpad
+  .al
+  sta !LKX_PREV
+  sta !LKX_D1
+  sta !LKX_D2
+  sta !LKX_D3
+  lda #$0000
+  sta !LKX_ARM
+  sta !LKX_HOLD
+  sta !LKX_IDLE
+  sep #$20 : .as
+lkp_loop:
+  .as : .xl
+  jsr fm_frame
+  jsl @ui_call_pad          ; the menu's own pad state follows (no stale edge on the way out)
+  jsr fm_env
+  .as : .xl
+  jsr lk_rawpad             ; A (16 bits) = the buttons down now
+  .al
+  jsr lk_debounce
+  bit #$8000                ; B held: the way out after LK_HOLD frames
+  beq lkp_nohold
+  pha
+  lda !LKX_HOLD
+  inc
+  sta !LKX_HOLD
+  cmp #LK_HOLD
+  pla
+  bcc lkp_edges
+  sep #$20 : .as
+  lda #$03                  ; back blip
+  sta @SFX_MAILBOX
+  jsr lk_close
+  sec
+  rts
+lkp_nohold:
+  .al
+  pha
+  lda #$0000
+  sta !LKX_HOLD
+  pla
+lkp_edges:
+  .al
+  pha
+  cmp #$0000                ; nothing down: the idle count runs, else it starts again
+  beq lkp_idle
+  lda #$0000
+  sta !LKX_IDLE
+  bra lkp_edge2
+lkp_idle:
+  .al
+  lda !LKX_IDLE
+  inc
+  sta !LKX_IDLE
+lkp_edge2:
+  .al
+  lda $01, s
+  eor !LKX_PREV             ; changed
+  and $01, s                ; ... and down now = pressed
+  ora !LKX_ARM
+  sta !LKX_ARM
+  lda $01, s
+  eor #$ffff
+  and !LKX_PREV             ; down before, up now = released
+  and !LKX_ARM              ; pressed since the keypad opened
+  sta !LKX_T
+  pla
+  sta !LKX_PREV
+  lda !LKX_T
+  bne lkp_digit
+  lda !LKX_IDLE             ; 3 s of nothing ends a code of 4 or more
+  cmp #LK_IDLE
+  sep #$20 : .as
+  bcc lkp_back
+  lda !LKX_N
+  cmp #$04
+  bcc lkp_back
+  jmp lkp_full
+lkp_back:
+  .as : .xl
+  jmp lkp_loop
+lkp_digit:
+  .al
+  pha
+  eor #$ffff
+  and !LKX_ARM
+  sta !LKX_ARM
+  pla
+  ldx #$0001                ; the highest button released: B = 1 ... R = 12
+lkp_bit:
+  .al : .xl
+  asl
+  bcs lkp_got
+  inx
+  bra lkp_bit
+lkp_got:
+  .al : .xl
+  sep #$20 : .as
+  txa                       ; the digit
+  pha
+  rep #$20 : .al
+  lda !LKX_N
+  and #$00ff
+  tax
+  sep #$20 : .as
+  pla
+  cpx #LK_MAX
+  bcs lkp_back              ; (never: a code ends at its 10th button)
+  sta !LKX_IN, x
+  inc !LKX_N
+  lda #$01                  ; cursor blip
+  sta @SFX_MAILBOX
+  jsr lk_slots
+  lda !LKX_MODE
+  beq lkp_take
+  lda !LKX_N                ; checking: at the code's own length
+  cmp !LKX_LEN
+  bcs lkp_full
+  jmp lkp_loop
+lkp_take:
+  .as : .xl
+  lda !LKX_N                ; taking: at the 10th
+  cmp #LK_MAX
+  bcs lkp_full
+  jmp lkp_loop
+lkp_full:
+  .as : .xl
+  lda !LKX_MODE
+  beq lkp_done              ; taking a code: it is this one
+  jsr lk_same_as_cfg
+  bcs lkp_right
+  lda #$04                  ; error blip, "wrong code", and again from the first button
+  sta @SFX_MAILBOX
+  lda #LK_Y+5
+  ldx #!text_lock_wrong
+  jsr lk_note
+  jsr lk_clear_code
+  rep #$20 : .al
+  lda #$0000
+  sta !LKX_IDLE
+  sep #$20 : .as
+  jmp lkp_loop
+lkp_right:
+  .as : .xl
+  lda #$02                  ; confirm blip
+  sta @SFX_MAILBOX
+lkp_done:
+  .as : .xl
+  jsr lk_close
+  clc
+  rts
+
+; lk_same_as_cfg: carry set = LKX_IN / LKX_N is the code in CFG.  .as/.xl.
+lk_same_as_cfg:
+  .as : .xl
+  lda !LKX_N
+  cmp !LKX_LEN
+  bne lksa_no
+  ldx #$0000
+lksa_l:
+  .as : .xl
+  txa
+  cmp !LKX_N
+  bcs lksa_yes
+  jsr lk_cfg_digit          ; A = the code's digit X
+  cmp !LKX_IN, x
+  bne lksa_no
+  inx
+  bra lksa_l
+lksa_yes:
+  .as : .xl
+  sec
+  rts
+lksa_no:
+  .as : .xl
+  clc
+  rts
+
+; lk_cfg_digit: A = digit X (0..9) of CFG_LOCK_CODE.  .as/.xl, X kept.
+lk_cfg_digit:
+  .as : .xl
+  phx
+  rep #$20 : .al
+  txa
+  lsr
+  tax
+  sep #$20 : .as
+  lda @CFG_LOCK_CODE, x
+  plx
+  pha
+  txa
+  lsr                       ; carry = an odd digit: the low nibble
+  pla
+  bcs lkcd_lo
+  lsr
+  lsr
+  lsr
+  lsr
+  rts
+lkcd_lo:
+  .as : .xl
+  and #$0f
+  rts
+
+; lk_close: the keypad's window away, the caller's window and bar back.  .as/.xl.
+lk_close:
+  .as : .xl
+  jsr lk_geom
+  jsl @ui_call_wclose
+  jsr fm_env
+  .as : .xl
+  lda !LKX_WSAVE
+  sta window_x
+  lda !LKX_WSAVE+1
+  sta window_y
+  lda !LKX_WSAVE+2
+  sta window_w
+  lda !LKX_WSAVE+3
+  sta window_h
+  lda !LKX_BAR
+  sta bar_xl
+  lda !LKX_BAR+1
+  sta bar_yl
+  lda !LKX_BAR+2
+  sta bar_wl
+  rts
+
+lk_geom:
+  .as : .xl
+  lda #LK_X
+  sta window_x
+  lda #LK_Y
+  sta window_y
+  lda #LK_W
+  sta window_w
+  lda #LK_H
+  sta window_h
+  rts
+
+; lk_text: label X on row A, inside the keypad.  .as/.xl.
+lk_text:
+  .as : .xl
+  sta print_y
+  lda #LK_X+2
+  sta print_x
+  lda #LK_W-4
+  jmp fm_print
+
+; lk_note: label X on row A, inside the keypad, yellow (palette 1): the instruction under
+; the slots and "wrong code".  .as/.xl.
+lk_note:
+  .as : .xl
+  sta print_y
+  lda #LK_X+2
+  sta print_x
+  lda #LK_W-4
+  sta print_count
+  stz print_count+1
+  lda #$01
+  sta print_pal
+  stz print_pal+1
+  jsr fm_str
+  jsl @gi_call_hiprint
+  jmp fm_env
+
+; lk_green_b: the hint row just printed (print_x / print_y / print_done as hiprint left
+; them): the B that stands alone (no letter either side, so not the B of a word) gets
+; palette 2, the green of the keys in every hint.  The tile buffers, which the menu NMI
+; sends; hi-res: half-column h is in BG1 when odd, BG2 when even, at row * 64 + (h & ~1)
+; (manhost.a65 hint_keys' mapping).  .as/.xl.
+lk_green_b:
+  .as : .xl
+  rep #$20 : .al
+  lda print_x
+  and #$00ff
+  sta !LKX_BEG
+  tax
+  clc
+  adc print_done
+  and #$00ff
+  sta !LKX_END
+lkg_loop:
+  .al : .xl
+  txa
+  cmp !LKX_END
+  bcs lkg_out
+  jsr lk_cell_char
+  cmp #$0042                ; 'B'
+  bne lkg_next
+  dex                       ; the one before: not a letter (or the row's start)
+  txa
+  cmp !LKX_BEG
+  bcc lkg_prev_ok
+  jsr lk_cell_char
+  jsr lk_letter
+  bcs lkg_skip_back
+lkg_prev_ok:
+  .al : .xl
+  inx
+  inx                       ; the one after: not a letter (or the row's end)
+  txa
+  cmp !LKX_END
+  bcs lkg_next_ok
+  jsr lk_cell_char
+  jsr lk_letter
+  dex
+  bcs lkg_next
+  bra lkg_paint
+lkg_next_ok:
+  .al : .xl
+  dex
+lkg_paint:
+  .al : .xl
+  jsr lk_cell_off
+  bcs lkg_bg1
+  lda @BG2_TILE_BUF, x
+  and #$e3ff
+  ora #$0800                ; palette 2
+  sta @BG2_TILE_BUF, x
+  bra lkg_done
+lkg_bg1:
+  .al : .xl
+  lda @BG1_TILE_BUF, x
+  and #$e3ff
+  ora #$0800
+  sta @BG1_TILE_BUF, x
+lkg_done:
+  .al : .xl
+  sep #$20 : .as
+  rts                       ; one B is enough
+lkg_skip_back:
+  .al : .xl
+  inx
+lkg_next:
+  .al : .xl
+  inx
+  bra lkg_loop
+lkg_out:
+  .al : .xl
+  sep #$20 : .as
+  rts
+
+; lk_cell_char: A (16) = the character at half-column X of the print_y row (tile / 2).
+; X kept.  .al/.xl.
+lk_cell_char:
+  .al : .xl
+  phx
+  jsr lk_cell_off
+  bcs lkcc_bg1
+  lda @BG2_TILE_BUF, x
+  bra lkcc_got
+lkcc_bg1:
+  .al : .xl
+  lda @BG1_TILE_BUF, x
+lkcc_got:
+  .al : .xl
+  plx
+  and #$03ff
+  lsr
+  rts
+
+; lk_cell_off: X = half-column in; X = byte offset out, carry = odd (BG1).  .al/.xl.
+lk_cell_off:
+  .al : .xl
+  lda print_y
+  and #$00ff
+  xba
+  lsr
+  lsr                       ; row * 64
+  sta !LKX_T2
+  txa
+  lsr                       ; carry = odd
+  php
+  txa
+  and #$fffe
+  clc
+  adc !LKX_T2
+  tax
+  plp
+  rts
+
+; lk_letter: carry set = A (16) is an ASCII letter.  .al.
+lk_letter:
+  .al
+  ora #$0020                ; lower case
+  cmp #$0061                ; 'a'
+  bcc lkl_no
+  cmp #$007b                ; past 'z'
+  bcs lkl_no
+  sec
+  rts
+lkl_no:
+  .al
+  clc
+  rts
+
+; lk_clear: no digits, the slots drawn, and the message row: "4 to 10 buttons, then wait
+; 3 s" while a code is taken, blank while one is checked.  .as/.xl.
+lk_clear:
+  .as : .xl
+  ldx #!lk_blank
+  lda !LKX_MODE
+  bne lkc_msg
+  ldx #!text_lock_wait
+lkc_msg:
+  .as : .xl
+  lda #LK_Y+5               ; a blank row between the slots and it
+  jsr lk_note
+lk_clear_code:
+  .as : .xl
+  stz !LKX_N
+; lk_slots: a star for each button typed (never the button itself) and a '_' for the next,
+; at least four slots.  .as/.xl.
+lk_slots:
+  .as : .xl
+  lda !LKX_N
+  inc
+  cmp #11                  ; LK_MAX + 1
+  bcc lks_cap
+  lda #LK_MAX
+lks_cap:
+  .as : .xl
+  cmp #$04
+  bcs lks_n
+  lda #$04
+lks_n:
+  .as : .xl
+  sta !LKX_T                ; slots
+  ldx #$0000
+  ldy #$0000                ; the slot
+lks_loop:
+  .as : .xl
+  tya
+  cmp !LKX_N                ; carry set = not typed yet (lda keeps it)
+  lda #$5f                  ; '_'
+  bcs lks_put
+  lda #$2a                  ; '*'
+lks_put:
+  .as : .xl
+  sta !LKX_LINE, x
+  inx
+  lda #$20
+  sta !LKX_LINE, x
+  inx
+  iny
+  tya
+  cmp #LK_MAX
+  bcc lks_loop
+  lda #$00                  ; 20 columns always: a shorter row would leave stars behind
+  dex
+  sta !LKX_LINE, x
+  lda !LKX_T                ; past the slots: blanks
+  rep #$20 : .al
+  and #$00ff
+  asl
+  tax
+  sep #$20 : .as
+lks_blank:
+  .as : .xl
+  cpx #19                  ; LK_MAX * 2 - 1
+  bcs lks_end
+  lda #$20
+  sta !LKX_LINE, x
+  inx
+  bra lks_blank
+lks_end:
+  .as : .xl
+  lda #LK_Y+3
+  sta print_y
+  lda #LK_X+8               ; 19 columns, near the middle of the 32 inside
+  sta print_x
+  ldx #!LKX_LINE
+  stx print_src
+  lda #$7e
+  sta print_bank
+  lda #19
+  sta print_count
+  stz print_count+1
+  stz print_pal
+  stz print_pal+1
+  jsl @gi_call_hiprint
+  jmp fm_env
+
+; lk_debounce: A (16) = the buttons down now -> down now or in any of the 3 frames before.
+; A wireless pad drops a report now and then: without this a held B "let go" for a frame,
+; which typed a B and started the 3 s of the way out again (5 s and more on a console).
+; .al in and out.
+lk_debounce:
+  .al
+  pha
+  ora !LKX_D1
+  ora !LKX_D2
+  ora !LKX_D3
+  sta !LKX_T
+  lda !LKX_D2
+  sta !LKX_D3
+  lda !LKX_D1
+  sta !LKX_D2
+  pla
+  sta !LKX_D1
+  lda !LKX_T
+  rts
+
+; lk_rawpad: A (16 bits, .al out) = the buttons down on both pads (a pad, or the NTT Data
+; keypad with its ID nibble taken off; any other controller gives nothing).
+lk_rawpad:
+  .as : .xl
+  rep #$20 : .al
+  lda @$004218
+  jsr lkr_pad
+  sta !LKX_T
+  lda @$00421a
+  jsr lkr_pad
+  ora !LKX_T
+  rts
+lkr_pad:
+  .al
+  bit #PAD_ID_NOTPAD
+  bne lkr_none
+  and #$fff0
+  rts
+lkr_none:
+  .al
+  lda #$0000
+  rts
+
+; the message row erased
+lk_blank:
+  .byt "                                ", 0
+
+; ---------------------------------------------------------------------------
+; lock_menu_body: gopt_list_build's code for SVW_LOCK, its php/phd already pushed, .as/.xl,
+; DBR:X = menu_enttab_cfg.  The table goes to FM_TAB with our row before the last one (the
+; tour); leaves like gopt_list_build: DB $7E, X = !FM_TAB, rtl straight back into show_menu.
+; ---------------------------------------------------------------------------
+lock_menu_body:
+  .as : .xl
+  phb
+  pla                       ; A = the table's bank
+  pea $0000
+  pld
+  pea $7e7e
+  plb
+  plb
+  sta print_ptr+2           ; DP 0: [print_ptr] = the table
+  stx print_ptr
+  rep #$20 : .al
+  lda #!FM_TAB
+  sta !FMX_TBL
+  sep #$20 : .as
+  ldy #$0000                ; the header, as given
+lmb_head:
+  .as : .xl
+  lda [print_ptr], y
+  tyx
+  sta @FM_TAB, x
+  iny
+  cpy #$0004
+  bne lmb_head
+  sty !FMX_TLEN
+lmb_entry:
+  .as : .xl
+  lda [print_ptr], y        ; type 0 = the end
+  beq lmb_end
+  phy                       ; the tour's row: ours goes in front of it
+  iny
+  rep #$20 : .al
+  lda [print_ptr], y
+  cmp #!mtext_cfg_tour
+  sep #$20 : .as
+  bne lmb_copy
+  iny
+  iny
+  lda [print_ptr], y
+  cmp #^mtext_cfg_tour
+  bne lmb_copy
+  jsr lock_row
+lmb_copy:
+  .as : .xl
+  ply
+  rep #$20 : .al
+  lda !FMX_TLEN
+  clc
+  adc #!FM_TAB
+  tax
+  lda !FMX_TLEN
+  clc
+  adc #MENU_ENTRY_SIZE
+  sta !FMX_TLEN
+  sep #$20 : .as
+  jsr fcb_copy1             ; fileman.a65: the entry to $7E:X, Y past it
+  bra lmb_entry
+lmb_end:
+  .as : .xl
+  jsr fm_tab_end
+  pld
+  plp
+  pea $7e7e
+  plb
+  plb
+  rep #$10 : .xl
+  ldx #!FM_TAB
+  rtl
+
+; lock_row: the row at FM_TAB + FMX_TLEN, an MTYPE_FUNC (back to Settings after it) calling
+; lock_h_cfg, text and description resolved here.  .as/.xl, DP 0, DB $7E.
+lock_row:
+  .as : .xl
+  ldx #!mtext_lock_row
+  jsr fm_str
+  rep #$20 : .al
+  lda !FMX_TLEN
+  clc
+  adc #!FM_TAB
+  tax
+  lda print_src
+  sta !$0001, x
+  lda #!lock_h_cfg-1
+  sta !$0004, x
+  lda #$0000
+  sta !$0007, x             ; +7..+22: no value, no hook, no greying
+  sta !$0009, x
+  sta !$000e, x
+  sta !$0010, x
+  sta !$0012, x
+  sta !$0014, x
+  sta !$0015, x
+  sep #$20 : .as
+  lda #MTYPE_FUNC
+  sta !$0000, x
+  lda print_bank
+  sta !$0003, x
+  lda #^lock_h_cfg
+  sta !$0006, x
+  phx
+  ldx #!mdesc_lock_row
+  jsr fm_str
+  plx
+  rep #$20 : .al
+  lda print_src
+  sta !$000b, x
+  lda !FMX_TLEN
+  clc
+  adc #MENU_ENTRY_SIZE
+  sta !FMX_TLEN
+  sep #$20 : .as
+  lda print_bank
+  sta !$000d, x
+  rts
+
+; ---------------------------------------------------------------------------
+; lock_h_cfg: the Settings row.  No code yet: take a new one.  A code: a small menu, change
+; it or turn the lock off (whoever is here gave it already: Settings asks for it).
+; ---------------------------------------------------------------------------
+lock_h_cfg:
+  php
+  phb
+  phd
+  jsr fm_enter
+  .as : .xl
+  lda window_x              ; kept here, not only by fm_enter: the small menu's handlers run
+  sta !LKX_CSAVE            ;   fm_enter again and would leave show_menu the wrong window
+  lda window_y              ;   to pop (a torn Settings window after "Turn the lock off")
+  sta !LKX_CSAVE+1
+  lda window_w
+  sta !LKX_CSAVE+2
+  lda window_h
+  sta !LKX_CSAVE+3
+  jsr lk_valid
+  bcs lhc_menu
+  jsr lk_new
+  bra lhc_out
+lhc_menu:
+  .as : .xl
+  lda #$10
+  sta window_x
+  lda #$0d
+  sta window_y
+  rep #$20 : .al
+  lda #!FMX_TAB2
+  sta !FMX_TBL
+  lda #$0000
+  sta !FMX_DESC
+  sep #$20 : .as
+  ldx #!text_lock_title
+  jsr fm_tab_head
+  ldx #!mtext_lock_change
+  ldy #!lk_h_change-1
+  jsr fm_row
+  ldx #!mtext_lock_remove
+  ldy #!lk_h_remove-1
+  jsr fm_row
+  jsr fm_tab_end
+  jsr fm_show
+lhc_out:
+  .as : .xl
+  lda !LKX_CSAVE
+  sta window_x
+  lda !LKX_CSAVE+1
+  sta window_y
+  lda !LKX_CSAVE+2
+  sta window_w
+  lda !LKX_CSAVE+3
+  sta window_h
+  pld
+  plb
+  plp
+  rtl
+
+lk_h_change:
+  php
+  phb
+  phd
+  jsr fm_enter
+  .as : .xl
+  jsr lk_new
+  jmp fm_h_out
+
+lk_h_remove:
+  php
+  phb
+  phd
+  jsr fm_enter
+  .as : .xl
+  lda #$00
+  ldx #$0004
+lhr_zero:
+  .as : .xl
+  sta @CFG_LOCK_CODE, x
+  dex
+  bpl lhr_zero
+  jsr lk_save
+  ldx #!text_lock_off
+  jsr lk_popup
+  jmp fm_h_out
+
+; lk_new: a new code, typed twice.  .as/.xl, fm_env.
+lk_new:
+  .as : .xl
+  stz !LKX_MODE
+  ldx #!text_lock_new
+  jsr lock_keypad
+  bcs lkn3_out
+  ldx #$0009                ; the first entry kept
+lkn3_keep:
+  .as : .xl
+  lda !LKX_IN, x
+  sta !LKX_NEW, x
+  dex
+  bpl lkn3_keep
+  lda !LKX_N
+  sta !LKX_NEWN
+  ldx #!text_lock_again
+  jsr lock_keypad
+  bcs lkn3_out
+  lda !LKX_N
+  cmp !LKX_NEWN
+  bne lkn3_diff
+  ldx #$0000
+lkn3_cmp:
+  .as : .xl
+  txa
+  cmp !LKX_N
+  bcs lkn3_same
+  lda !LKX_IN, x
+  cmp !LKX_NEW, x
+  bne lkn3_diff
+  inx
+  bra lkn3_cmp
+lkn3_diff:
+  .as : .xl
+  lda #$04
+  sta @SFX_MAILBOX
+  ldx #!text_lock_nomatch
+  jmp lk_popup
+lkn3_same:
+  .as : .xl
+  lda #$00                  ; packed into CFG: two buttons a byte, the first on top
+  ldx #$0004
+lkn3_zero:
+  .as : .xl
+  sta @CFG_LOCK_CODE, x
+  dex
+  bpl lkn3_zero
+  ldx #$0000
+lkn3_pack:
+  .as : .xl
+  txa
+  cmp !LKX_N
+  bcs lkn3_packed
+  lda !LKX_IN, x
+  sta !LKX_T
+  phx
+  rep #$20 : .al
+  txa
+  lsr
+  tax
+  sep #$20 : .as
+  bcs lkn3_lo               ; an odd button: the low nibble
+  lda !LKX_T
+  asl
+  asl
+  asl
+  asl
+  sta @CFG_LOCK_CODE, x
+  bra lkn3_next
+lkn3_lo:
+  .as : .xl
+  lda @CFG_LOCK_CODE, x
+  ora !LKX_T
+  sta @CFG_LOCK_CODE, x
+lkn3_next:
+  .as : .xl
+  plx
+  inx
+  bra lkn3_pack
+lkn3_packed:
+  .as : .xl
+  lda #$00                  ; locked from now on, not from the next boot
+  sta @LOCK_OPEN
+  jsr lk_save
+  ldx #!text_lock_on
+  jmp lk_popup
+lkn3_out:
+  .as : .xl
+  rts
+
+; lk_popup: one line, any key closes it.  .as/.xl.
+lk_popup:
+  .as : .xl
+  stz !FMX_L2
+  jmp fm_popup
+
+; lk_valid: carry set = CFG_LOCK_CODE is a real code (4 to 10 buttons 1..12), Y = its
+; length.  fmres.a65 lock_valid is the same, near there.  .as/.xl, A and X lost.
+lk_valid:
+  .as : .xl
+  ldx #$0000
+  ldy #$0000
+lkv3_byte:
+  .as : .xl
+  lda @CFG_LOCK_CODE, x
+  lsr
+  lsr
+  lsr
+  lsr
+  beq lkv3_end
+  cmp #$0d
+  bcs lkv3_no
+  iny
+  lda @CFG_LOCK_CODE, x
+  and #$0f
+  beq lkv3_end
+  cmp #$0d
+  bcs lkv3_no
+  iny
+  inx
+  cpx #$0005
+  bne lkv3_byte
+lkv3_end:
+  .as : .xl
+  cpy #$0004                ; carry set = four or more
+  rts
+lkv3_no:
+  .as : .xl
+  clc
+  rts
+
+; lk_save: CFG to the card (SAVE_CFG), sent once and waited for the way media_rep_save
+; (pcmplay.a65) does: SNES_CMD back to $55, bounded.  .as/.xl.
+lk_save:
+  .as : .xl
+  jsl @ui_call_coversync
+  jsr fm_env
+  .as : .xl
+  lda #$00
+  sta @SNES_CMD
+  lda #CMD_SAVE_CFG
+  sta @MCU_CMD
+  ldx #$0040
+lks2_outer:
+  .as : .xl
+  ldy #$0000
+lks2_inner:
+  .as : .xl
+  lda @SNES_CMD
+  cmp #CMD_MCU_RDY
+  beq lks2_done
+  dey
+  bne lks2_inner
+  dex
+  bne lks2_outer
+lks2_done:
+  .as : .xl
+  lda #$00
+  sta @MCU_CMD
+  rts

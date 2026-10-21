@@ -861,6 +861,7 @@
 #define SVW_RECENT                  1
 #define SVW_FAV                     2
 #define SVW_GIMS                    $ff /* menu only, never sent to the firmware: fm_menu_hook's code for the browser settings table (gimenu.a65) */
+#define SVW_LOCK                    $fe /* menu only, the same for the Settings table (lock.a65 adds the parental lock's row) */
 #define SVOP_INFO                   0
 #define SVOP_USE                    1
 #define SVOP_COPY                   2
@@ -1092,6 +1093,7 @@
 #define CFG_PLAYER_REPEAT               CFG_ADDR+$01D9 /* 0/1: the music players (.spc / .pcm / .nsf) repeat the track that ends instead of moving on. X on a player screen flips it (media_rep_toggle, pcmplay.a65) and the player sends SAVE_CFG when it closes; the card modules read this live byte (SRAM_CFG_PLAYER_REPEAT_ADDR). YAML PlayerRepeat, no menu entry. Lockstep with src/cfg.h. */
 #define CFG_GB_ROTATE_BUTTONS           CFG_ADDR+$01DA /* 0/1: SNES B plays the Game Boy's A and Y alone its B, on both Game Boy cores. YAML GbRotateButtons; menu row "Rotate Game Boy buttons" in the SGB menu (kv_onoff, NOT greyed: it applies to the SGB on the Mk.II too). The menu only edits it: at game load the MCU patches the SGB BIOS (sgb_stage_config) or the GBC player's "GBCF" block +6 (gbc_stage_config). Lockstep with src/cfg.h. */
 #define CFG_STOP_MUSIC_GI               CFG_ADDR+$01DB /* 0/1: stop the menu music while the game info screen is up, start it again on the way back (snes/gimusic.a65). $1D9/$1DA are reserved in cfg_t. YAML StopMusicOnGameInfo. Lockstep with src/cfg.h. */
+#define CFG_LOCK_CODE                   CFG_ADDR+$01DC /* 5 B: the parental lock's code (lock.a65), 4 to 10 buttons a nibble each (1..12), the first on top, a 0 nibble ends it; all zero = none. Lockstep with cfg_t.lock_code */
 #define ONB_VERSION                     2              /* the first-boot tour's version: bump it when a release adds cards to the tour (tag them with it, +ONB_FD_SINCE), and the tour comes back once showing only them. Lockstep with snes/onboarding/onb_memmap.i65. */
 
 #define MENU_ENTRY_SIZE             23
@@ -1226,6 +1228,7 @@
 #define FM_IDX                      $7E9406 /* word: the directory entry the context menu was opened on */
 #define FM_TYPE                     $7E9408 /* its type */
 #define FM_ARMV                     $7E9409 /* what FM_ARM held when fm_menu_hook took it: 2 = an MSU-1 folder's game menu (only the delete-folder row) */
+#define LOCK_OPEN                   $7E940A /* 1 = the parental lock's code was given this session (lock.a65); zeroed with the block at every boot, so a reset locks again */
 #define FM_TAB                      $7E9500 /* the context table fm_ctx_build writes (up to 24 entries) */
 #define FM_SCR                      $7E9800 /* bank $C3's own scratch, up to $7E9FFF */
 #define FM_BANK_MAGIC               $C30000 /* "FMB1": bank $C3 is the file manager's (fileman.a65) */

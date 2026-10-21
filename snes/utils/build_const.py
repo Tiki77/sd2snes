@@ -447,7 +447,8 @@ def main():
     # $C3 like the context menus' file rows, same rules.
     FM_PREFIXES = ("text_fm_", "mtext_fm_", "mdesc_fm_",
                    "text_gopt_", "mtext_gopt_", "mdesc_gopt_",
-                   "mtext_gims_", "mdesc_gims_")
+                   "mtext_gims_", "mdesc_gims_",
+                   "text_lock_", "mtext_lock_", "mdesc_lock_")
     out, order, fm_neutral = [], [], []
     for line in lines:
         m = LINE_RE.match(line)
@@ -508,7 +509,7 @@ def main():
                     ("text_mtl_", 40), ("text_mt_", 32), ("text_pcm_", 40), ("text_nsf_", 40),
                     ("mtext_", 40),
                     ("mdesc_", 160), ("text_err_", 26),
-                    ("text_ce_ed_keys", 48), ("text_ce_kbd_keys_", 42), ("text_ce_", 6))
+                    ("text_ce_ed_keys", 48), ("text_lock_", 32), ("text_ce_kbd_keys_", 42), ("text_ce_", 6))
     WIDTH_DEFAULT = 56
 
     def encoded_len(text):

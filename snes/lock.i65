@@ -1,0 +1,431 @@
+// lock.i65 -- the parental lock in the in-game menu (igmenu.a65): the menu's keypad
+// (snes/lock.a65) on the footer row.  CFG_LOCK_CODE is the game's CFG in BSRAM; the code
+// given once holds until the shell closes (igl_open, zeroed by igmenu_main).  Asked before
+// the GAME OPTIONS screen, the cheat editor and the trainer's SAVE CHEAT.
+//
+// Each of the twelve buttons is a digit on its RELEASE (so the Y / Select that opened it is
+// not one); B held for 3 s leaves.  The row: the prompt, then a star per button and a _.
+//
+// snescom preprocessing: // comments only, never `;` inside an included file.
+
+// the scratch is in lock_defs.i65 (included early: igmenu_main zeroes igl_open)
+
+// ---- carry CLEAR = go ahead, SET = refused.  Any widths in, kept (but the carry). ----
+ig_lock_ask:
+	php
+	rep #$30 : .al : .xl
+	pha
+	phx
+	phy
+	lda @igl_open
+	and #$00ff
+	bne igl_go
+	sep #$20 : .as
+	jsr igl_valid                              // Y = the code's length
+	bcc igl_go
+	rep #$30 : .al : .xl
+	tya
+	sta @igl_len
+	jsr igl_keypad
+	bcs igl_no
+	sep #$20 : .as
+	lda #$01 : sta @igl_open
+igl_go:
+	rep #$30 : .al : .xl
+	ply
+	plx
+	pla
+	plp
+	clc
+	rts
+igl_no:
+	rep #$30 : .al : .xl
+	ply
+	plx
+	pla
+	plp
+	sec
+	rts
+
+// ---- carry set = CFG_LOCK_CODE is 4 to 10 buttons 1..12 (a 0 nibble ends it), Y = its
+//      length.  .as/.xl, A and X lost. ----
+igl_valid:
+	.as : .xl
+	ldx #$0000
+	ldy #$0000
+iglv_byte:
+	.as : .xl
+	lda @CFG_LOCK_CODE, x
+	lsr : lsr : lsr : lsr
+	beq iglv_end
+	cmp #$0d
+	bcs iglv_no
+	iny
+	lda @CFG_LOCK_CODE, x
+	and #$0f
+	beq iglv_end
+	cmp #$0d
+	bcs iglv_no
+	iny
+	inx
+	cpx #$0005
+	bne iglv_byte
+iglv_end:
+	.as : .xl
+	cpy #$0004                                 // carry set = four or more
+	rts
+iglv_no:
+	.as : .xl
+	clc
+	rts
+
+// ---- A(8) = digit X (0..9) of CFG_LOCK_CODE.  .as/.xl, X kept. ----
+igl_cfg_digit:
+	.as : .xl
+	phx
+	rep #$20 : .al
+	txa
+	lsr
+	tax
+	sep #$20 : .as
+	lda @CFG_LOCK_CODE, x
+	plx
+	pha
+	txa
+	lsr                                        // carry = an odd digit: the low nibble
+	pla
+	bcs igcd_lo
+	lsr : lsr : lsr : lsr
+	rts
+igcd_lo:
+	.as : .xl
+	and #$0f
+	rts
+
+// ---- the keypad: carry clear = the right code, set = cancelled.  The code is checked at
+//      its own length, or after 3 s with nothing pressed (from the 4th button).  The
+//      footer comes back either way, and the shell's edge memory is set to what is held
+//      now (no stale edge). ----
+igl_keypad:
+	php
+	rep #$30 : .al : .xl
+	lda #IGM_SH_LOCK_ENTER : sta @igl_msg
+	jsr igl_clear
+	jsr igl_pad
+	sta @igl_prev
+	sta @igl_d1
+	sta @igl_d2
+	sta @igl_d3
+	lda #$0000
+	sta @igl_arm
+	sta @igl_hold
+	sta @igl_idle
+iglk_loop:
+	.al : .xl
+	jsr igl_pad                                // A = the buttons down now (after the vblank)
+	jsr igl_debounce
+	bit #$8000                                 // B held: the way out after IGL_HOLD frames
+	beq iglk_nohold
+	pha
+	lda @igl_hold
+	inc
+	sta @igl_hold
+	cmp #IGL_HOLD
+	pla
+	bcc iglk_edges
+	jsr igl_out
+	plp
+	sec
+	rts
+iglk_nohold:
+	.al : .xl
+	pha
+	lda #$0000 : sta @igl_hold
+	pla
+iglk_edges:
+	.al : .xl
+	pha
+	cmp #$0000                                 // nothing down: the idle count runs
+	beq iglk_idle
+	lda #$0000 : sta @igl_idle
+	bra iglk_e2
+iglk_idle:
+	.al : .xl
+	lda @igl_idle
+	inc
+	sta @igl_idle
+iglk_e2:
+	.al : .xl
+	lda $01, s
+	eor @igl_prev
+	and $01, s                                 // changed and down now = pressed
+	ora @igl_arm
+	sta @igl_arm
+	lda $01, s
+	eor #$ffff
+	and @igl_prev                              // down before, up now = released
+	and @igl_arm                               //   ... and pressed since it opened
+	sta @igl_t
+	pla
+	sta @igl_prev
+	lda @igl_t
+	bne iglk_digit
+	lda @igl_idle                              // 3 s of nothing checks a code of 4 or more
+	cmp #IGL_IDLE
+	bcc iglk_loop
+	lda @igl_n
+	cmp #$0004
+	bcc iglk_loop
+	bra iglk_full
+iglk_digit:
+	.al : .xl
+	eor #$ffff
+	and @igl_arm
+	sta @igl_arm
+	lda @igl_t
+	ldx #$0001                                 // the highest button released: B = 1 ... R = 12
+iglk_bit:
+	.al : .xl
+	asl
+	bcs iglk_got
+	inx
+	bra iglk_bit
+iglk_got:
+	.al : .xl
+	txa
+	sta @igl_t
+	lda @igl_n
+	cmp #$000a
+	bcs iglk_loop                              // (never: the check comes at the code's length)
+	tax
+	sep #$20 : .as
+	lda @igl_t
+	sta @igl_in, x
+	rep #$20 : .al
+	inx
+	txa
+	sta @igl_n
+	jsr igl_draw
+	lda @igl_n
+	cmp @igl_len
+	bcs iglk_full
+	jmp iglk_loop
+iglk_full:
+	.al : .xl
+	jsr igl_same
+	bcs iglk_right
+	lda #IGM_SH_LOCK_WRONG : sta @igl_msg
+	jsr igl_clear
+	lda #$0000 : sta @igl_idle
+	jmp iglk_loop
+iglk_right:
+	.al : .xl
+	jsr igl_out
+	plp
+	clc
+	rts
+
+// ---- A(16) = the buttons down now -> down now or in any of the 3 frames before (a wireless
+//      pad drops a report now and then: a held B would "let go" for a frame).  .al. ----
+igl_debounce:
+	.al : .xl
+	pha
+	ora @igl_d1
+	ora @igl_d2
+	ora @igl_d3
+	sta @igl_t
+	lda @igl_d2 : sta @igl_d3
+	lda @igl_d1 : sta @igl_d2
+	pla
+	sta @igl_d1
+	lda @igl_t
+	rts
+
+// ---- carry set = igl_in / igl_n is the code in CFG.  .al/.xl in and out. ----
+igl_same:
+	.al : .xl
+	lda @igl_n
+	cmp @igl_len
+	bne igls_no
+	ldx #$0000
+igls_l:
+	.al : .xl
+	txa
+	cmp @igl_n
+	bcs igls_yes
+	sep #$20 : .as
+	jsr igl_cfg_digit
+	sta @igl_t
+	lda @igl_in, x
+	cmp @igl_t
+	rep #$20 : .al
+	bne igls_no
+	inx
+	bra igls_l
+igls_yes:
+	.al : .xl
+	sec
+	rts
+igls_no:
+	.al : .xl
+	rep #$20 : .al
+	clc
+	rts
+
+// the footer back, the shell's edges past what is held now
+igl_out:
+	php
+	rep #$30 : .al : .xl
+	jsr igl_blank_on
+	jsr igmenu_draw_footer
+	jsr igl_blank_off
+	jsr igl_pad_now
+	sta @ovl_pprev
+	plp
+	rts
+
+// no digits, the row redrawn
+igl_clear:
+	php
+	rep #$30 : .al : .xl
+	lda #$0000
+	sta @igl_n
+	jsr igl_draw
+	plp
+	rts
+
+// the row: the prompt (igl_msg) and the slots (a star for each button typed, a '_' for the
+// next, at least four, always 19 columns so a shorter row leaves nothing behind), centred
+// on IG_FOOTER_ROW, in forced blank (a whole row does not fit the end of the vblank)
+igl_draw:
+	php
+	phb
+	rep #$30 : .al : .xl
+	sep #$20 : .as
+	lda #$f4 : pha : plb                       // DBR=$F4 (OVL_RB abs writes)
+	lda @CFG_LANGUAGE
+	cmp #IGM_LANG_COUNT
+	bcc igld_lang
+	lda #$00
+igld_lang:
+	rep #$30 : .al : .xl
+	and #$00ff
+	sta @sst_lang
+	lda @igl_msg
+	jsr sh_strlen
+	clc
+	adc #$0015                                 // + two blanks + the 19 columns of slots
+	sta @igl_t
+	lda #$0040
+	sec : sbc @igl_t
+	lsr
+	tay                                        // Y = the row's start column
+	jsr ovl_row_clear                          // keeps Y
+	lda @igl_msg
+	jsr sh_copy                                // Y comes back past the prompt
+	iny
+	iny
+	lda @igl_n                                 // slots = max(4, min(n + 1, 10))
+	inc
+	cmp #$000b
+	bcc igld_cap
+	lda #$000a
+igld_cap:
+	.al : .xl
+	cmp #$0004
+	bcs igld_n
+	lda #$0004
+igld_n:
+	.al : .xl
+	sta @igl_t
+	ldx #$0000
+	sep #$20 : .as
+igld_slot:
+	.as : .xl
+	cpx !igl_t                                 // (DBR $F4; the word, its high byte 0)
+	bcs igld_flush
+	lda #$5f                                   // '_'
+	cpx !igl_n
+	bcs igld_put
+	lda #$2a                                   // '*'
+igld_put:
+	.as : .xl
+	sta OVL_RB, y
+	iny
+	iny
+	inx
+	bra igld_slot
+igld_flush:
+	.as : .xl
+	rep #$30 : .al : .xl
+	jsr igl_blank_on
+	ldx #IG_FOOTER_ROW
+	jsr ovl_flush_abs
+	jsr igl_blank_off
+	plb
+	plp
+	rts
+
+igl_blank_on:
+	php
+	sep #$20 : .as
+	lda #$80 : sta @$002100
+	plp
+	rts
+
+igl_blank_off:
+	php
+	sep #$20 : .as
+	lda #$0f : sta @$002100
+	plp
+	rts
+
+// ---- A(16) = the buttons down on both pads, after the next vblank's auto-joypad read
+//      (igmenu_loop's own sequence) ----
+igl_pad:
+	php
+	sep #$20 : .as
+igp_vb:
+	.as
+	lda @$004212 : bpl igp_vb                  // wait for vblank
+igp_st:
+	.as
+	lda @$004212 : and #$01 : beq igp_st       // auto-joypad read START
+igp_dn:
+	.as
+	lda @$004212 : and #$01 : bne igp_dn       // ... and DONE
+	jsr igl_pad_now
+	pha
+	sep #$20 : .as
+igp_out:
+	.as
+	lda @$004212 : bmi igp_out                 // out of the vblank again
+	rep #$20 : .al
+	pla
+	plp
+	rep #$20 : .al
+	rts
+
+// A(16) = both pads now: a pad or the NTT Data keypad, ID nibble off; anything else = 0
+igl_pad_now:
+	php
+	rep #$30 : .al : .xl
+	lda @$004218
+	bit #PAD_ID_NOTPAD
+	beq iglp1
+	lda #$0000
+iglp1:
+	.al : .xl
+	and #$fff0
+	sta @igl_t
+	lda @$00421a
+	bit #PAD_ID_NOTPAD
+	beq iglp2
+	lda #$0000
+iglp2:
+	.al : .xl
+	and #$fff0
+	ora @igl_t
+	plp
+	rep #$20 : .al
+	rts

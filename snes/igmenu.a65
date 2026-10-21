@@ -41,6 +41,7 @@ igmenu_header:
                                    ; EARLY: ig_bar_sync reads tr_bar_row long before the
                                    ; code include at the bottom of this file.
 #include "cheatedit_defs.i65"      ; cheat EDITOR (CHEATS tab add/edit/delete) layout/scratch.
+#include "lock_defs.i65"           ; the parental lock's keypad scratch (lock.i65)
                                    ; Same reason: ig_bar_sync, cheats_input/tick and the
                                    ; footer read ce_mode before the code include.
 #include "igmenu_lang.i65"         ; GENERATED: HELP tab i18n string tables + IGM_HELP_NLINES/
@@ -352,6 +353,7 @@ igmenu_main:
 	sta @igmenu_flags                       ; (active_tab is NOT cleared here: it persists across
 	sta @igmenu_prevtab                     ;  close/reopen -- the session gate below inits it once)
 	sta @ce_mode                            ; cheat editor closed: a START-close mid-edit reopens on the list
+	sta @igl_open                           ; the parental lock asks again (lock.i65)
 	sta @tr_rowpend                         ; TRAINER: nothing staged for tr_row_dma yet
 	sta @man_list_cursor                    ; GUIDES tab-level cursor (host scratch; the viewer
 	                                        ;   never reads it, so it is NOT in man_state_reset)
@@ -761,6 +763,8 @@ ig_tb_chk_y:
 	bit #$4000                              ; Y -> the GAME OPTIONS screen (igopt.i65)
 	sep #$20 : .as
 	beq ig_loop_tail
+	jsr ig_lock_ask                         ; the parental lock first (lock.i65)
+	bcs ig_loop_tail
 	jsr gopt_open
 ig_loop_tail:
 	sep #$20 : .as
@@ -1037,6 +1041,8 @@ cde_lang_ok:
 #define IGM_SH_FT_HELP    7
 #define IGM_SH_FT_GOPT    8
 #define IGM_SH_FT_GOPT_ED 9
+#define IGM_SH_LOCK_ENTER 10                      ; the parental lock's keypad row (lock.i65)
+#define IGM_SH_LOCK_WRONG 11
 #define igo_editing       $F48434   ; GAME OPTIONS: 1 = a value is being edited (igopt.i65)
 
 ; ---- draw shell-chrome string A(16)=line index centered on absolute row X(16).
@@ -1196,7 +1202,10 @@ ci_no_a:
 	lda @ovl_edge : bit #$4000
 	sep #$20 : .as
 	beq ci_no_y
+	jsr ig_lock_ask                           ; the parental lock first (lock.i65)
+	bcs ci_y_out
 	jsr ce_open_edit
+ci_y_out:
 	plp
 	rts
 ci_no_y:
@@ -1204,7 +1213,10 @@ ci_no_y:
 	lda @ovl_edge : bit #$2000
 	sep #$20 : .as
 	beq ci_no_sel
+	jsr ig_lock_ask
+	bcs ci_sel_out
 	jsr ce_open_new
+ci_sel_out:
 	plp
 	rts
 ci_no_sel:
@@ -4113,6 +4125,7 @@ iot_done:
 ; references, no short-branch surprises. Its data tail is followed only by labels.
 #include "trainer.i65"
 #include "cheatedit.i65"           ; cheat EDITOR code (uses tr_nav_repeat / tr_side_repair)
+#include "lock.i65"                ; the parental lock's keypad
 #include "ighelp.i65"              ; HELP screen (SELECT at the bar) + the pad-combo renderer
 #include "igopt.i65"               ; GAME OPTIONS screen (Y at the bar): the per-game options
 

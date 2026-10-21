@@ -138,7 +138,13 @@ sfg_pbak:
   jsl @gi_call_dc_restore                    ; menu graphics back, screen_dma_disable = 0
   jsr sv_env
   jsr sfg_nmi                                ; the screen is drawn by the menu NMI's tile
-  lda #$02                                   ;   DMA (gi_dc_restore leaves it off)
+                                             ;   DMA (gi_dc_restore leaves it off)
+  jsl @lock_ask                              ; the parental lock (fmres.a65), over the browser
+  bcc sfg_open                               ;   now: on the info screen its keypad would not show
+  jmp sfg_prst                               ; refused: the info screen back
+sfg_open:
+  .as
+  lda #$02
   sta @SFX_MAILBOX                          ; confirm blip, after the restore's cover burst
   lda @gi_query_cmd
   ldx #SVW_RECENT

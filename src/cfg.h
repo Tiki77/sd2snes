@@ -92,6 +92,7 @@
 #define CFG_PLAYER_REPEAT                ("PlayerRepeat")
 #define CFG_GB_ROTATE_BUTTONS            ("GbRotateButtons")
 #define CFG_STOP_MUSIC_GAME_INFO         ("StopMusicOnGameInfo")
+#define CFG_LOCK_CODE                    ("LockCode")
 
 #define CFG_MENU_COMBO_MIN_BUTTONS       (3)
 
@@ -286,6 +287,13 @@ typedef struct __attribute__ ((__packed__)) _cfg_block {
      is up and start it again on the way back (snes/gimusic.a65). Stopping an SPC takes a console
      reset, so opening the screen takes about a second longer while it is on. YAML
      StopMusicOnGameInfo + menu "Stop music on game info" (browser settings). Default 0. */
+  uint8_t  lock_code[5];             /* CFG @ $1DC..$1E0: the parental lock's code (snes/lock.a65):
+     4 to 10 pad buttons, a nibble each, the first in the top nibble of byte 0, each 1..12 (B Y
+     Select Start Up Down Left Right A X L R), a 0 nibble ends it.  All zero = no lock; fewer
+     than 4 or a nibble above 12 is no lock either (the menu cannot take it).  Only the menu
+     reads it and only the menu sets it (Settings > Parental lock).  YAML LockCode, the buttons
+     as letters in order ("BYsSudlrAXLR", the in-game combos' alphabet): a parent who forgot
+     the code reads or removes the line.  Default none. */
 } cfg_t;
 
 int cfg_save(void);

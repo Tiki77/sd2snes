@@ -216,6 +216,8 @@ SHELL_LABELS = [
     "text_igm_ft_help",       # 7 footer, HELP screen
     "text_igm_ft_gopt",       # 8 footer, GAME OPTIONS screen
     "text_igm_ft_gopt_ed",    # 9 footer, GAME OPTIONS while a value is edited
+    "text_igm_lock_enter",    # 10 the parental lock's keypad row (lock.i65), the stars after it
+    "text_igm_lock_wrong",    # 11 the same after a wrong code
 ]
 
 # The cheat EDITOR (CHEATS tab: add / edit / delete a cheat), IN INDEX ORDER. Lockstep with
@@ -242,6 +244,8 @@ CHEATEDIT_LABEL_MAX["text_igm_ce_name"] = 7
 # All five are centered on a 64-column row by sh_draw_centered, so the only real
 # limit is the row itself; keep a margin so a long translation cannot touch the edges.
 SHELL_LABEL_MAX = {lbl: 56 for lbl in SHELL_LABELS}
+# the keypad row puts two blanks and 19 columns of slots ("* * * _ ...", up to 10) after its prompt
+SHELL_LABEL_MAX["text_igm_lock_enter"] = SHELL_LABEL_MAX["text_igm_lock_wrong"] = 42
 
 # The TRAINER tab strings, IN INDEX ORDER. Lockstep with the IGM_TR_* indices in
 # snes/trainer.i65 (SAME count + order) and with the EN base labels in const.a65.

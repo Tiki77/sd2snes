@@ -237,10 +237,19 @@ fmh_l4:
 fmh_l5:
   .as : .xl
   cmp #^menu_enttab_browser
-  bne fmh_out
+  bne fmh_l6
   cpx #!menu_enttab_browser
-  bne fmh_out
+  bne fmh_l6
   lda #SVW_GIMS
+  bra fmh_list
+; Settings gets the parental lock's row (lock.a65), strings in bank $C3 as well.
+fmh_l6:
+  .as : .xl
+  cmp #^menu_enttab_cfg
+  bne fmh_out
+  cpx #!menu_enttab_cfg
+  bne fmh_out
+  lda #SVW_LOCK
   bra fmh_list
 fmh_fav:
   .as : .xl
@@ -305,3 +314,183 @@ fvs_go:
   .as
   plp
   jmp @fm_view_alone        ; fileman.a65
+
+; ======================================================================
+;  The parental lock (lock.a65 has the keypad, in bank $C3).  While a code is set in CFG and
+;  not given yet this session (LOCK_OPEN), whatever changes the card or the settings asks
+;  for it first.  Most of it goes through show_menu: lock_entry runs on every row the user
+;  picks and asks only for the rows in lock_targets.  The rest calls lock_ask itself (the
+;  cheat editor, a theme picked in the browser, L and R on the game info screen).
+; ======================================================================
+
+; carry set = the lock is on and closed.  Any widths in, all registers but P kept.
+lock_needed:
+  php
+  rep #$30 : .al : .xl
+  pha
+  phx
+  phy
+  sep #$20 : .as
+  lda @LOCK_OPEN
+  bne lkn_no
+  jsr lock_valid
+  bcc lkn_no
+  rep #$30 : .al : .xl
+  ply
+  plx
+  pla
+  plp
+  sec
+  rts
+lkn_no:
+  .as
+  rep #$30 : .al : .xl
+  ply
+  plx
+  pla
+  plp
+  clc
+  rts
+
+; lock_valid: carry set = CFG_LOCK_CODE is a real code: 4 to 10 buttons 1..12 (a 0 nibble
+; ends it), Y = its length.  lock.a65 lk_valid is the same, near there.  .as/.xl, A X lost.
+lock_valid:
+  .as : .xl
+  ldx #$0000
+  ldy #$0000
+lkv_byte:
+  .as : .xl
+  lda @CFG_LOCK_CODE, x
+  lsr
+  lsr
+  lsr
+  lsr
+  beq lkv_end
+  cmp #$0d
+  bcs lkv_no
+  iny
+  lda @CFG_LOCK_CODE, x
+  and #$0f
+  beq lkv_end
+  cmp #$0d
+  bcs lkv_no
+  iny
+  inx
+  cpx #$0005
+  bne lkv_byte
+lkv_end:
+  .as : .xl
+  cpy #$0004                ; carry set = four or more
+  rts
+lkv_no:
+  .as : .xl
+  clc
+  rts
+
+; lock_ask: carry CLEAR = go ahead (no lock, or the code was given now or earlier this
+; session); SET = refused (cancelled, or bank $C3 is not there to ask).  Any widths in, all
+; registers, DB and DP kept.
+lock_ask:
+  php
+  jsr lock_needed
+  bcc lka_go
+  jsl @fm_bank_ok
+  bcc lka_no
+  jsl @lock_keypad_ask      ; lock.a65: carry clear = the right code
+  bcs lka_no
+lka_go:
+  plp
+  clc
+  rtl
+lka_no:
+  plp
+  sec
+  rtl
+
+; lock_entry: show_menu, the row picked, before it acts (menu.a65).  A (16 bits) = the row's
+; type, Y = where its target is in [w_menu_addr] (show_menu's DP, $08 there).  Carry SET =
+; refused: show_menu goes back to its list.  All registers and widths kept.
+#define LKE_MENU_ADDR   $08         /* show_menu's w_menu_addr (menu.a65), lockstep */
+#define LKE_T           $7E9F30     /* word: the target's address (lock.a65 keeps clear of it) */
+#define LKE_TB          $7E9F32     /* its bank */
+lock_entry:
+  php
+  rep #$30 : .al : .xl
+  pha
+  phx
+  phy
+  jsr lock_needed
+  bcc lke_go
+  lda [LKE_MENU_ADDR], y
+  sta @LKE_T
+  iny
+  iny
+  lda [LKE_MENU_ADDR], y
+  sta @LKE_TB               ; the byte after it too: only the low one is compared
+  ldx #$0000
+lke_scan:
+  .al : .xl
+  lda @lock_targets, x
+  beq lke_go                ; not one of ours
+  cmp @LKE_T
+  bne lke_next
+  lda @lock_targets+2, x
+  eor @LKE_TB
+  and #$00ff
+  beq lke_ask
+lke_next:
+  .al : .xl
+  inx
+  inx
+  inx
+  bra lke_scan
+lke_ask:
+  .al : .xl
+  jsl @lock_ask
+  bcs lke_no
+lke_go:
+  .al : .xl
+  ply
+  plx
+  pla
+  plp
+  clc
+  rtl
+lke_no:
+  .al : .xl
+  ply
+  plx
+  pla
+  plp
+  sec
+  rtl
+
+; The rows that ask: what a SUBMENU opens, what a VALUE edits (its value table), what a
+; FUNC / FUNC_CLOSE calls (the handler - 1).  0 ends it.
+lock_targets:
+  .word !menu_enttab_cfg : .byt ^menu_enttab_cfg              ; Settings
+  .word !kv_language : .byt ^kv_language                      ; the main menu's Language
+  .word !kv_patch_hdrmode : .byt ^kv_patch_hdrmode            ; a patch's header mode
+  .word !patch_create_rom-1 : .byt ^patch_create_rom        ; a patched ROM to the card
+  .word !set_selected_spc_as_bgm-1 : .byt ^set_selected_spc_as_bgm
+  .word !set_selected_as_autoboot_rom-1 : .byt ^set_selected_as_autoboot_rom
+  .word !set_recent_as_autoboot_rom-1 : .byt ^set_recent_as_autoboot_rom
+  .word !set_favorite_as_autoboot_rom-1 : .byt ^set_favorite_as_autoboot_rom
+  .word !saves_ctx_browser-1 : .byt ^saves_ctx_browser
+  .word !saves_ctx_recent-1 : .byt ^saves_ctx_recent
+  .word !saves_ctx_fav-1 : .byt ^saves_ctx_fav
+  .word !delete_selected_file-1 : .byt ^delete_selected_file
+  .word !delete_recent_file-1 : .byt ^delete_recent_file
+  .word !delete_favorite_file-1 : .byt ^delete_favorite_file
+  .word !gopt_h_browser-1 : .byt ^gopt_h_browser           ; Game options
+  .word !gopt_h_recent-1 : .byt ^gopt_h_recent
+  .word !gopt_h_fav-1 : .byt ^gopt_h_fav
+  .word !fm_h_cut-1 : .byt ^fm_h_cut                       ; the file manager: what writes
+  .word !fm_h_paste-1 : .byt ^fm_h_paste
+  .word !fm_h_rename-1 : .byt ^fm_h_rename
+  .word !fm_h_mkdir-1 : .byt ^fm_h_mkdir
+  .word !fm_h_rmdir-1 : .byt ^fm_h_rmdir
+  .word !fm_h_rmdir_cwd-1 : .byt ^fm_h_rmdir_cwd
+  .word !fm_s_cut-1 : .byt ^fm_s_cut
+  .word !fm_s_delete-1 : .byt ^fm_s_delete
+  .word 0

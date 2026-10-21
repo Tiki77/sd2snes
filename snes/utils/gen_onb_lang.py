@@ -254,6 +254,8 @@ NAMES = [
   ('Rotated Game Boy buttons', 'Botões do Game Boy girados', 'Botones de Game Boy girados', 'Gedrehte Game-Boy-Tasten', 'Boutons Game Boy pivotés', 'Tasti Game Boy ruotati', 'Повёрнутые кнопки Game Boy', 'Gedraaide Game Boy-knoppen'),
   # 54 the NTT Data Keypad (NDK10) as a standard pad (2.18)
   ('NTT Data Keypad',)*8,
+  # 55 the parental lock: a code of 4 buttons before what changes the card or the settings (2.18)
+  ('Parental lock', 'Bloqueio parental', 'Bloqueo parental', 'Kindersicherung', 'Contrôle parental', 'Blocco parentale', 'Родительский контроль', 'Kinderslot'),
   # 50 the PPU is cleared before every game boots
   ('Clear PPU on boot', 'Limpar PPU no boot', 'Limpiar PPU al arrancar', 'PPU beim Start löschen', 'Effacer le PPU au boot', "Pulisci PPU all'avvio", 'Очистка PPU при загрузке', 'Leeg PPU bij starten'),
   # 51 bus timing compat
@@ -761,6 +763,15 @@ TEXTS = [
    "L'|NTT Data Keypad| (NDK10) funziona come un controller normale nel menu, nel menu in gioco, nel visore delle guide e nelle scorciatoie in gioco. Il tastierino numerico resta ai giochi che lo usano.",
    '|NTT Data Keypad| (NDK10) работает как обычный контроллер в |Меню|, в |Меню в игре|, в просмотре |РУКОВОДСТВО К ИГРЕ| и в |КОМБИНАЦИИ В ИГРЕ|. Цифровой блок остаётся играм, которые его используют.',
    'Het |NTT Data Keypad| (NDK10) werkt als een gewone controller in het menu, het in-game menu, de handleidingviewer en de in-game sneltoetsen. Het cijferblok blijft voor de spellen die het gebruiken.'),
+  # 55 the parental lock (2.18)
+  ('{lockrow} in {cfg} asks for a code of 4 to 10 buttons (wait 3 s to end one shorter than 10) before anything that changes the card or the settings: {cfg}, deleting, renaming and moving files, saves, {goptrow}, editing cheats, autoboot and themes, in the in-game menu too. Holding [B] for 3 s cancels. Forgot the code? Delete LockCode in |/sd2snes/config.yml|.',
+   '{lockrow}, em {cfg}, pede um código de 4 a 10 botões (espere 3 s para terminar antes dos 10) antes do que muda o cartão ou os ajustes: {cfg}, apagar, renomear e mover arquivos, saves, {goptrow}, editar cheats, autoboot e temas, também no menu in-game. Segurar [B] por 3 s cancela. Esqueceu o código? Apague LockCode no |/sd2snes/config.yml|.',
+   '{lockrow}, en {cfg}, pide un código de 4 a 10 botones (espera 3 s para acabar antes de 10) antes de lo que cambia la tarjeta o los ajustes: {cfg}, borrar, renombrar y mover archivos, partidas, {goptrow}, editar trucos, autoarranque y temas, también en el menú del juego. Mantener [B] 3 s cancela. Si olvidas el código, borra LockCode en |/sd2snes/config.yml|.',
+   '{lockrow} in {cfg} fragt vor allem, was die Karte oder die Einstellungen ändert, einen Code aus 4 bis 10 Tasten ab (3 s warten beendet einen kürzeren): {cfg}, Dateien löschen, umbenennen und verschieben, Spielstände, {goptrow}, Cheats bearbeiten, Autoboot und Themes, auch im Ingame-Menü. [B] 3 s halten bricht ab. Code vergessen? LockCode in |/sd2snes/config.yml| löschen.',
+   '{lockrow}, dans {cfg}, demande un code de 4 à 10 boutons (attendez 3 s pour finir avant 10) avant ce qui change la carte ou les réglages : {cfg}, effacer, renommer et déplacer des fichiers, sauvegardes, {goptrow}, éditer les cheats, autoboot et thèmes, aussi dans le menu en jeu. Maintenir [B] 3 s annule. Code oublié ? Effacez LockCode dans |/sd2snes/config.yml|.',
+   '{lockrow}, in {cfg}, chiede un codice da 4 a 10 tasti (aspetta 3 s per finire prima di 10) prima di ciò che cambia la scheda o le impostazioni: {cfg}, cancellare, rinominare e spostare file, salvataggi, {goptrow}, modificare i cheat, autoboot e temi, anche nel menu in gioco. Tenere [B] 3 s annulla. Codice dimenticato? Cancella LockCode in |/sd2snes/config.yml|.',
+   '{lockrow} в {cfg} спрашивает код из 4-10 кнопок (подождите 3 с, чтобы закончить раньше) перед всем, что меняет карту памяти или настройки: {cfg}, удаление, переименование и перемещение файлов, сохранения, {goptrow}, правка чит-кодов, автозапуск и темы, в том числе в |Меню в игре|. Удержание кнопки [B] 3 с - отмена. Забыли код? Удалите LockCode в |/sd2snes/config.yml|.',
+   "{lockrow} in {cfg} vraagt een code van 4 tot 10 knoppen (wacht 3 s om eerder te stoppen) voor alles wat de kaart of de instellingen wijzigt: {cfg}, bestanden wissen, hernoemen en verplaatsen, saves, {goptrow}, cheats bewerken, autoboot en thema's, ook in het in-game menu. [B] 3 s vasthouden annuleert. Code vergeten? Wis LockCode in |/sd2snes/config.yml|."),
   # 50 the PPU is cleared before every game boots
   ("Some romhacks draw their intro without clearing the video memory, and on a real console the menu's leftovers show as garbage. The |sd2snes+| wipes it before every game starts.",
    'Alguns romhacks desenham a abertura sem limpar a memória de vídeo, e num console de verdade as sobras do menu aparecem como lixo. O |sd2snes+| limpa tudo antes de qualquer jogo começar.',
@@ -917,7 +928,7 @@ def _cells(text):
 
 
 TEXT_W = 30          # == ONB_TEXT_W: cols 1..30
-MORE_FIRST = 54      # == ONB_MORE_FIRST: the "and more" items are the descriptors from here
+MORE_FIRST = 55      # == ONB_MORE_FIRST: the "and more" items are the descriptors from here
 MORE_NAME_W = 24     # an answer row's width (onb_draw_option_value prints labels with 24)
 # How tall a card's paragraph may be depends on what the card shows under it, so the cap
 # is worked out per card from the engine's own layout (onboarding_main.a65) and the card's
@@ -973,7 +984,7 @@ _MENU_LABELS = {"cfg": "mtext_mm_cfg", "sgbmenu": "mtext_cfg_sgb", "auto": "text
                 "decreased": "text_igm_tr_decreased", "savecheat": "text_igm_tr_savecheat",
                 "cheats": "text_filesel_context_cheats", "cheatstab": "text_igm_tab_cheats",
                 "hook": "mtext_ingame_enable",
-                "goptrow": "mtext_gopt_row", "onechip": "mtext_ingame_1chiptransientfixes",
+                "goptrow": "mtext_gopt_row", "lockrow": "mtext_lock_row", "onechip": "mtext_ingame_1chiptransientfixes",
                 "gdefault": "text_gopt_default", "rmdir": "mtext_fm_rmdir",
                 "fmsel": "mtext_fm_select"}
 _MENU_WORDS = {key: menu_text(lab) for key, lab in _MENU_LABELS.items()}

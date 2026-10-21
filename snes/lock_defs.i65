@@ -1,0 +1,18 @@
+// lock_defs.i65 -- the scratch of the in-game parental lock (lock.i65), in scope from the
+// top of igmenu.a65 (cpp is textual: igmenu_main zeroes igl_open long before lock.i65).
+// snescom preprocessing: // comments only.
+#define igl_open        $F48700    // 1 = the code was given since the shell opened
+#define igl_n           $F48702    // word: buttons typed (the high byte 0)
+#define igl_len         $F48704    // word: the length of the code in CFG
+#define igl_prev        $F48706    // word: the buttons down last frame
+#define igl_arm         $F48708    // word: pressed since the keypad opened
+#define igl_hold        $F4870A    // word: frames B has been held
+#define igl_t           $F4870C    // word scratch
+#define igl_msg         $F4870E    // word: the prompt's shell line (IGM_SH_LOCK_*)
+#define igl_idle        $F48710    // word: frames with nothing down since the last button
+#define igl_in          $F48712    // 10 B: the buttons typed, 1..12 each
+#define igl_d1          $F4871C    // word: the raw buttons 1, 2 and 3 frames ago (igl_debounce)
+#define igl_d2          $F4871E
+#define igl_d3          $F48720
+#define IGL_HOLD        180        // frames of B for "cancel": 3 s at 60 Hz
+#define IGL_IDLE        180        // frames with nothing pressed that end a code: 3 s
