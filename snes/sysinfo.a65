@@ -103,6 +103,7 @@ sysinfo_printloop:
   bcc -
   jsr printtime
   jsr read_pad
+  jsl @ext_sysinfo_pad   ; an extension may look at the keys (bootgate.a65)
   lda pad_b
   ora pad_a
   bne +

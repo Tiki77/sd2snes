@@ -914,6 +914,10 @@
 #define MENU_HANDOFF_MAGIC          $a5
 #define BOOT_INTRO                  $002BE2 /* fork: BOOT_INTRO_MAGIC = show the power-on screen (bootintro.a65) on this boot: the first menu load since power-on, CFG_BOOT_INTRO on, no autoboot. src/main.c writes it on every menu load before the console leaves reset; the screen clears it as it reads it, so the reset button in the menu does not replay it. Lockstep with SNESCMD_BOOT_INTRO in src/snes.h */
 #define BOOT_INTRO_MAGIC            $b7
+/* An optional extension of the menu image, linked in after the build: a header at the
+   top of bank $C3 ("EXT1", then two jml entries: +4 the System Information pad hook,
+   +8 the coldboot hook). The public build leaves it empty (bootgate.a65). */
+#define MENU_EXT_HDR                $C3FF00
 #define SFX_MAILBOX                 $002BE0 /* fork: menu sound effects mailbox (sfx.a65 <-> MCU menu loop). Value = effect+1 (1-4: cursor/confirm/back/error), 0 = consumed. DEDICATED byte: sharing MCU_CMD raced the real commands. NOT $2A08: MCU_PARAM is a 12-BYTE region ($2A04-$2A0F, settime writes +11) - parking there corrupted cover requests and saved garbled favorites. $2BE0 sits in the unreferenced $2BB4-$2BEF gap. Newest-wins, fire-and-forget. */
 
 /* WiFi status/scan block + connect params, RESERVED for the Companion port.

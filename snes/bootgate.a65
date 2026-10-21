@@ -12,6 +12,10 @@
 ; then. Anything else returns without touching bank $C3.
 ; ===========================================================================
 boot_intro:
+  jsr ext_present
+  bcs bg_noext
+  jsl @MENU_EXT_HDR+8        ; the extension's coldboot hook
+bg_noext:
   php
   sep #$20 : .as
   lda @BOOT_INTRO
@@ -23,3 +27,45 @@ bg_out:
   .as
   plp
   rtl
+
+; ===========================================================================
+; The optional extension of the menu image (MENU_EXT_HDR, memmap.i65): a header at the top
+; of bank $C3 that a build may fill in after the link. The public build leaves it empty and
+; these do nothing. Bank $C3 is lent to the guide viewer, so its "FMB1" is checked too.
+; ===========================================================================
+
+; ext_sysinfo_pad: the System Information loop, right after its read_pad (sysinfo.a65).
+ext_sysinfo_pad:
+  jsr ext_present
+  bcs esp_out
+  jsl @MENU_EXT_HDR+4
+esp_out:
+  rtl
+
+; ext_present: carry clear = bank $C3 is in and holds an extension. A/X/Y, P kept.
+ext_present:
+  php
+  rep #$20 : .al
+  pha
+  lda @$C30000
+  cmp #$4d46                 ; "FM"
+  bne ep_no
+  lda @$C30002
+  cmp #$3142                 ; "B1"
+  bne ep_no
+  lda @MENU_EXT_HDR
+  cmp #$5845                 ; "EX"
+  bne ep_no
+  lda @MENU_EXT_HDR+2
+  cmp #$3154                 ; "T1"
+  bne ep_no
+  pla
+  plp
+  clc
+  rts
+ep_no:
+  .al
+  pla
+  plp
+  sec
+  rts
