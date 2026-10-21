@@ -1130,6 +1130,11 @@ gi_fmv_advance:
   rep #$10 : .xl
   phb
   lda #$00 : pha : plb          ; DB=0 (MCU regs via @, and the waitblank/cover helpers)
+  ; No auto-joypad read until the frame is up (the last cover_blank_end turns it back on):
+  ; this takes 2-3 frames (the MCU, two VBlank windows) in which gin_syncread does not run,
+  ; and the SNES Mouse clears its motion counters at every auto-read, so their motion was
+  ; lost (the pointer went ~25% slower with a clip). Unlatched, the mouse keeps counting.
+  lda #$80 : sta $4200
   jsr gi_fmv_cmd                ; stream the next frame into GI_TILES ($CA0000)
   ; pick the INACTIVE set as the write target (off-screen -> writing it can't tear)
   lda gi_fmv_buf
@@ -1146,16 +1151,16 @@ gfa_write_a:
   sep #$20 : .as
 gfa_dst_ready:
   ; window 1: first half of the frame -> inactive set base
-  jsr cover_blank_begin
+  jsr cover_blank_begin_nj
   ldx gi_fmv_dst_vram : stx $2116
   DMA7(#$01, #GI_FMV_HALF_B, #^GI_TILES, #!GI_TILES, #$18)
-  jsr cover_blank_end
+  jsr cover_blank_end_nj
   ; rebuild the band tilemap (box -> inactive set chars) for the atomic flip in window 2.
   ; v3 paletted path: ONLY rewrite the box -- the cover region in GI_TMAP_BUF persists between
   ; frames (laid once by gi_fmv_build_tmap_v3). A is 8-bit here (.as).
   jsr gi_fmv_box_tmap
   ; window 2: new frame's palette -> CGRAM 168..255, second tile half, then flip the tilemap (atomic)
-  jsr cover_blank_begin
+  jsr cover_blank_begin_nj
   lda #168 : sta $2121         ; the MCU staged the new frame's 88-colour palette at GI_FMV_PAL
   DMA7(#$00, #$00b0, #^GI_FMV_PAL, #!GI_FMV_PAL, #$22)   ; -> CGRAM 168..255 (176 B)
   rep #$20 : .al

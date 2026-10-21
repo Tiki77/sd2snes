@@ -119,9 +119,16 @@ cbp4:
 ;    so restoring $81 is correct (NOT used from cover_init, where NMI is still
 ;    off and the screen is already blanked). $4200 is write-only, hence the fixed
 ;    restore value rather than save/restore.
+; cover_blank_begin_nj: the same with the auto-joypad read left OFF (gi_fmv_advance)
+cover_blank_begin_nj:
+  sep #$20 : .as
+  lda #$00
+  bra cbb_set
 cover_blank_begin:
   sep #$20 : .as
   lda #$01                  ; NMI off so the VBlank handler can't run mid-upload
+cbb_set:
+  .as
   sta $4200
   jsr waitblank             ; sync to VBlank start: the whole upload lands in VBlank
                             ; (off-screen) so there is NO visible flash, and HDMA is
@@ -133,11 +140,20 @@ cover_blank_begin:
   rts
 cover_blank_end:
   sep #$20 : .as
+  lda #$81                  ; VBlank NMI + auto-joypad back on
+cbe_set:
+  .as
+  pha
   lda cur_bright            ; un-blank
   sta $2100
-  lda #$81                  ; VBlank NMI + auto-joypad back on
+  pla
   sta $4200
   rts
+; cover_blank_end_nj: NMI back on, the auto-joypad read still off (gi_fmv_advance)
+cover_blank_end_nj:
+  sep #$20 : .as
+  lda #$80
+  bra cbe_set
 
 ; -- cover_hide: hide any shown cover during browsing (NMI on). Forces blank so
 ;    the OAM writes land, sets every cover sprite Y=$f0 (off-screen), restores.
