@@ -240,27 +240,27 @@ NAMES = [
   ('Saves screen', 'Tela de saves', 'Pantalla de partidas', 'Spielstand-Übersicht', 'Écran des sauvegardes', 'Schermata salvataggi', 'Экран сохранений', 'Saves-overzicht'),
   # 47 the file manager: copy, cut, paste, rename, new folder, select several, view a text file (2.18)
   ('File manager', 'Gerenciador de arquivos', 'Gestor de archivos', 'Dateimanager', 'Gestionnaire de fichiers', 'Gestione file', 'Файловый менеджер', 'Bestandsbeheer'),
-  # 48 game options: settings for one game only, over the global ones, laid out like Settings (2.18)
-  ('Game options', 'Opções do jogo', 'Opciones del juego', 'Spieloptionen', 'Options du jeu', 'Opzioni del gioco', 'Настройки игры', 'Spelopties'),
-  # 49 Repeat in the .spc / .pcm / .nsf players (2.18)
-  ('Repeat in the players', 'Repetir nos tocadores', 'Repetir en reproductores', 'Wiederholen in den Playern', 'Répéter dans les lecteurs', 'Ripeti nei lettori', 'Повтор в плеерах', 'Herhalen in de spelers'),
-  # 50 stop the menu music on the game info card (2.18; needs the menu music)
-  ('Stop music on game info', 'Parar música na ficha', 'Parar música en la ficha', 'Musik aus in der Infokarte', 'Couper la musique (fiche)', 'Ferma musica nella scheda', 'Без музыки в карточке игры', 'Muziek uit bij spelinfo'),
-  # 51 the ROM's CRC32 on the game info card (2.18)
-  ('CRC32 on the game info', 'CRC32 na ficha', 'CRC32 en la ficha', 'CRC32 in der Infokarte', 'CRC32 dans la fiche', 'CRC32 nella scheda', 'CRC32 в карточке игры', 'CRC32 in de spelinfo'),
-  # 52 delete a folder and all it holds (2.18)
+  # 48 delete a folder and all it holds (2.18)
   ('Delete folders', 'Excluir pastas', 'Borrar carpetas', 'Ordner löschen', 'Supprimer des dossiers', 'Eliminare cartelle', 'Удаление папок', 'Mappen verwijderen'),
+  # 49 game options: settings for one game only, over the global ones, laid out like Settings (2.18)
+  ('Game options', 'Opções do jogo', 'Opciones del juego', 'Spieloptionen', 'Options du jeu', 'Opzioni del gioco', 'Настройки игры', 'Spelopties'),
+  # 50 Repeat in the .spc / .pcm / .nsf players (2.18)
+  ('Repeat in the players', 'Repetir nos tocadores', 'Repetir en reproductores', 'Wiederholen in den Playern', 'Répéter dans les lecteurs', 'Ripeti nei lettori', 'Повтор в плеерах', 'Herhalen in de spelers'),
+  # 51 stop the menu music on the game info card (2.18; needs the menu music)
+  ('Stop music on game info', 'Parar música na ficha', 'Parar música en la ficha', 'Musik aus in der Infokarte', 'Couper la musique (fiche)', 'Ferma musica nella scheda', 'Без музыки в карточке игры', 'Muziek uit bij spelinfo'),
+  # 52 the ROM's CRC32 on the game info card (2.18)
+  ('CRC32 on the game info', 'CRC32 na ficha', 'CRC32 en la ficha', 'CRC32 in der Infokarte', 'CRC32 dans la fiche', 'CRC32 nella scheda', 'CRC32 в карточке игры', 'CRC32 in de spelinfo'),
   # 53 rotated Game Boy buttons, on the SGB and the GBC core (2.18)
   ('Rotated Game Boy buttons', 'Botões do Game Boy girados', 'Botones de Game Boy girados', 'Gedrehte Game-Boy-Tasten', 'Boutons Game Boy pivotés', 'Tasti Game Boy ruotati', 'Повёрнутые кнопки Game Boy', 'Gedraaide Game Boy-knoppen'),
   # 54 the NTT Data Keypad (NDK10) as a standard pad (2.18)
   ('NTT Data Keypad',)*8,
-  # 49 the PPU is cleared before every game boots
+  # 50 the PPU is cleared before every game boots
   ('Clear PPU on boot', 'Limpar PPU no boot', 'Limpiar PPU al arrancar', 'PPU beim Start löschen', 'Effacer le PPU au boot', "Pulisci PPU all'avvio", 'Очистка PPU при загрузке', 'Leeg PPU bij starten'),
-  # 50 bus timing compat
+  # 51 bus timing compat
   ('Bus timing compat', 'Compat. de barramento', 'Compat. de bus', 'Bus-Timing-Kompat.', 'Compat. timing bus', 'Compat. timing bus', 'Совместимость шины', 'Compat. bustiming'),
-  # 51 the hardware model in System Information
+  # 52 the hardware model in System Information
   ('Hardware model', 'Modelo do hardware', 'Modelo de hardware', 'Hardware-Modell', 'Modèle du matériel', "Modello dell'hardware", 'Модель картриджа', 'Hardwaremodel'),
-  # 52 BS-X and the Memory Pack
+  # 48 BS-X and the Memory Pack
   ('BS-X and Memory Pack', 'BS-X e Memory Pack', 'BS-X y Memory Pack', 'BS-X und Memory Pack', 'BS-X et Memory Pack', 'BS-X e Memory Pack', 'BS-X и Memory Pack', 'BS-X en Memory Pack'),
   # 53 delete files and saves
   ('Delete files and saves', 'Apagar arquivos e saves', 'Borrar archivos y saves', 'Dateien/Saves löschen', 'Effacer fichiers/saves', 'Eliminare file e save', 'Удаление файлов и сейвов', 'Bestanden/saves wissen'),
@@ -697,7 +697,16 @@ TEXTS = [
    'Nella lista, [Y] su una voce apre il menu contestuale con |Copia|, |Taglia|, |Incolla qui|, |Rinomina| e |Nuova cartella|. |Selezione multipla| segna le voci con [A]. Un gioco rinominato tiene salvataggi, cheat e copertine, e [A] su un |.txt| lo apre.',
    'Нажатие кнопки [Y] на любом элементе списка файлов открывает контекстное меню: |Удалить|, |Копировать|, |Вырезать|, |Вставить сюда|, |Переименовать| и |Новая папка|. Функция |Выбрать несколько| позволяет пометить элементы с помощью кнопки [A]. При переименовании игры также автоматически переименовываются связанные с ней файлы сохранений, чит-коды и обложки, а нажатие кнопки [A] на файле с расширением |.txt| открывает его содержимое.',
    'In de lijst opent [Y] op een item het contextmenu met |Kopiëren|, |Knippen|, |Hier plakken|, |Hernoemen| en |Nieuwe map|. |Meerdere selecteren| markeert items met [A]. Een hernoemd spel houdt zijn saves, cheats en hoesjes, en [A] op een |.txt| opent het.'),
-  # 48 game options (2.18): Settings' own options, per game, only those the game uses
+  # 48 delete a folder and all it holds, and the marked entries in the selection mode (2.18)
+  ('[Y] on a folder offers {rmdir}: it counts files, folders and size, asks ({no} comes selected) and removes it all with a progress bar ([B] cancels). In {fmsel}, {del} does the same for the marked entries. Saves and cheats the |sd2snes| folder keeps stay, system folders are refused.',
+   '[Y] numa pasta oferece {rmdir}: conta arquivos, pastas e tamanho, pergunta ({no} já marcado) e apaga tudo com barra de progresso ([B] cancela). Em {fmsel}, {del} faz o mesmo com os itens marcados. Saves e cheats da pasta |sd2snes| ficam, e as pastas do sistema são recusadas.',
+   '[Y] en una carpeta ofrece {rmdir}: cuenta archivos, carpetas y tamaño, pregunta ({no} ya elegido) y la borra con barra de progreso ([B] cancela). En {fmsel}, {del} hace lo mismo con lo marcado. Partidas y trucos de la carpeta |sd2snes| se quedan, las carpetas del sistema se rechazan.',
+   '[Y] auf einem Ordner bietet {rmdir}: zählt Dateien, Ordner und Größe, fragt ({no} vorgewählt) und löscht alles mit Fortschrittsbalken ([B] bricht ab). In {fmsel} macht {del} das mit den markierten Einträgen. Spielstände und Cheats im Ordner |sd2snes| bleiben, Systemordner sind gesperrt.',
+   "[Y] sur un dossier propose {rmdir} : il compte fichiers, dossiers et taille, demande ({no} présélectionné) et efface tout avec une barre ([B] annule). En {fmsel}, {del} fait de même avec les entrées marquées. Sauvegardes et cheats de |sd2snes| restent, dossiers système refusés.",
+   '[Y] su una cartella offre {rmdir}: conta file, cartelle e dimensione, chiede ({no} già scelto) e cancella tutto con una barra ([B] annulla). In {fmsel}, {del} fa lo stesso con le voci segnate. Salvataggi e cheat di |sd2snes| restano, cartelle di sistema rifiutate.',
+   'При нажатии кнопки [Y] на папке доступна функция {rmdir}: она подсчитывает количество файлов и папок, а также их общий размер, запрашивает подтверждение (по умолчанию {no}) и удаляет всё содержимое, отображая индикатор прогресса ([B] - отмена). В режиме {fmsel} команда {del} выполняет аналогичное действие для отмеченных элементов. Сохранения и файлы чит-кодов в папке |/sd2snes| остаются нетронутыми, а удаление системных папок заблокировано.',
+   '[Y] op een map biedt {rmdir}: telt bestanden, mappen en grootte, vraagt het ({no} voorgeselecteerd) en wist alles met een balk ([B] annuleert). In {fmsel} doet {del} hetzelfde met de gemarkeerde items. Saves en cheats in |sd2snes| blijven, systeemmappen geweigerd.'),
+  # 49 game options (2.18): Settings' own options, per game, only those the game uses
   ("{goptrow} keeps settings for one game only, laid out like {cfg} with just what that game uses. {gdefault} follows the global option. Open it with [Y] on a game, [L] on the info card or [Y] on the in-game tab bar, where what cannot change mid-game is dimmed.",
    '{goptrow} guarda ajustes só para um jogo, organizados como em {cfg} e só com o que vale para ele. {gdefault} segue a opção global. Abra com [Y] num jogo, [L] na ficha ou [Y] na barra de abas do menu in-game, onde o que não muda com o jogo rodando fica apagado.',
    '{goptrow} guarda ajustes solo para un juego, como en {cfg} y solo con lo que ese juego usa. {gdefault} sigue la opción global. Ábrelo con [Y] en un juego, [L] en la ficha o [Y] en la barra de pestañas del juego, donde lo que no cambia jugando sale atenuado.',
@@ -706,7 +715,7 @@ TEXTS = [
    "{goptrow} salva impostazioni per un solo gioco, come in {cfg}, solo con ciò che il gioco usa. {gdefault} segue l'opzione globale. Apri con [Y] su un gioco, [L] sulla scheda o [Y] sulle schede del menu in gioco, dove ciò che è bloccato in gioco è grigio.",
    '{goptrow} содержит настройки, относящиеся к конкретной игре. Они организованы так же, как в {cfg}, и включают только те параметры, которые применимы к ней. {gdefault} соответствует общим настройкам. Открыть этот раздел можно нажатием кнопки [Y] на выбранной игре, кнопка [L] - в карточке игры или кнопка [Y] - на панели вкладок |Меню в игре|, при этом заблокированные для игры параметры отображаются серым цветом.',
    '{goptrow} bewaart instellingen voor één spel, ingedeeld zoals {cfg}, met alleen wat dat spel gebruikt. {gdefault} volgt de algemene optie. Open met [Y] op een spel, [L] op de spelinfo of [Y] op de tabbalk van het in-game menu, waar wat vastligt grijs is.'),
-  # 49 Repeat in the .spc / .pcm / .nsf players (2.18)
+  # 50 Repeat in the .spc / .pcm / .nsf players (2.18)
   ('In the |.spc|, |.pcm| and |.nsf| players, [X] turns {repeat} on: when the track ends it starts again instead of moving to the next one. An |.nsf| song ends after 3 s of silence. {repeat} starts off and the player remembers it.',
    'Nos tocadores de |.spc|, |.pcm| e |.nsf|, [X] liga {repeat}: quando a faixa acaba, ela recomeça em vez de ir para a próxima. Uma música de |.nsf| acaba depois de 3 s de silêncio. {repeat} começa desligado e o tocador lembra a escolha.',
    'En los reproductores de |.spc|, |.pcm| y |.nsf|, [X] activa {repeat}: al terminar, la pista vuelve a empezar en vez de pasar a la siguiente. Una canción de |.nsf| termina tras 3 s de silencio. {repeat} empieza desactivado y el reproductor lo recuerda.',
@@ -715,7 +724,7 @@ TEXTS = [
    'Nei lettori di |.spc|, |.pcm| e |.nsf|, [X] attiva {repeat}: alla fine la traccia ricomincia invece di passare alla successiva. Un brano |.nsf| finisce dopo 3 s di silenzio. {repeat} parte disattivato e il lettore lo ricorda.',
    'В плеерах |.spc|, |.pcm| и |.nsf| кнопка [X] включает {repeat}: в конце трек начинается заново, а не переходит к следующему. Мелодия |.nsf| заканчивается после 3 секунд тишины. {repeat} изначально выключен, плеер запоминает выбор.',
    'In de spelers voor |.spc|, |.pcm| en |.nsf| zet [X] {repeat} aan: aan het eind begint het nummer opnieuw in plaats van het volgende. Een |.nsf|-nummer eindigt na 3 s stilte. {repeat} staat eerst uit en de speler onthoudt het.'),
-  # 50 stop the menu music on the game info card (2.18; needs the menu music). The user asked for
+  # 51 stop the menu music on the game info card (2.18; needs the menu music). The user asked for
   # the cost to be plain: opening the card takes about a second longer, and both ways fade
   ('{yes}: the menu music stops while a game info card is open and starts over when you leave. It takes an internal console reset: opening the card gets about 1 s slower, and both ways the screen fades out and back. The clip and the menu sounds still play.',
    '{yes}: a música do menu para enquanto a ficha de um jogo está aberta e recomeça quando você sai. Isso exige reiniciar o console por dentro: abrir a ficha fica cerca de 1 s mais lento, e na ida e na volta a tela escurece e volta. O vídeo e os sons do menu continuam.',
@@ -725,7 +734,7 @@ TEXTS = [
    "{yes}: la musica del menu si ferma mentre la scheda di un gioco è aperta e riparte quando esci. Serve un reset interno della console: aprire la scheda richiede circa 1 s in più, e all'andata e al ritorno lo schermo si oscura e torna. Il video e i suoni restano.",
    '{yes} - музыка в меню прекращается, когда открыта карточка с информацией об игре, и начинает звучать заново, когда вы её закрываете. Это требует внутреннего перезапуска консоли: открытие карточки происходит примерно на 1 секунду медленнее, а при её открытии и закрытии экран плавно гаснет и снова загорается. Видеоролик и звуки меню продолжают воспроизводиться.',
    "{yes}: de menumuziek stopt zolang de spelinfo open is en begint opnieuw als je teruggaat. Daarvoor is een interne reset van de console nodig: de spelinfo openen duurt zo'n 1 s langer, en heen en terug dooft het beeld uit en weer in. Video en menugeluiden blijven."),
-  # 51 the ROM's CRC32 on the game info card (2.18)
+  # 52 the ROM's CRC32 on the game info card (2.18)
   ("The game info card shows the ROM's CRC32 right of the title, the number the catalogs use: no 512-byte copier header and, for NES, no iNES header. A patched entry shows its base ROM. It is computed in the background and shows up in seconds. A long title scrolls.",
    'A ficha do jogo mostra o CRC32 da ROM à direita do título, o número que os catálogos usam: sem o cabeçalho de 512 bytes de copiadora e, no NES, sem o iNES. Uma entrada com patch mostra a ROM base. Ele é calculado em segundo plano e aparece em segundos. Um título longo rola.',
    'La ficha del juego muestra el CRC32 de la ROM a la derecha del título, el número de los catálogos: sin la cabecera de 512 bytes de copiadora y, en NES, sin la iNES. Una entrada con parche muestra la ROM base. Se calcula en segundo plano y aparece en segundos. Un título largo se desplaza.',
@@ -734,15 +743,6 @@ TEXTS = [
    "La scheda del gioco mostra il CRC32 della ROM a destra del titolo, il numero dei cataloghi: senza l'header di 512 byte del copiatore e, per il NES, senza l'iNES. Una voce con patch mostra la ROM di base. Viene calcolato in background e appare in pochi secondi. Un titolo lungo scorre.",
    'В карточке игры справа от названия отображается контрольная сумма CRC32 (используемая в каталогах), которая рассчитывается без учета 512-байтового заголовка, добавляемого устройствами для копирования (или заголовка iNES - в случае с консолью NES). Для модифицированных (патченных) версий игр указывается CRC32 исходного ROM-файла. Это значение вычисляется в фоновом режиме и появляется через несколько секунд. Длинные названия отображаются в виде бегущей строки.',
    'De spelinfo toont rechts van de titel de CRC32 van de ROM, het getal van de catalogi: zonder 512-byte copier-header en bij NES zonder iNES-header. Een item met patch toont de basis-ROM. Hij wordt op de achtergrond berekend en verschijnt binnen enkele seconden. Een lange titel scrolt.'),
-  # 52 delete a folder and all it holds, and the marked entries in the selection mode (2.18)
-  ('[Y] on a folder offers {rmdir}: it counts files, folders and size, asks ({no} comes selected) and removes it all with a progress bar ([B] cancels). In {fmsel}, {del} does the same for the marked entries. Saves and cheats the |sd2snes| folder keeps stay, system folders are refused.',
-   '[Y] numa pasta oferece {rmdir}: conta arquivos, pastas e tamanho, pergunta ({no} já marcado) e apaga tudo com barra de progresso ([B] cancela). Em {fmsel}, {del} faz o mesmo com os itens marcados. Saves e cheats da pasta |sd2snes| ficam, e as pastas do sistema são recusadas.',
-   '[Y] en una carpeta ofrece {rmdir}: cuenta archivos, carpetas y tamaño, pregunta ({no} ya elegido) y la borra con barra de progreso ([B] cancela). En {fmsel}, {del} hace lo mismo con lo marcado. Partidas y trucos de la carpeta |sd2snes| se quedan, las carpetas del sistema se rechazan.',
-   '[Y] auf einem Ordner bietet {rmdir}: zählt Dateien, Ordner und Größe, fragt ({no} vorgewählt) und löscht alles mit Fortschrittsbalken ([B] bricht ab). In {fmsel} macht {del} das mit den markierten Einträgen. Spielstände und Cheats im Ordner |sd2snes| bleiben, Systemordner sind gesperrt.',
-   "[Y] sur un dossier propose {rmdir} : il compte fichiers, dossiers et taille, demande ({no} présélectionné) et efface tout avec une barre ([B] annule). En {fmsel}, {del} fait de même avec les entrées marquées. Sauvegardes et cheats de |sd2snes| restent, dossiers système refusés.",
-   '[Y] su una cartella offre {rmdir}: conta file, cartelle e dimensione, chiede ({no} già scelto) e cancella tutto con una barra ([B] annulla). In {fmsel}, {del} fa lo stesso con le voci segnate. Salvataggi e cheat di |sd2snes| restano, cartelle di sistema rifiutate.',
-   'При нажатии кнопки [Y] на папке доступна функция {rmdir}: она подсчитывает количество файлов и папок, а также их общий размер, запрашивает подтверждение (по умолчанию {no}) и удаляет всё содержимое, отображая индикатор прогресса ([B] - отмена). В режиме {fmsel} команда {del} выполняет аналогичное действие для отмеченных элементов. Сохранения и файлы чит-кодов в папке |/sd2snes| остаются нетронутыми, а удаление системных папок заблокировано.',
-   '[Y] op een map biedt {rmdir}: telt bestanden, mappen en grootte, vraagt het ({no} voorgeselecteerd) en wist alles met een balk ([B] annuleert). In {fmsel} doet {del} hetzelfde met de gemarkeerde items. Saves en cheats in |sd2snes| blijven, systeemmappen geweigerd.'),
   # 53 rotated Game Boy buttons, on the SGB and the GBC core (2.18)
   ("{yes}: SNES [B] plays the Game Boy's A and [Y] its B, the two side by side as on the Game Boy. [A] still plays A. Works on the Super Game Boy and on the Game Boy Color core. It lives in {cfg} > {sgbmenu} and can be set per game too.",
    '{yes}: o [B] do SNES faz o A do Game Boy e o [Y] faz o B, os dois lado a lado como no Game Boy. O [A] continua sendo A. Vale no Super Game Boy e no núcleo Game Boy Color. Fica em {cfg} > {sgbmenu} e também pode ser ajustado por jogo.',
@@ -761,7 +761,7 @@ TEXTS = [
    "L'|NTT Data Keypad| (NDK10) funziona come un controller normale nel menu, nel menu in gioco, nel visore delle guide e nelle scorciatoie in gioco. Il tastierino numerico resta ai giochi che lo usano.",
    '|NTT Data Keypad| (NDK10) работает как обычный контроллер в |Меню|, в |Меню в игре|, в просмотре |РУКОВОДСТВО К ИГРЕ| и в |КОМБИНАЦИИ В ИГРЕ|. Цифровой блок остаётся играм, которые его используют.',
    'Het |NTT Data Keypad| (NDK10) werkt als een gewone controller in het menu, het in-game menu, de handleidingviewer en de in-game sneltoetsen. Het cijferblok blijft voor de spellen die het gebruiken.'),
-  # 49 the PPU is cleared before every game boots
+  # 50 the PPU is cleared before every game boots
   ("Some romhacks draw their intro without clearing the video memory, and on a real console the menu's leftovers show as garbage. The |sd2snes+| wipes it before every game starts.",
    'Alguns romhacks desenham a abertura sem limpar a memória de vídeo, e num console de verdade as sobras do menu aparecem como lixo. O |sd2snes+| limpa tudo antes de qualquer jogo começar.',
    'Algunos romhacks dibujan su intro sin limpiar la memoria de vídeo, y en una consola real los restos del menú salen como basura. El |sd2snes+| la borra antes de que empiece cualquier juego.',
@@ -770,7 +770,7 @@ TEXTS = [
    "Alcune romhack disegnano l'intro senza pulire la memoria video, e su una console vera gli avanzi del menu appaiono come spazzatura. L'|sd2snes+| la pulisce prima che parta qualsiasi gioco.",
    'Некоторые ромхаки рисуют заставку, не очищая видеопамять, и на настоящей консоли остатки меню видны как мусор. |sd2snes+| очищает её перед запуском любой игры.',
    'Sommige romhacks tekenen hun intro zonder het videogeheugen te wissen, en op een echte console verschijnen restjes van het menu als rommel. De |sd2snes+| wist het voordat elk spel start.'),
-  # 50 bus timing compat
+  # 51 bus timing compat
   ('A game that freezes or glitches right after the logo on some consoles, mostly 1-CHIP ones? Try {cfg} > {ingame} > {buscompat}: it frees the cartridge bus a little earlier, like firmware 1.11.0 did.',
    'Um jogo trava ou dá glitch logo depois do logo em alguns consoles, quase sempre 1-CHIP? Tente {cfg} > {ingame} > {buscompat}: ela libera o barramento do cartucho um pouco antes, como a firmware 1.11.0 fazia.',
    '¿Un juego se cuelga o falla justo tras el logo en algunas consolas, casi siempre 1-CHIP? Prueba {cfg} > {ingame} > {buscompat}: libera el bus del cartucho un poco antes, como hacía el firmware 1.11.0.',
@@ -779,7 +779,7 @@ TEXTS = [
    "Un gioco si blocca o dà glitch subito dopo il logo su alcune console, quasi sempre 1-CHIP? Prova {cfg} > {ingame} > {buscompat}: libera il bus della cartuccia un po' prima, come il firmware 1.11.0.",
    'Игра зависает или работает со сбоями сразу после логотипа на некоторых консолях, чаще всего 1-CHIP? Попробуйте {cfg} > {ingame} > {buscompat}: шина картриджа освобождается немного раньше, как в прошивке 1.11.0.',
    'Loopt een spel vast of hapert het net na het logo op sommige consoles, meestal 1-CHIP? Probeer {cfg} > {ingame} > {buscompat}: de cartridgebus wordt iets eerder vrijgegeven, zoals firmware 1.11.0 deed.'),
-  # 51 the hardware model in System Information
+  # 52 the hardware model in System Information
   ('{sysinfo} in the main menu ([X]) now also shows which hardware it runs on: |sd2snes Mk.II|, |sd2snes Mk.III| or |FXPAK PRO STM32|.',
    '{sysinfo} no menu principal ([X]) agora mostra também em que hardware ele roda: |sd2snes Mk.II|, |sd2snes Mk.III| ou |FXPAK PRO STM32|.',
    '{sysinfo} en el menú principal ([X]) ahora también muestra en qué hardware corre: |sd2snes Mk.II|, |sd2snes Mk.III| o |FXPAK PRO STM32|.',
@@ -788,7 +788,7 @@ TEXTS = [
    '{sysinfo} nel menu principale ([X]) ora mostra anche su quale hardware gira: |sd2snes Mk.II|, |sd2snes Mk.III| o |FXPAK PRO STM32|.',
    '{sysinfo} в главном меню ([X]) теперь показывает и модель картриджа: |sd2snes Mk.II|, |sd2snes Mk.III| или |FXPAK PRO STM32|.',
    '{sysinfo} in het hoofdmenu ([X]) toont nu ook op welke hardware het draait: |sd2snes Mk.II|, |sd2snes Mk.III| of |FXPAK PRO STM32|.'),
-  # 52 BS-X and the Memory Pack
+  # 48 BS-X and the Memory Pack
   ('Satellaview games that use the 8M Memory Pack slot read it from |/sd2snes/saves| as |<rom>.mpk|: saved sound novels, downloaded races and the like. The game still boots without a pack.',
    'Jogos do Satellaview que usam o slot de Memory Pack de 8M leem o pack de |/sd2snes/saves| como |<rom>.mpk|: sound novels salvas, corridas baixadas e afins. O jogo boota mesmo sem o pack.',
    'Los juegos de Satellaview que usan el slot de Memory Pack de 8M lo leen de |/sd2snes/saves| como |<rom>.mpk|: sound novels guardadas, carreras descargadas y más. El juego arranca incluso sin pack.',
