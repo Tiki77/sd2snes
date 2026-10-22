@@ -1,6 +1,6 @@
 <p align="center"><a href="https://sd2snes.ludufre.com"><img src="gfx/logo.png" alt="sd2snes+" width="320"></a></p>
 
-**🌐 Language:** English · [Português 🇧🇷](https://sd2snes.ludufre.com/?lang=pt) · [Español 🇪🇸](https://sd2snes.ludufre.com/?lang=es) · [Deutsch 🇩🇪](https://sd2snes.ludufre.com/?lang=de) · [Français 🇫🇷](https://sd2snes.ludufre.com/?lang=fr) · [Italiano 🇮🇹](https://sd2snes.ludufre.com/?lang=it) · [Русский 🇷🇺](https://sd2snes.ludufre.com/?lang=ru) · [Nederlands 🇳🇱](https://sd2snes.ludufre.com/beta.html?lang=nl)
+**🌐 Language:** English · [Português 🇧🇷](https://sd2snes.ludufre.com/?lang=pt) · [Español 🇪🇸](https://sd2snes.ludufre.com/?lang=es) · [Deutsch 🇩🇪](https://sd2snes.ludufre.com/?lang=de) · [Français 🇫🇷](https://sd2snes.ludufre.com/?lang=fr) · [Italiano 🇮🇹](https://sd2snes.ludufre.com/?lang=it) · [Русский 🇷🇺](https://sd2snes.ludufre.com/?lang=ru) · [Nederlands 🇳🇱](https://sd2snes.ludufre.com/?lang=nl) · [日本語 🇯🇵](https://sd2snes.ludufre.com/?lang=ja) · [简体中文 🇨🇳](https://sd2snes.ludufre.com/?lang=zh)
 
 > **What is this?** A version of the [original sd2snes firmware](https://github.com/mrehkopf/sd2snes) by [@mrehkopf](https://github.com/mrehkopf) that keeps the firmware base and adds user-facing extras. Use this repo only for issues about **those additions** — for core firmware issues, use the original project.
 
