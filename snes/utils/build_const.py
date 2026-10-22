@@ -526,6 +526,21 @@ def main():
                 return lim
         return WIDTH_DEFAULT
 
+    # The game-info screen has no BG2 glyph pool, so there a glyph whose lead lands on an even
+    # (BG2) column is moved one column on (snes/cjk.a65 cjk_print_bg2) and that blank column is
+    # not charged to print_count: the text runs past its budget instead of being clipped, and
+    # past the row it wraps onto the next one. Labels printed there: prefix -> start column.
+    GI_PAD_START = (("text_gi_footer", 2),)
+
+    def gi_columns(text, start):
+        col = start
+        for ch in re.sub(r"\{\d+\}", "#", text):
+            if is_cjk(ch):
+                col += 3 if col % 2 == 0 else 2
+            else:
+                col += 1
+        return col - start
+
     too_wide = []
     for lang_name, d in langs:   # every loaded translation: validate each
         use(lang_name)
@@ -536,6 +551,12 @@ def main():
             n, lim = encoded_len(text), budget_for(label)
             if n > lim:
                 too_wide.append(f"{label} [{lang_name}]: {n} > {lim} bytes: {text!r}")
+            for prefix, start in GI_PAD_START:
+                if label.startswith(prefix):
+                    cols = gi_columns(text, start)
+                    if cols > lim:
+                        too_wide.append(f"{label} [{lang_name}]: {cols} > {lim} columns on the "
+                                        f"game-info screen (CJK alignment blanks): {text!r}")
     use(None)
     if too_wide:
         sys.exit("build_const.py: translation(s) exceed their UI slot:\n  "
