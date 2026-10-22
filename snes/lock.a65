@@ -679,8 +679,9 @@ lk_blank:
 
 ; ---------------------------------------------------------------------------
 ; lock_menu_body: gopt_list_build's code for SVW_LOCK, its php/phd already pushed, .as/.xl,
-; DBR:X = menu_enttab_cfg.  The table goes to FM_TAB with our row before the last one (the
-; tour); leaves like gopt_list_build: DB $7E, X = !FM_TAB, rtl straight back into show_menu.
+; DBR:X = menu_enttab_cfg.  The table goes to FM_TAB_CFG (not FM_TAB: Browser Settings, opened
+; from here, is rebuilt there) with our row before the last one (the tour); leaves like
+; gopt_list_build: DB $7E, X = !FM_TAB_CFG, rtl straight back into show_menu.
 ; ---------------------------------------------------------------------------
 lock_menu_body:
   .as : .xl
@@ -694,7 +695,7 @@ lock_menu_body:
   sta print_ptr+2           ; DP 0: [print_ptr] = the table
   stx print_ptr
   rep #$20 : .al
-  lda #!FM_TAB
+  lda #!FM_TAB_CFG
   sta !FMX_TBL
   sep #$20 : .as
   ldy #$0000                ; the header, as given
@@ -702,7 +703,7 @@ lmb_head:
   .as : .xl
   lda [print_ptr], y
   tyx
-  sta @FM_TAB, x
+  sta @FM_TAB_CFG, x
   iny
   cpy #$0004
   bne lmb_head
@@ -730,7 +731,7 @@ lmb_copy:
   rep #$20 : .al
   lda !FMX_TLEN
   clc
-  adc #!FM_TAB
+  adc #!FM_TAB_CFG
   tax
   lda !FMX_TLEN
   clc
@@ -748,10 +749,10 @@ lmb_end:
   plb
   plb
   rep #$10 : .xl
-  ldx #!FM_TAB
+  ldx #!FM_TAB_CFG
   rtl
 
-; lock_row: the row at FM_TAB + FMX_TLEN, an MTYPE_FUNC (back to Settings after it) calling
+; lock_row: the row at FM_TAB_CFG + FMX_TLEN, an MTYPE_FUNC (back to Settings after it) calling
 ; lock_h_cfg, text and description resolved here.  .as/.xl, DP 0, DB $7E.
 lock_row:
   .as : .xl
@@ -760,7 +761,7 @@ lock_row:
   rep #$20 : .al
   lda !FMX_TLEN
   clc
-  adc #!FM_TAB
+  adc #!FM_TAB_CFG
   tax
   lda print_src
   sta !$0001, x

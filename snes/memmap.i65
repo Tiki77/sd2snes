@@ -1219,8 +1219,8 @@
 #define FM_ASK_RMDIR                4
 #define FM_FL_UNCLIP                $08
 #define MODULE_ST_MISSING           1
-/* WRAM: $7E9400-$7E9FFF, the free tail of the iris block (the saves screen has $7E9000-$7E93FF,
-   the Ficha $7E8800-$7E8BFF).  setup_gfx zeroes it at every boot, so the flags start at 0
+/* WRAM: $7E9400-$7E9FFF, the free tail of the iris block (the saves screen, the game options
+   and Settings (FM_TAB_CFG) take turns at $7E9000-$7E93FF, the Ficha $7E8800-$7E8BFF).  setup_gfx zeroes it at every boot, so the flags start at 0
    without anyone clearing them (the $55 of clear_wram never survives here). */
 #define FM_SELMODE                  $7E9400 /* 1 = the browser is in selection mode */
 #define FM_NMARK                    $7E9402 /* word: entries marked */
@@ -1230,5 +1230,6 @@
 #define FM_ARMV                     $7E9409 /* what FM_ARM held when fm_menu_hook took it: 2 = an MSU-1 folder's game menu (only the delete-folder row) */
 #define LOCK_OPEN                   $7E940A /* 1 = the parental lock's code was given this session (lock.a65); zeroed with the block at every boot, so a reset locks again */
 #define FM_TAB                      $7E9500 /* the context table fm_ctx_build writes (up to 24 entries) */
+#define FM_TAB_CFG                  $7E9000 /* Settings with the parental lock's row (lock.a65), up to $7E93FF; not FM_TAB, where Browser Settings (gimenu.a65), opened from it, is rebuilt */
 #define FM_SCR                      $7E9800 /* bank $C3's own scratch, up to $7E9FFF */
 #define FM_BANK_MAGIC               $C30000 /* "FMB1": bank $C3 is the file manager's (fileman.a65) */
