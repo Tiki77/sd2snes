@@ -688,6 +688,15 @@ void nsf_start(nsf_t *n, uint8_t song)
   n->pvictim = NSF_PINNED * NSF_SPP;
   n->misses = n->writebacks = 0;
   for(i = 0; i < 8; i++) n->bank[i] = n->info.banks[i];
+  /* $FFFA-$FFFF of a flat tune that does not fill them (bank 7 is then zero
+     tail): vectors to NSF_RET, as a hardware player points them into its own
+     code.  A BRK then ends the call, and a tune that reads them as data (a $FFFF
+     "no stream" pointer) gets a non-zero byte as on a cartridge: with zeros,
+     Rockman no Constancy's song 3 took it for a command and ran into its data. */
+  if(n->info.nbanks >= 8 && n->info.pad + n->info.data_len <= 0x7ffa) {
+    uint16_t vec[3] = { NSF_RET, NSF_RET, NSF_RET };   /* little-endian, as the 6502 */
+    n->bk(n->bk_ctx, NSF_BK_ROM + 0x7ffa, (uint8_t *)vec, 6, 1);
+  }
 
   n->apu.time = n->cyc;
   nsf_apu_reset(&n->apu, n->info.pal);

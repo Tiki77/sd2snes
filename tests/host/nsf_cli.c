@@ -79,6 +79,7 @@ static void load_nrom(nsf_t *n, const char *path)
   nsf_info_t info;
   memset(&info, 0, sizeof info);
   info.nbanks = prg >> 12;
+  info.data_len = prg;              /* all ROM: nsf_start keeps the vectors */
   for(int i = 0; i < 8; i++) info.banks[i] = i % info.nbanks;
   info.speed_us = 16639;
   bk_size = NSF_BK_ROM + prg;
