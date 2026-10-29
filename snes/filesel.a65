@@ -65,6 +65,7 @@ fileselloop_redraw
   stz filesel_dirty
   jsr filesel_statusbar
   jsl @msu_probe_visible  ; settle the MSU-1 game icons of the folders on this page (msufolder.a65)
+  jsr filesel_fn_page     ; number the CJK names of this page (cjk.a65)
   jsr filesel_redraw
   jsr filesel_cleanup ; update phase 2
   jsl @gi_relight_check   ; back from game info: fade in over the finished list
@@ -75,6 +76,15 @@ fileselloop_redraw
                           ; snes/memtest.a65). Also self-gating, and it demotes the block
                           ; to MT_ST_SEEN on the way out so it opens exactly once.
   bra fileselloop
+
+filesel_fn_page:
+  lda filesel_state
+  bne +
+  lda @FN_CJK_HAS
+  beq +
+  jsr cover_sync_before_cmd ; a cover load in flight owns the command channel
+  jsl @cjk_fn_page
++ rts
 
 filesel_cleanup:
   sep #$20 : .as
@@ -874,6 +884,7 @@ select_dir:
   phb
   pha
   plb
+  jsr dirent_fsname_y   ; the path takes the name the card knows, not the one the menu prints
 ; append selected dir name to current working directory
   ldx #$0000
 find_path_end:
@@ -925,6 +936,28 @@ copy_new_path_loop:
   jsr fnl_place_cursor
   sec                   ; fnl_place_cursor's compare/subtract clobbered it
 + sep #$20 : .as
+  rts
+
+; dirent_fsname_y: DB:Y = a directory entry. An entry is size(6) display\0 filesystem\0
+; (src/filetypes.c): the display name is in the menu's font encoding (CJK glyph pairs), the
+; second is the UTF-8 name a path needs. Moves Y so that !6,y is the second, when there is
+; one. .as/.xl.
+dirent_fsname_y:
+  phy
+dfy_skip:
+  lda !6, y
+  beq dfy_end
+  iny
+  bra dfy_skip
+dfy_end:
+  lda !7, y
+  beq dfy_none
+  iny
+  pla
+  pla
+  rts
+dfy_none:
+  ply
   rts
 
 select_parent:
@@ -3353,6 +3386,7 @@ filesel_request_filelist:
 filesel_request_filelist_wait_mcu:
   jsl @WRAM_WAIT_MCU
   jsr pop_window
+  jsl @cjk_flush_fn
 ; dirend_addr = (entry count reported by the firmware) * 4.  The firmware wrote
 ; the count into MCU_PARAM right after scan_dir; reading it back from the snescmd
 ; region is reliable.  The old approach scanned the SDRAM directory table at $C2
@@ -3557,6 +3591,7 @@ fnl_es_loop:
   sep #$20 : .as
   lda dirent_bank
   sta longptr+2
+  jsr fnl_fsname
   ; Compare name against path component
   jsr fnl_cmp_subdir
   bcc fnl_es_next
@@ -3724,6 +3759,7 @@ fnl_sf_check:
   sep #$20 : .as
   lda dirent_bank
   sta longptr+2
+  jsr fnl_fsname
   jsr fnl_cmp_file
   bcc fnl_sf_next
   ; Match: compute entry index = testvar+4 / 4
@@ -3775,6 +3811,34 @@ fnl_pc_scroll:
   lda listdisp
   dec
   sta @filesel_sel
+  rts
+
+; =========================================================
+; fnl_fsname:
+;   longptr = an entry's display name -> its UTF-8 name, when
+;   the entry has one (dirent_fsname_y). LAST_GAME_DIR/FILE
+;   are UTF-8 paths. .as/.xl, Y clobbered.
+; =========================================================
+fnl_fsname:
+  ldy #$0000
+ffs_skip:
+  lda [longptr], y
+  beq ffs_end
+  iny
+  bra ffs_skip
+ffs_end:
+  iny
+  lda [longptr], y
+  beq ffs_out
+  rep #$20 : .al
+  tya
+  clc
+  adc longptr
+  sta longptr
+  sep #$20 : .as
+  bcc ffs_out
+  inc longptr+2
+ffs_out:
   rts
 
 ; =========================================================
